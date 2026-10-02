@@ -29,6 +29,16 @@ import {
   type ChemoPlan,
   type LabReviewRecord,
 } from "@/api/chemotherapy.api";
+import {
+  CLOSED_PLAN_STATUSES,
+  avatarFor,
+  fmtDate,
+  getInitials,
+  isOverdue,
+  isTodayIso,
+  summarizeCycles,
+  toTime,
+} from "./orderMasterCycles";
 
 type OrderStatus = "Scheduled" | "In Progress" | "Labs Pending" | "Held" | "Completed" | "Cancelled";
 
@@ -37,14 +47,22 @@ interface OrderRow {
   date: string;
   patient_id: string;
   patient_name: string;
+  patient_initials: string;
+  patient_avatar_color: string;
+  patient_avatar_bg: string;
   intent: string;
   protocol: string;
   protocol_code: string;
+  /* Cycle/Day column: the cycle + day the plan is actually on, and the
+     completed / planned cycle count as its own line. */
   cycle_label: string;
+  cycles_label: string;
+  cycle_progress: number;
   next_cycle_date: string;
-  status: OrderStatus;
   raw_status: string;
-  latest_cycle_id: string;
+  /* The cycle the labs are read from - the one being treated, not the
+     highest cycle number. */
+  current_cycle_id: string;
 }
 
 interface LabValue {
@@ -53,67 +71,21 @@ interface LabValue {
   platelet: string;
 }
 
-function deriveStatus(plan: ChemoPlan, hasLab: boolean): OrderStatus {
-  const s = (plan.treatment_status ?? "PLANNED").toUpperCase();
-  if (s === "COMPLETED") return "Completed";
-  if (s === "CANCELLED") return "Cancelled";
-  if (s === "DISCONTINUED") return "Held";
-  if (s === "ACTIVE") return hasLab ? "In Progress" : "Labs Pending";
-  return "Scheduled";
-}
-
-function latestCycle(plan: ChemoPlan) {
-  const cycles = plan.chemotherapy_cycle ?? [];
-  if (cycles.length === 0) return null;
-  return [...cycles].sort((a, b) => (b.cycle_number ?? 0) - (a.cycle_number ?? 0))[0];
-}
+/* Avatar / cycle / date helpers now live in ./orderMasterCycles - a co-located
+   module (like consultation/doseCalculation.ts) so the cycle maths is
+   unit-tested in orderMasterCycles.spec.ts without mounting this page. */
 
 function fmtValue(n: number | string | null | undefined): string {
   if (n === null || n === undefined || n === "") return "—";
   return String(n);
 }
 
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  const parsed = new Date(d);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return format(parsed, "MMM d, yyyy");
-}
-
-function isTodayIso(iso: string | null | undefined): boolean {
-  if (!iso) return false;
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return false;
-  const now = new Date();
-  const utc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - 5.5 * 60 * 60 * 1000;
-  const dayStart = new Date(utc + 5.5 * 60 * 60 * 1000);
-  return (
-    parsed.getUTCFullYear() === dayStart.getUTCFullYear() &&
-    parsed.getUTCMonth() === dayStart.getUTCMonth() &&
-    parsed.getUTCDate() === dayStart.getUTCDate()
-  );
-}
-
-function isOverdue(iso: string | null | undefined): boolean {
-  if (!iso) return false;
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return false;
-  const now = new Date();
-  const utc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - 5.5 * 60 * 60 * 1000;
-  const dayStart = new Date(utc + 5.5 * 60 * 60 * 1000);
-  const start = Date.UTC(dayStart.getUTCFullYear(), dayStart.getUTCMonth(), dayStart.getUTCDate());
-  const cmp = Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
-  return cmp < start;
-}
-
 function OrderActionMenu({
   onView,
-  onUpdateStatus,
   onExport,
   onPharmacySlip,
 }: {
   onView: () => void;
-  onUpdateStatus: () => void;
   onExport: () => void;
   onPharmacySlip: () => void;
 }) {
@@ -124,9 +96,8 @@ function OrderActionMenu({
   const { can } = usePermission();
 
   const canView = can("chemo.plan.read") || can("chemo.plan.update");
-  const canUpdate = can("chemo.plan.update");
 
-  if (!canView && !canUpdate && !can("report.export")) return null;
+  if (!canView && !can("report.export")) return null;
 
   const placeMenu = () => {
     const btn = btnRef.current;
@@ -163,7 +134,6 @@ function OrderActionMenu({
   const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
   if (canView) items.push({ label: "View Order", onClick: onView });
   if (canView) items.push({ label: "Pharmacy Slip", onClick: onPharmacySlip });
-  if (canUpdate) items.push({ label: "Update Status", onClick: onUpdateStatus });
   if (can("report.export")) items.push({ label: "Export Order", onClick: onExport });
 
   return (
@@ -270,8 +240,6 @@ export default function OrderMaster() {
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
-  const [statusTarget, setStatusTarget] = useState<OrderRow | null>(null);
-  const [statusLoading, setStatusLoading] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -280,36 +248,34 @@ export default function OrderMaster() {
       const list = res.data?.data ?? [];
 
       const mapped: OrderRow[] = list.map((p: ChemoPlan) => {
-        const cycle = latestCycle(p);
+        const cycles = summarizeCycles(p);
         const patient =
           p.patient_bio_data?.patient_first_name && p.patient_bio_data?.patient_last_name
             ? `${p.patient_bio_data.patient_first_name} ${p.patient_bio_data.patient_last_name}`
             : "—";
         const protocolName = p.regimen_name ?? p.protocol_name ?? "—";
         const code = p.regimen_code ?? p.chemotherapy_regimen_protocol?.regimen_code ?? "";
-        const planned = p.planned_cycles ?? 0;
-        const completed = p.completed_cycles ?? 0;
-        const cycleLabel =
-          cycle && cycle.cycle_number != null
-            ? `Cycle ${cycle.cycle_number}${cycle.cycle_day != null ? ` / Day ${cycle.cycle_day}` : ""}`
-            : planned > 0
-              ? `${completed} / ${planned} done`
-              : "—";
+        const avatar = avatarFor(p.patient_id || p.chemotherapy_plan_id);
 
         return {
           plan_id: p.chemotherapy_plan_id,
-          date: p.created_at ?? p.treatment_start_date ?? new Date().toISOString(),
+          // The schedule's own start date, not the row's creation timestamp
+          // (created_at always exists, so it used to win every time).
+          date: p.treatment_start_date ?? p.created_at ?? "",
           patient_id: p.patient_id,
           patient_name: patient,
+          patient_initials: getInitials(patient),
+          patient_avatar_color: avatar.avatarColor,
+          patient_avatar_bg: avatar.initBg,
           intent: p.treatment_intent ?? "—",
           protocol: protocolName,
           protocol_code: code,
-          cycle_label: cycleLabel,
-          next_cycle_date:
-            cycle?.next_cycle_date ?? p.expected_end_date ?? p.treatment_start_date ?? "",
-          status: deriveStatus(p, false),
+          cycle_label: cycles.cycleLabel,
+          cycles_label: cycles.cyclesLabel,
+          cycle_progress: cycles.progress,
+          next_cycle_date: cycles.nextCycleDate,
           raw_status: (p.treatment_status ?? "PLANNED").toUpperCase(),
-          latest_cycle_id: cycle?.chemotherapy_cycle_id ?? "",
+          current_cycle_id: cycles.currentCycleId,
         };
       });
 
@@ -342,7 +308,7 @@ export default function OrderMaster() {
     if (s === "COMPLETED") return "Completed";
     if (s === "CANCELLED") return "Cancelled";
     if (s === "DISCONTINUED") return "Held";
-    const hasLab = labs[r.latest_cycle_id] != null;
+    const hasLab = labs[r.current_cycle_id] != null;
     if (s === "ACTIVE") return hasLab ? "In Progress" : "Labs Pending";
     return "Scheduled";
   };
@@ -400,7 +366,7 @@ export default function OrderMaster() {
           return String(a[sortField]).localeCompare(String(b[sortField])) * dir;
         case "date":
         case "next_cycle_date":
-          return (new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime()) * dir;
+          return (toTime(a[sortField]) - toTime(b[sortField])) * dir;
         default:
           return 0;
       }
@@ -424,8 +390,16 @@ export default function OrderMaster() {
   const visibleStart = totalRecords === 0 ? 0 : (safePage - 1) * rowsPerPage + 1;
   const visibleEnd = Math.min(safePage * rowsPerPage, totalRecords);
 
+  /* Labs are only meaningful while a plan is still running, and they hang off
+     the cycle being treated rather than the highest cycle number. */
+  const labCycleIds = currentRows
+    .filter((r) => !CLOSED_PLAN_STATUSES.includes(r.raw_status))
+    .map((r) => r.current_cycle_id)
+    .filter(Boolean);
+  const labCycleKey = labCycleIds.join(",");
+
   useEffect(() => {
-    const cycleIds = currentRows.map((r) => r.latest_cycle_id).filter(Boolean);
+    const cycleIds = labCycleKey ? labCycleKey.split(",") : [];
     if (cycleIds.length === 0) return;
     let cancelled = false;
 
@@ -473,16 +447,16 @@ export default function OrderMaster() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRows.map((r) => r.latest_cycle_id).join(",")]);
+  }, [labCycleKey]);
 
   const handleExport = (exportFormat: string) => {
     const source = sortedData;
     const rowsForExport = source.map((r) => ({
       ...r,
       status: statusOf(r),
-      lab: labs[r.latest_cycle_id] ?? null,
-      lab_label: labs[r.latest_cycle_id]
-        ? `HB ${labs[r.latest_cycle_id]?.hemoglobin} / WBC ${labs[r.latest_cycle_id]?.wbc} / PLT ${labs[r.latest_cycle_id]?.platelet}`
+      lab: labs[r.current_cycle_id] ?? null,
+      lab_label: labs[r.current_cycle_id]
+        ? `HB ${labs[r.current_cycle_id]?.hemoglobin} / WBC ${labs[r.current_cycle_id]?.wbc} / PLT ${labs[r.current_cycle_id]?.platelet}`
         : "Pending",
     }));
     if (exportFormat === "pdf") {
@@ -497,6 +471,7 @@ export default function OrderMaster() {
           { header: "Intent", cell: (r: any) => r.intent },
           { header: "Protocol", cell: (r: any) => r.protocol },
           { header: "Cycle/Day", cell: (r: any) => r.cycle_label },
+          { header: "Cycles Done", cell: (r: any) => r.cycles_label },
           { header: "Next Cycle Date", cell: (r: any) => fmtDate(r.next_cycle_date) },
           { header: "Lab Status", cell: (r: any) => r.lab_label },
           { header: "Status", cell: (r: any) => r.status },
@@ -508,7 +483,7 @@ export default function OrderMaster() {
     }
     if (exportFormat !== "csv") return;
     try {
-      const header = ["Date", "Patient ID", "Patient Name", "Intent", "Protocol", "Cycle/Day", "Next Cycle Date", "Lab Status", "Status"];
+      const header = ["Date", "Patient ID", "Patient Name", "Intent", "Protocol", "Cycle/Day", "Cycles Done", "Next Cycle Date", "Lab Status", "Status"];
       const lines = rowsForExport.map((r) =>
         [
           fmtDate(r.date),
@@ -517,6 +492,7 @@ export default function OrderMaster() {
           r.intent,
           r.protocol,
           r.cycle_label,
+          r.cycles_label,
           fmtDate(r.next_cycle_date),
           r.lab_label,
           r.status,
@@ -547,51 +523,6 @@ export default function OrderMaster() {
 
   const handlePharmacySlip = (row: OrderRow) => {
     navigate(`/orders/${row.plan_id}/pharmacy-slip`);
-  };
-
-  const PLAN_TRANSITIONS: Record<string, string[]> = {
-    PLANNED: ["ACTIVE", "CANCELLED"],
-    ACTIVE: ["COMPLETED", "DISCONTINUED"],
-    COMPLETED: [],
-    DISCONTINUED: [],
-    CANCELLED: [],
-  };
-
-  const availableTransitions = statusTarget ? PLAN_TRANSITIONS[statusTarget.raw_status] ?? [] : [];
-
-  const [confirmStatus, setConfirmStatus] = useState<string>("");
-  const [confirmReason, setConfirmReason] = useState<string>("");
-
-  const openStatusDialog = (row: OrderRow) => {
-    setStatusTarget(row);
-    const transitions = PLAN_TRANSITIONS[row.raw_status] ?? [];
-    setConfirmStatus(transitions[0] ?? "");
-    setConfirmReason("");
-  };
-
-  const confirmStatusChange = async () => {
-    if (!statusTarget || !confirmStatus) return;
-    setStatusLoading(true);
-    try {
-      await chemotherapyApi.changePlanStatus(statusTarget.plan_id, {
-        status: confirmStatus,
-        reason: confirmReason.trim() || undefined,
-      });
-      toast({
-        title: "Order status updated",
-        description: `Order for ${statusTarget.patient_name} moved to ${confirmStatus}.`,
-      });
-      setStatusTarget(null);
-      void fetchOrders();
-    } catch (e: any) {
-      toast({
-        title: "Update failed",
-        description: e.response?.data?.message ?? e.message,
-        variant: "destructive",
-      });
-    } finally {
-      setStatusLoading(false);
-    }
   };
 
   const statCards = [
@@ -705,7 +636,7 @@ export default function OrderMaster() {
                         const row = r as OrderRow;
                         return (
                           <div>
-                            <div className="text-[#424752] text-sm font-semibold">{fmtDate(row.date)}</div>
+                            <div className="hms-content-text text-[#191C1E] leading-4">{fmtDate(row.date)}</div>
                             <div className="hms-id-text">{row.plan_id}</div>
                           </div>
                         );
@@ -715,19 +646,30 @@ export default function OrderMaster() {
                       key: "patient_name",
                       label: "Patient Name",
                       sortable: true,
-                      render: (r: any) => (
-                        <div>
-                          <div className="hms-name-text">{(r as OrderRow).patient_name}</div>
-                          <div className="hms-id-text">{(r as OrderRow).patient_id}</div>
-                        </div>
-                      ),
+                      render: (r: any) => {
+                        const row = r as OrderRow;
+                        return (
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text"
+                              style={{ background: row.patient_avatar_bg, color: row.patient_avatar_color }}
+                            >
+                              {row.patient_initials}
+                            </div>
+                            <div>
+                              <div className="hms-name-text">{row.patient_name}</div>
+                              <div className="hms-id-text">{row.patient_id}</div>
+                            </div>
+                          </div>
+                        );
+                      },
                     },
                     {
                       key: "intent",
                       label: "Intent of Treatment",
                       sortable: true,
                       render: (r: any) => (
-                        <span className="text-[#424752] text-sm font-semibold">{(r as OrderRow).intent}</span>
+                        <span className="hms-content-text text-[#191C1E] leading-4">{(r as OrderRow).intent}</span>
                       ),
                     },
                     {
@@ -738,7 +680,10 @@ export default function OrderMaster() {
                         const row = r as OrderRow;
                         return (
                           <div>
-                            <div className="text-[#424752] text-sm font-semibold">{row.protocol}</div>
+                            <div className="hms-name-text">{row.protocol}</div>
+                            {row.protocol_code && (
+                              <div className="hms-department-text text-[#8C8D8F]">{row.protocol_code}</div>
+                            )}
                           </div>
                         );
                       },
@@ -747,16 +692,30 @@ export default function OrderMaster() {
                       key: "cycle_label",
                       label: "Cycle/Day",
                       sortable: false,
-                      render: (r: any) => (
-                        <span className="text-[#424752] text-sm font-semibold">{(r as OrderRow).cycle_label}</span>
-                      ),
+                      render: (r: any) => {
+                        const row = r as OrderRow;
+                        return (
+                          <div className="min-w-[132px]">
+                            <div className="hms-name-text">{row.cycle_label}</div>
+                            <div className="hms-department-text text-[#8C8D8F]">{row.cycles_label}</div>
+                            {/* Same thin progress track as the bottom cards,
+                                filled by completed_cycles / planned_cycles. */}
+                            <div className="mt-1.5 h-1.5 w-24 bg-[#F2F4F6] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#004785] rounded-full"
+                                style={{ width: `${row.cycle_progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      },
                     },
                     {
                       key: "next_cycle_date",
                       label: "Next Cycle Date",
                       sortable: true,
                       render: (r: any) => (
-                        <span className="text-[#424752] text-sm font-medium">{fmtDate((r as OrderRow).next_cycle_date)}</span>
+                        <span className="hms-content-text text-[#191C1E] leading-4">{fmtDate((r as OrderRow).next_cycle_date)}</span>
                       ),
                     },
                     {
@@ -767,8 +726,8 @@ export default function OrderMaster() {
                         const row = r as OrderRow;
                         return (
                           <LabStatusCell
-                            lab={labs[row.latest_cycle_id]}
-                            pending={!!labsLoading[row.latest_cycle_id]}
+                            lab={labs[row.current_cycle_id]}
+                            pending={!!labsLoading[row.current_cycle_id]}
                           />
                         );
                       },
@@ -791,7 +750,6 @@ export default function OrderMaster() {
                           <OrderActionMenu
                             onView={() => handleView(row)}
                             onPharmacySlip={() => handlePharmacySlip(row)}
-                            onUpdateStatus={() => openStatusDialog(row)}
                             onExport={() => {
                               const single = [row];
                               downloadExportPdf({
@@ -805,8 +763,9 @@ export default function OrderMaster() {
                                   { header: "Intent", cell: () => row.intent },
                                   { header: "Protocol", cell: () => row.protocol },
                                   { header: "Cycle/Day", cell: () => row.cycle_label },
+                                  { header: "Cycles Done", cell: () => row.cycles_label },
                                   { header: "Next Cycle Date", cell: () => fmtDate(row.next_cycle_date) },
-                                  { header: "Status", cell: () => row.status },
+                                  { header: "Status", cell: () => statusOf(row) },
                                 ],
                                 rows: single,
                               });
@@ -876,7 +835,7 @@ export default function OrderMaster() {
               <div className="mt-4 flex flex-col gap-3">
                 {rows
                   .filter((r) => statusOf(r) === "Scheduled" || statusOf(r) === "In Progress" || statusOf(r) === "Labs Pending")
-                  .sort((a, b) => new Date(a.next_cycle_date).getTime() - new Date(b.next_cycle_date).getTime())
+                  .sort((a, b) => toTime(a.next_cycle_date) - toTime(b.next_cycle_date))
                   .filter((r) => r.next_cycle_date && r.next_cycle_date !== "—")
                   .slice(0, 5)
                   .map((r) => (
@@ -886,7 +845,7 @@ export default function OrderMaster() {
                         <div className="hms-id-text">{r.protocol} · {r.cycle_label}</div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <StatusBadge status={r.status} />
+                        <StatusBadge status={statusOf(r)} />
                         <span className="text-[10px] font-semibold text-[#6B7280]">{fmtDate(r.next_cycle_date)}</span>
                       </div>
                     </div>
@@ -941,46 +900,6 @@ export default function OrderMaster() {
             }}
             onCancel={() => setNewOrderOpen(false)}
           />
-
-          {/* ==================== UPDATE STATUS DIALOG ==================== */}
-          <ConfirmationDialog
-            open={!!statusTarget}
-            type="question"
-            title="Update Order Status"
-            description={
-              statusTarget
-                ? `Change status for ${statusTarget.patient_name} (${statusTarget.protocol}): current ${statusOf(statusTarget)}.`
-                : ""
-            }
-            confirmText="Update Status"
-            cancelText="Cancel"
-            loading={statusLoading}
-            onConfirm={confirmStatusChange}
-            onCancel={() => setStatusTarget(null)}
-          >
-            <div className="w-full flex flex-col gap-2 text-left">
-              <select
-                value={confirmStatus}
-                onChange={(e) => setConfirmStatus(e.target.value)}
-                disabled={availableTransitions.length === 0}
-                className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-md text-sm text-[#424752] outline-none focus:border-[#00488D]"
-              >
-                {availableTransitions.length === 0 && <option value="">No transitions available</option>}
-                {availableTransitions.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              {confirmStatus === "CANCELLED" || confirmStatus === "DISCONTINUED" ? (
-                <input
-                  type="text"
-                  value={confirmReason}
-                  onChange={(e) => setConfirmReason(e.target.value)}
-                  placeholder={`Reason (required to ${confirmStatus})`}
-                  className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-md text-sm text-[#424752] outline-none focus:border-[#00488D]"
-                />
-              ) : null}
-            </div>
-          </ConfirmationDialog>
 
         </main>
       </div>

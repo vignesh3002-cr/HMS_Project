@@ -45,6 +45,10 @@ export type FormData = {
   mStage: string[];
   icdCode: string;
   notes: string;
+  /* Investigation Results: the visit's Report Date (DD-MM-YYYY; empty
+     means the Date of Diagnosis) and each test's value by parameter_id. */
+  investigationReportDate: string;
+  investigationResults: Record<string, string>;
 };
 
 /* Row shape returned by

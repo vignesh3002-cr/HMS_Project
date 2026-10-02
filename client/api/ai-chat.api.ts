@@ -10,6 +10,7 @@ export interface AIPerformedAction {
     tool: string;
     description: string;
     success: boolean;
+    args?: any;
     result?: any;
     error?: string;
 }

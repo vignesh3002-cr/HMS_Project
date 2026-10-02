@@ -1,10 +1,19 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import { getUser } from "../../../utils/token";
 import { chemoPlanCurrentItems, chemoPlanItemName } from "../../../api/chemotherapy.api";
 import { generatePrescriptionPdf } from "../../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+import {
+  LineChart,
+  Grid as ChartGrid,
+  XAxis as ChartXAxis,
+  YAxis as ChartYAxis,
+  Line as ChartLine,
+  Tooltip as ChartTooltip,
+  ReferenceBand as ChartReferenceBand,
+} from "@/components/hms/LineChart";
 import type {
   SummaryPlanItem,
   SummaryPlan,
@@ -43,6 +52,291 @@ type Patient360Visit = {
   } | null;
 };
 
+/* A saved Investigation Results value (patient_investigation_result, from
+   the Diagnosis tab) with its test and the test's cancer type. */
+type InvestigationResultRow = {
+  investigation_result_id: string;
+  encounter_no: string;
+  parameter_id: string;
+  report_date: string;
+  value_text: string;
+  value_numeric: string | number | null;
+  is_abnormal: boolean;
+  investigation_parameter?: {
+    parameter_id: string;
+    parameter_name: string;
+    chart_name: string;
+    input_type: string;
+    unit: string | null;
+    normal_min: string | number | null;
+    normal_max: string | number | null;
+    range_label: string | null;
+    display_order: number | null;
+    cancer_type_id: string;
+    cancer_types?: { cancer_type_id: string; cancer_type: string } | null;
+  } | null;
+};
+
+/* Treatment Trend: one reading of a test, one test's series, and a cancer
+   type's tests. */
+type TrendPoint = { date: Date; value: number; status: "High" | "Low" | null };
+type TrendChart = {
+  parameterId: string;
+  name: string;
+  chartName: string;
+  unit: string | null;
+  rangeLabel: string | null;
+  min: number | null;
+  max: number | null;
+  order: number;
+  points: TrendPoint[];
+};
+type TrendGroup = { cancerTypeId: string; cancerType: string; charts: TrendChart[] };
+
+const TREND_LINE_COLOR = "#004785";
+const TREND_OUT_OF_RANGE_COLOR = "#DC2626";
+
+const toNumberOrNull = (value: string | number | null | undefined) =>
+  value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+    ? null
+    : Number(value);
+
+/* The patient's number tests as one series each (oldest reading first),
+   grouped per cancer type: the diagnosis's primary cancer type first,
+   then the others by name. */
+function buildTreatmentTrends(
+  rows: InvestigationResultRow[],
+  primaryCancerTypeId?: string | null
+): TrendGroup[] {
+  const groups = new Map<string, TrendGroup>();
+
+  for (const row of rows) {
+    const parameter = row.investigation_parameter;
+    const value = toNumberOrNull(row.value_numeric);
+    if (!parameter || parameter.input_type !== "NUMBER" || value === null) continue;
+    const date = new Date(row.report_date);
+    if (Number.isNaN(date.getTime())) continue;
+
+    const cancerTypeId = parameter.cancer_type_id;
+    const group = groups.get(cancerTypeId) ?? {
+      cancerTypeId,
+      cancerType: parameter.cancer_types?.cancer_type || "Cancer type",
+      charts: [],
+    };
+    groups.set(cancerTypeId, group);
+
+    let chart = group.charts.find((item) => item.parameterId === parameter.parameter_id);
+    if (!chart) {
+      chart = {
+        parameterId: parameter.parameter_id,
+        name: parameter.parameter_name,
+        chartName: parameter.chart_name,
+        unit: parameter.unit,
+        rangeLabel: parameter.range_label,
+        min: toNumberOrNull(parameter.normal_min),
+        max: toNumberOrNull(parameter.normal_max),
+        order: parameter.display_order ?? 0,
+        points: [],
+      };
+      group.charts.push(chart);
+    }
+
+    chart.points.push({
+      date,
+      value,
+      status:
+        chart.max !== null && value > chart.max
+          ? "High"
+          : chart.min !== null && value < chart.min
+            ? "Low"
+            : null,
+    });
+  }
+
+  const list = [...groups.values()];
+  list.forEach((group) => {
+    group.charts.forEach((chart) => chart.points.sort((a, b) => a.date.getTime() - b.date.getTime()));
+    group.charts.sort(
+      (a, b) => a.chartName.localeCompare(b.chartName) || a.order - b.order
+    );
+  });
+  return list.sort((a, b) => {
+    if (a.cancerTypeId === primaryCancerTypeId) return -1;
+    if (b.cancerTypeId === primaryCancerTypeId) return 1;
+    return a.cancerType.localeCompare(b.cancerType);
+  });
+}
+
+const formatTrendValue = (value: number) =>
+  value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+const formatTrendDate = (date: Date) =>
+  date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+
+/* Where the latest reading sits against the normal range - an icon and a
+   word with the color, never the color alone. */
+function TrendStatusChip({ status, hasRange }: { status: TrendPoint["status"]; hasRange: boolean }) {
+  if (!hasRange) return null;
+  return status ? (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-inset ring-red-200">
+      <i className={`fa-solid ${status === "High" ? "fa-arrow-up" : "fa-arrow-down"} text-[10px]`} />
+      {status === "High" ? "Above normal" : "Below normal"}
+    </span>
+  ) : (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+      <i className="fa-solid fa-check text-[10px]" />
+      Within range
+    </span>
+  );
+}
+
+/* One test's trend: the latest value with its change since the previous
+   reading, a smooth line over the visits with the normal range shaded and
+   out-of-range readings marked, and the values as a table. */
+function TrendChartCard({ chart }: { chart: TrendChart }) {
+  const [showValues, setShowValues] = useState(false);
+  const latest = chart.points[chart.points.length - 1];
+  const previous = chart.points.length > 1 ? chart.points[chart.points.length - 2] : null;
+  const delta = previous ? latest.value - previous.value : null;
+  const hasRange = chart.min !== null || chart.max !== null;
+  const rangeText =
+    chart.rangeLabel ||
+    (chart.min !== null && chart.max !== null
+      ? `${chart.min}–${chart.max}`
+      : chart.min !== null
+        ? `≥${chart.min}`
+        : chart.max !== null
+          ? `≤${chart.max}`
+          : null);
+  const unitSuffix = chart.unit ? ` ${chart.unit}` : "";
+
+  /* Keep the normal limits in view, and start non-negative markers at 0. */
+  const include = [chart.min, chart.max].filter((value): value is number => value !== null);
+  if (Math.min(...chart.points.map((point) => point.value), ...include) >= 0) include.push(0);
+
+  const rows = chart.points.map((point) => ({
+    date: point.date,
+    value: point.value,
+    status: point.status,
+  }));
+
+  return (
+    <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="truncate text-sm font-bold text-gray-900">{chart.name} Trend</h4>
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-500">
+            {rangeText && (
+              <>
+                {/* Key for the shaded normal band in the chart. */}
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm bg-[#00A87E]/15 ring-1 ring-inset ring-[#00A87E]/60"
+                />
+                <span className="shrink-0">Normal {rangeText}</span>
+                <span aria-hidden="true">·</span>
+              </>
+            )}
+            <span className="truncate">{chart.chartName}</span>
+          </p>
+        </div>
+        <TrendStatusChip status={latest.status} hasRange={hasRange} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl font-semibold text-gray-900">{formatTrendValue(latest.value)}</span>
+        {chart.unit && <span className="text-sm font-medium text-gray-500">{chart.unit}</span>}
+        {delta !== null && previous && (
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500">
+            <i
+              className={`fa-solid ${
+                delta > 0 ? "fa-arrow-trend-up" : delta < 0 ? "fa-arrow-trend-down" : "fa-minus"
+              } text-[11px]`}
+            />
+            {delta > 0 ? "+" : ""}
+            {formatTrendValue(delta)} since {formatTrendDate(previous.date)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2">
+        <LineChart
+          data={rows}
+          x="date"
+          height={200}
+          margin={{ top: 14, right: 40, bottom: 30, left: 44 }}
+          yInclude={include}
+        >
+          <ChartGrid />
+          <ChartReferenceBand from={chart.min} to={chart.max} />
+          <ChartXAxis maxTicks={6} />
+          <ChartYAxis />
+          <ChartLine
+            y="value"
+            name={chart.name}
+            color={TREND_LINE_COLOR}
+            strokeWidth={2}
+            curve="smooth"
+            area={!hasRange}
+            areaOpacity={0.12}
+            markerRadius={4}
+            pointColor={(row) => (row.status ? TREND_OUT_OF_RANGE_COLOR : undefined)}
+          />
+          <ChartTooltip
+            formatY={(value) => `${formatTrendValue(value)}${unitSuffix}`}
+            detail={(row) =>
+              row.status
+                ? `${row.status} - outside the normal range`
+                : hasRange
+                  ? "Within the normal range"
+                  : null
+            }
+          />
+        </LineChart>
+        {chart.points.length === 1 && (
+          <p className="text-center text-xs text-gray-400">The trend line appears after the next reading.</p>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setShowValues((open) => !open)}
+        aria-expanded={showValues}
+        className="mt-2 self-start text-xs font-semibold text-[#004785] hover:underline focus:outline-none focus-visible:underline"
+      >
+        {showValues ? "Hide values" : `Show values (${chart.points.length})`}
+      </button>
+      {showValues && (
+        <table className="mt-2 w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-gray-100 text-gray-500">
+              <th className="py-1.5 pr-3 font-semibold">Report date</th>
+              <th className="py-1.5 pr-3 text-right font-semibold">Value</th>
+              <th className="py-1.5 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {[...chart.points].reverse().map((point, index) => (
+              <tr key={`${point.date.getTime()}-${index}`}>
+                <td className="py-1.5 pr-3 text-gray-700">{formatTrendDate(point.date)}</td>
+                <td
+                  className="py-1.5 pr-3 text-right font-semibold text-gray-900"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {formatTrendValue(point.value)}
+                  {unitSuffix}
+                </td>
+                <td className={`py-1.5 ${point.status ? "font-semibold text-red-700" : "text-gray-500"}`}>
+                  {point.status ? `${point.status}` : hasRange ? "Normal" : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 const HistoryTab: React.FC<{
   embedded?: boolean;
   patientId?: string;
@@ -63,6 +357,10 @@ const HistoryTab: React.FC<{
   const { vitals: patientVitals } = useLatestPatientVitals(patientId);
   const [timelineViewMode, setTimelineViewMode] = useState<"one-by-one" | "list">("one-by-one");
   const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
+  const [barTooltip, setBarTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [activeVitalChart, setActiveVitalChart] = useState<
+    "weight" | "bp" | "pulse" | "temp" | "painscore"
+  >("weight");
   const timelineScrollRef = useRef<HTMLDivElement>(null);
 
   /* Patient 360: the patient's visits - every saved staging detail
@@ -739,31 +1037,96 @@ const HistoryTab: React.FC<{
   });
   adverseEventRows.sort((a, b) => b.date.localeCompare(a.date));
 
-  /* Per-cycle average weight for the vitals trend chart. */
-  const weightTrend = planCyclesSorted
-    .map((cycle) => {
-      const detail = cycleDetails.find(
-        (entry) => entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
-      );
-      const weights = (detail?.chemotherapy_vitals ?? [])
-        .map((vital) => Number(vital.weight))
-        .filter((value) => !Number.isNaN(value) && value > 0);
-      const avg =
-        weights.length > 0
-          ? weights.reduce((sum, value) => sum + value, 0) / weights.length
-          : null;
-      return {
-        cycleNumber: cycle.cycle_number,
-        weight: avg,
-      };
-    })
-    .filter((entry) => entry.weight != null);
-  const weightTrendMax = Math.max(...weightTrend.map((e) => e.weight ?? 0), 1);
+  /* One bar per calendar day — group encounter weights by date, last recorded value per day wins. */
+  const weightTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.weight != null && Number(enc.weight) > 0)
+      .sort((a, b) =>
+        (a.encounter_ts || a.created_at || "").localeCompare(
+          b.encounter_ts || b.created_at || ""
+        )
+      )
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.weight));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, weight]) => ({ date: day, weight }));
+  })();
+  const weightTrendMax = Math.max(...weightTrend.map((e) => e.weight), 1);
   const weightTrendAvg =
     weightTrend.length > 0
-      ? weightTrend.reduce((sum, entry) => sum + (entry.weight ?? 0), 0) /
+      ? weightTrend.reduce((sum, entry) => sum + entry.weight, 0) /
         weightTrend.length
       : null;
+
+  /* Per-day BP trend */
+  const bpTrend = (() => {
+    const byDay = new Map<string, { systolic: number; diastolic: number }>();
+    [...visitEncounters]
+      .filter((enc) => enc.systolic_bp != null && enc.diastolic_bp != null)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, { systolic: Number(enc.systolic_bp), diastolic: Number(enc.diastolic_bp) });
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, bp]) => ({ date: day, ...bp }));
+  })();
+
+  /* Per-day Pulse trend */
+  const pulseTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.pulse != null && Number(enc.pulse) > 0)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.pulse));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
+
+  /* Per-day Temperature trend */
+  const tempTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.temperature != null && Number(enc.temperature) > 0)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.temperature));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
+
+  /* Per-day Pain score trend (0-10). `pain_score` may arrive as a string. */
+  const painTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.pain_score != null && String(enc.pain_score).trim() !== "")
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        const score = Number(enc.pain_score);
+        if (day && !Number.isNaN(score)) byDay.set(day, score);
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
 
   const fmtTimelineDate = (value?: string | Date | null): string => {
     if (!value) return "";
@@ -1114,6 +1477,48 @@ const HistoryTab: React.FC<{
     return items;
   })();
 
+  /* Treatment Trend: the Investigation Results the Diagnosis tab saved on
+     each visit, as one trend per number test, grouped per cancer type. */
+  const [investigationResults, setInvestigationResults] = useState<InvestigationResultRow[]>([]);
+  const [investigationLoading, setInvestigationLoading] = useState(false);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let cancelled = false;
+    setInvestigationLoading(true);
+    API.get<{ success: boolean; data: InvestigationResultRow[] }>(
+      "/oncology/investigation-results",
+      { params: { patient_id: patientId } }
+    )
+      .then((response) => {
+        if (!cancelled) setInvestigationResults(response.data?.data ?? []);
+      })
+      .catch((error) => {
+        console.warn("Failed to load investigation results for the trends:", error);
+        if (!cancelled) setInvestigationResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInvestigationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  const treatmentTrends = useMemo(
+    () =>
+      buildTreatmentTrends(
+        investigationResults,
+        (stagingDetails[0] as { cancer_type_id?: string | null } | undefined)?.cancer_type_id
+      ),
+    [investigationResults, stagingDetails]
+  );
+  const trendTestCount = treatmentTrends.reduce((sum, group) => sum + group.charts.length, 0);
+  const trendReadingCount = treatmentTrends.reduce(
+    (sum, group) => sum + group.charts.reduce((count, chart) => count + chart.points.length, 0),
+    0
+  );
+
   /* =========================================================
      CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
   ========================================================= */
@@ -1373,6 +1778,30 @@ const HistoryTab: React.FC<{
               Vitals Trend History
             </h2>
 
+            <div className="flex flex-wrap gap-2 mb-4">
+              {([
+                { key: "weight", label: "Weight" },
+                { key: "bp", label: "BP" },
+                { key: "pulse", label: "Pulse" },
+                { key: "temp", label: "Temp" },
+                { key: "painscore", label: "Painscore" },
+              ] as const).map((chart) => (
+                <button
+                  key={chart.key}
+                  type="button"
+                  onClick={() => setActiveVitalChart(chart.key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                    activeVitalChart === chart.key
+                      ? "bg-[#004785] border-[#004785] text-white shadow-sm"
+                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-[#004785]"
+                  }`}
+                >
+                  {chart.label}
+                </button>
+              ))}
+            </div>
+
+            {activeVitalChart === "weight" && (
             <div className="mb-4">
               <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
                 <span>WEIGHT (KG)</span>
@@ -1383,43 +1812,204 @@ const HistoryTab: React.FC<{
                 </span>
               </div>
 
-              <div className="flex items-end h-12 gap-1">
+              <div className="flex items-end h-16 gap-1.5">
                 {weightTrend.length === 0 ? (
                   <p className="text-xs text-gray-400">
-                    No vitals recorded for any cycle yet.
+                    No weight recorded for any visit yet.
                   </p>
                 ) : (
-                  weightTrend.map((entry) => (
+                  weightTrend.map((entry, idx) => (
                     <div
-                      key={entry.cycleNumber}
-                      title={`Cycle ${entry.cycleNumber}: ${(
-                        entry.weight ?? 0
-                      ).toFixed(1)} kg`}
-                      className="w-full bg-blue-600 rounded-t"
+                      key={entry.date || idx}
+                      className="flex-1 min-w-[10px] max-w-[40px] bg-blue-500 rounded-t-md cursor-pointer hover:bg-blue-700 transition-colors"
                       style={{
                         height: `${Math.max(
-                          8,
-                          Math.round(((entry.weight ?? 0) / weightTrendMax) * 100)
+                          12,
+                          Math.round((entry.weight / weightTrendMax) * 100)
                         )}%`,
                       }}
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const label = entry.date
+                          ? new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                          : "Visit";
+                        setBarTooltip({ text: `${label}: ${entry.weight.toFixed(1)} kg`, x: rect.left + rect.width / 2, y: rect.top });
+                      }}
+                      onMouseLeave={() => setBarTooltip(null)}
                     />
                   ))
                 )}
               </div>
             </div>
+            )}
 
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-500 font-medium">
-                BP / PULSE / TEMP
-              </span>
+            {activeVitalChart !== "weight" && (
+              <div className="mt-4 space-y-5 border-t border-gray-100 pt-4">
 
-              <button
-                type="button"
-                className="text-blue-600 font-bold hover:underline"
+                {/* Blood Pressure */}
+                {activeVitalChart === "bp" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Blood Pressure (mmHg)</span>
+                    {bpTrend.length > 0 && (
+                      <span>
+                        Avg {Math.round(bpTrend.reduce((s, e) => s + e.systolic, 0) / bpTrend.length)}/
+                        {Math.round(bpTrend.reduce((s, e) => s + e.diastolic, 0) / bpTrend.length)}
+                      </span>
+                    )}
+                  </div>
+                  {bpTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No BP recorded yet.</p>
+                  ) : (
+                    <>
+                      <div className="flex items-end h-20 gap-2">
+                        {(() => {
+                          const maxSys = Math.max(...bpTrend.map((e) => e.systolic), 1);
+                          return bpTrend.map((entry, idx) => {
+                            const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                            const tip = `${label}: ${entry.systolic}/${entry.diastolic} mmHg`;
+                            return (
+                              <div key={entry.date || idx} className="flex items-end gap-0.5 flex-1 min-w-[16px] max-w-[48px] h-full">
+                                <div
+                                  className="flex-1 bg-blue-600 rounded-t cursor-pointer hover:bg-blue-700 transition-colors"
+                                  style={{ height: `${Math.max(10, Math.round((entry.systolic / maxSys) * 100))}%` }}
+                                  onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setBarTooltip({ text: tip, x: r.left + r.width / 2, y: r.top }); }}
+                                  onMouseLeave={() => setBarTooltip(null)}
+                                />
+                                <div
+                                  className="flex-1 bg-blue-300 rounded-t cursor-pointer hover:bg-blue-400 transition-colors"
+                                  style={{ height: `${Math.max(10, Math.round((entry.diastolic / maxSys) * 100))}%` }}
+                                  onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setBarTooltip({ text: tip, x: r.left + r.width / 2, y: r.top }); }}
+                                  onMouseLeave={() => setBarTooltip(null)}
+                                />
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                      <div className="flex gap-3 mt-1.5 text-[10px] text-gray-500">
+                        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-blue-600" />Systolic</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-blue-300" />Diastolic</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                )}
+
+                {/* Pulse */}
+                {activeVitalChart === "pulse" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Pulse (bpm)</span>
+                    {pulseTrend.length > 0 && (
+                      <span>Avg {Math.round(pulseTrend.reduce((s, e) => s + e.value, 0) / pulseTrend.length)}</span>
+                    )}
+                  </div>
+                  {pulseTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No pulse recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...pulseTrend.map((e) => e.value), 1);
+                        return pulseTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-rose-500 rounded-t-md cursor-pointer hover:bg-rose-600 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              setBarTooltip({ text: `${label}: ${entry.value} bpm`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {/* Temperature */}
+                {activeVitalChart === "temp" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Temperature (°C)</span>
+                    {tempTrend.length > 0 && (
+                      <span>Avg {(tempTrend.reduce((s, e) => s + e.value, 0) / tempTrend.length).toFixed(1)}</span>
+                    )}
+                  </div>
+                  {tempTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No temperature recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...tempTrend.map((e) => e.value), 1);
+                        return tempTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-orange-400 rounded-t-md cursor-pointer hover:bg-orange-500 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              setBarTooltip({ text: `${label}: ${entry.value.toFixed(1)} °C`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {/* Pain Score */}
+                {activeVitalChart === "painscore" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Pain Score (0-10)</span>
+                    {painTrend.length > 0 && (
+                      <span>Avg {(painTrend.reduce((s, e) => s + e.value, 0) / painTrend.length).toFixed(1)}</span>
+                    )}
+                  </div>
+                  {painTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No pain score recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...painTrend.map((e) => e.value), 1);
+                        return painTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-red-500 rounded-t-md cursor-pointer hover:bg-red-600 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              const score = Number.isInteger(entry.value) ? String(entry.value) : entry.value.toFixed(1);
+                              setBarTooltip({ text: `${label}: ${score}/10`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+              </div>
+            )}
+
+            {barTooltip && (
+              <div
+                className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs font-medium rounded px-2.5 py-1 whitespace-nowrap shadow-lg"
+                style={{ left: barTooltip.x, top: barTooltip.y - 8, transform: "translate(-50%, -100%)" }}
               >
-                VIEW DETAILED CHARTS
-              </button>
-            </div>
+                {barTooltip.text}
+              </div>
+            )}
           </div>
 
           {/* DOCUMENT HISTORY */}
@@ -1522,6 +2112,67 @@ const HistoryTab: React.FC<{
             </div>
           </div>
         </div>
+
+      {/* TREATMENT TREND - the patient's Investigation Results over the
+          visits: one chart per test, grouped per cancer type. */}
+      <section id="treatment-trend-section" className="px-6 pb-6">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="flex flex-wrap justify-between items-center gap-3 p-5 border-b border-gray-200 bg-gray-50/50">
+            <div>
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-chart-line text-[#004785]" />
+                <h2 className="text-lg font-bold text-gray-900">Treatment Trend</h2>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Investigation Results from the Diagnosis tab, per cancer type, oldest to newest visit.
+              </p>
+            </div>
+            {trendReadingCount > 0 && (
+              <span className="text-xs font-semibold text-[#004785] bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-full">
+                {trendTestCount} test{trendTestCount === 1 ? "" : "s"} · {trendReadingCount} reading
+                {trendReadingCount === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+
+          <div className={`space-y-7 p-5 transition-opacity ${investigationLoading && treatmentTrends.length > 0 ? "opacity-60" : ""}`}>
+            {investigationLoading && treatmentTrends.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-sm text-gray-500">
+                <i className="fa-solid fa-circle-notch fa-spin mr-2" />
+                Loading investigation results...
+              </div>
+            ) : treatmentTrends.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-6 py-10 text-center">
+                <i className="fa-solid fa-chart-line mb-3 text-2xl text-gray-300" />
+                <p className="text-sm font-semibold text-gray-700">No investigation results yet</p>
+                <p className="mt-1 max-w-md text-xs text-gray-500">
+                  Values entered in the Diagnosis tab's Investigation Results (PSA, CEA, CA-125 and
+                  others) appear here as a trend for each test.
+                </p>
+              </div>
+            ) : (
+              treatmentTrends.map((group, index) => (
+                <div key={group.cancerTypeId}>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#004785] text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <h3 className="text-sm font-bold text-gray-900">{group.cancerType}</h3>
+                    <span className="text-xs text-gray-400">
+                      {group.charts.length} test{group.charts.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {group.charts.map((chart) => (
+                      <TrendChartCard key={chart.parameterId} chart={chart} />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* CHEMOTHERAPY CYCLE HISTORY */}
       <section id="chemotherapy-cycle-history" className="px-6 pb-6">
