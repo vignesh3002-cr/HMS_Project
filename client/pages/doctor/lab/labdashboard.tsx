@@ -774,6 +774,7 @@ export default function LabDashboard() {
                     userAvatar={avatarUrl}
                     onLogout={() => setLogoutOpen(true)}
                     profilePath="/lab/profile"
+                    hideNotifications
                   />
                 </div>
               </div>
@@ -1593,6 +1594,7 @@ export default function LabDashboard() {
                     userAvatar={avatarUrl}
                     onLogout={() => setLogoutOpen(true)}
                     profilePath="/lab/profile"
+                    hideNotifications
                   />
                 </div>
               </div>

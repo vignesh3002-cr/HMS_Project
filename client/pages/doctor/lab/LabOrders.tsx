@@ -350,7 +350,7 @@ export default function LabOrders() {
               </svg>
             </button>
             <LabNotificationBell size="md" />
-            <UserProfileDropdown userName={displayName} userSubtext={displayRole} userAvatar={avatarUrl} onLogout={() => setLogoutOpen(true)} profilePath="/lab/profile" />
+            <UserProfileDropdown userName={displayName} userSubtext={displayRole} userAvatar={avatarUrl} onLogout={() => setLogoutOpen(true)} profilePath="/lab/profile" hideNotifications />
           </div>
         </header>
 
