@@ -635,29 +635,30 @@ const Summary: React.FC<{
     };
   }, [resolvedPatientId]);
 
-  /* The plan's doctor (else the logged-in doctor) for the signature block. */
-  const planDoctorId = plan?.employees?.employee_id ?? getUser()?.employee_id ?? "";
+  /* The logged-in doctor signs the printed summary (else the plan's doctor). */
+  const signingDoctorId = getUser()?.employee_id ?? plan?.employees?.employee_id ?? "";
   useEffect(() => {
-    if (!planDoctorId) return;
+    if (!signingDoctorId) return;
     let cancelled = false;
     employeeApi
-      .getById(String(planDoctorId))
+      .getOne(String(signingDoctorId))
       .then((response) => {
         if (cancelled) return;
-        const employee = response.data.data ?? {};
-        const name = [employee.first_name, employee.last_name]
+        const detail = response.data.data;
+        const employee = detail?.employee;
+        const name = [employee?.first_name, employee?.last_name]
           .filter(Boolean)
           .join(" ");
         setDoctorInfo({
           name: name ? `Dr ${name.replace(/^dr\.?\s+/i, "")}` : "",
-          regNo: employee.license_no ?? "",
+          regNo: employee?.license_no || detail?.doctorProfile?.license_no || "",
         });
       })
       .catch((error) => console.error("Failed to load doctor details:", error));
     return () => {
       cancelled = true;
     };
-  }, [planDoctorId]);
+  }, [signingDoctorId]);
 
   /* This visit's cycle day order(s): those saved in its encounter. The
      current order is usually one of them; any other is fetched. */
