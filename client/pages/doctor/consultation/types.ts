@@ -49,6 +49,10 @@ export type FormData = {
      means the Date of Diagnosis) and each test's value by parameter_id. */
   investigationReportDate: string;
   investigationResults: Record<string, string>;
+  /* The doctor's own wording of a picked value, for this patient only
+     (the master tables keep theirs): `${field}|${selectedValue}` ->
+     edited text. The selection itself keeps the master value. */
+  valueEdits: Record<string, string>;
 };
 
 /* Row shape returned by

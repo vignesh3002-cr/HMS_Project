@@ -433,7 +433,8 @@ export const findStagingDetailForEncounter = async (
     success: boolean;
     data: { staging_detail_id: string }[];
   }>("/oncology/staging-details", {
-    params: { patient_id: patientId, encounter_no: encounterNo, page: 1, limit: 1 },
+    /* view=ids: just the row id, not the whole diagnosis. */
+    params: { patient_id: patientId, encounter_no: encounterNo, page: 1, limit: 1, view: "ids" },
   });
   return response.data.data?.[0]?.staging_detail_id ?? "";
 };
@@ -462,7 +463,7 @@ export const resolveStagingDetailId = async (patientId: string): Promise<string>
       success: boolean;
       data: { staging_detail_id: string }[];
     }>("/oncology/staging-details", {
-      params: { patient_id: patientId, page: 1, limit: 1 },
+      params: { patient_id: patientId, page: 1, limit: 1, view: "ids" },
     });
     const found = response.data.data?.[0]?.staging_detail_id ?? "";
     if (found) {

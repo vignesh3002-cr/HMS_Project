@@ -82,12 +82,20 @@ const hasDraftContent = (raw: string): boolean => {
       "nStage",
       "mStage",
     ];
-    return arrayKeys.some((key) => {
-      const value = data[key];
-      return Array.isArray(value)
-        ? value.length > 0
-        : typeof value === "string" && value.length > 0;
-    });
+    if (
+      arrayKeys.some((key) => {
+        const value = data[key];
+        return Array.isArray(value)
+          ? value.length > 0
+          : typeof value === "string" && value.length > 0;
+      })
+    ) {
+      return true;
+    }
+    const edits = data.valueEdits;
+    return Boolean(
+      edits && typeof edits === "object" && Object.keys(edits).length > 0
+    );
   } catch {
     return true;
   }
@@ -350,6 +358,121 @@ const DiagnosisSearchInput: React.FC<{
   />
 );
 
+/* A small control inside a chip (✎ / ×). A span, not a button: the chips
+   sit inside the dropdown trigger. Never opens / closes the dropdown. */
+const ChipControl: React.FC<{
+  label: string;
+  onActivate: () => void;
+  children: React.ReactNode;
+}> = ({ label, onActivate, children }) => (
+  <span
+    role="button"
+    tabIndex={0}
+    aria-label={label}
+    title={label}
+    onClick={(e) => {
+      e.stopPropagation();
+      onActivate();
+    }}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        onActivate();
+      }
+    }}
+    className="inline-flex cursor-pointer items-center justify-center leading-none hover:text-blue-900"
+  >
+    {children}
+  </span>
+);
+
+/* A selected value's chip: × removes it. With `onEdit`, ✎ lets the doctor
+   reword it for this patient only - Enter or leaving the box keeps the
+   text, Escape cancels, an empty box goes back to the master value. An
+   edited chip is marked and shows the master value on hover. */
+const DiagnosisChip: React.FC<{
+  label: string;
+  original: string;
+  onRemove: () => void;
+  onEdit?: (text: string) => void;
+}> = ({ label, original, onRemove, onEdit }) => {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(label);
+  /* Set once Enter / Escape has finished the edit, so the blur that
+     follows doesn't save a second time. */
+  const finishedRef = React.useRef(false);
+  const edited = label !== original;
+
+  const finish = (save: boolean) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    if (save) onEdit?.(draft);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <span
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="inline-flex items-center rounded-full bg-white px-1.5 py-0.5 ring-1 ring-blue-400"
+      >
+        <input
+          type="text"
+          value={draft}
+          autoFocus
+          maxLength={100}
+          aria-label={`Edit ${original}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") {
+              e.preventDefault();
+              finish(true);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              finish(false);
+            }
+          }}
+          onBlur={() => finish(true)}
+          className="w-44 border-0 bg-transparent p-0 text-xs text-gray-900 focus:outline-none focus:ring-0"
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={edited ? `Edited for this patient - master value: ${original}` : undefined}
+      className={
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium " +
+        (edited ? "bg-amber-50 italic text-amber-800" : "bg-blue-50 text-blue-700")
+      }
+    >
+      {edited && (
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      )}
+      {label}
+      {onEdit && (
+        <ChipControl
+          label={`Edit ${label}`}
+          onActivate={() => {
+            finishedRef.current = false;
+            setDraft(label);
+            setEditing(true);
+          }}
+        >
+          ✎
+        </ChipControl>
+      )}
+      <ChipControl label={`Remove ${label}`} onActivate={onRemove}>
+        ×
+      </ChipControl>
+    </span>
+  );
+};
+
 /* Checkbox multi-select shown as a dropdown (same interaction as the
    Cancer Type field): the selected-chips strip acts as the trigger and
    the grouped checkbox list appears only on hover or click. With `onAdd`,
@@ -366,7 +489,22 @@ const DiagnosisCheckboxList: React.FC<{
   /* Set for a field whose values carry a system (Grade): the system the
      Add row is prefilled with for a cancer type. */
   systemDefault?: (cancerType: string) => string;
-}> = ({ title, groups, selected, onToggle, loading, addTypes = [], onAdd, systemDefault }) => {
+  /* For the editable fields: a selected value's text for this patient,
+     and saving a reworded one. */
+  labelOf?: (value: string) => string;
+  onEditValue?: (value: string, text: string) => void;
+}> = ({
+  title,
+  groups,
+  selected,
+  onToggle,
+  loading,
+  addTypes = [],
+  onAdd,
+  systemDefault,
+  labelOf,
+  onEditValue,
+}) => {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -427,12 +565,21 @@ const DiagnosisCheckboxList: React.FC<{
 
       <div className="relative" ref={containerRef}>
         {/* Trigger: selected chips strip. */}
-        <button
-          type="button"
+        {/* A div, not a button: a chip being reworded holds an input. */}
+        <div
+          role="button"
+          tabIndex={0}
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
-          className="flex min-h-[46px] w-full flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setOpen((current) => !current);
+            }
+          }}
+          className="flex min-h-[46px] w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
         >
           {selected.length === 0 ? (
             <span className="text-gray-400">
@@ -440,33 +587,17 @@ const DiagnosisCheckboxList: React.FC<{
             </span>
           ) : (
             selected.map((value) => {
-              const label = splitQualified(value).raw || value;
+              const original = splitQualified(value).raw || value;
               return (
-                <span
+                <DiagnosisChip
                   key={value}
-                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
-                >
-                  {label}
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Remove ${label}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggle(value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onToggle(value);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
-                  >
-                    ×
-                  </span>
-                </span>
+                  label={labelOf ? labelOf(value) : original}
+                  original={original}
+                  onRemove={() => onToggle(value)}
+                  onEdit={
+                    onEditValue ? (text) => onEditValue(value, text) : undefined
+                  }
+                />
               );
             })
           )}
@@ -478,7 +609,7 @@ const DiagnosisCheckboxList: React.FC<{
           >
             <ChevronDownIcon />
           </span>
-        </button>
+        </div>
 
         {/* Dropdown body: only rendered on hover or click. */}
         {open && (
@@ -575,7 +706,21 @@ const DiagnosisCheckboxSelect: React.FC<{
   /* With it, a search box filters the list and offers to add a value it
      doesn't have. */
   onAdd?: (text: string) => Promise<void>;
-}> = ({ title, options, value, onChange, placeholder = "Select one option below", loading, onAdd }) => {
+  /* For an editable field: the chosen value's text for this patient, and
+     saving a reworded one. */
+  displayValue?: string;
+  onEditValue?: (text: string) => void;
+}> = ({
+  title,
+  options,
+  value,
+  onChange,
+  placeholder = "Select one option below",
+  loading,
+  onAdd,
+  displayValue,
+  onEditValue,
+}) => {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -629,40 +774,33 @@ const DiagnosisCheckboxSelect: React.FC<{
 
       <div className="relative" ref={containerRef}>
         {/* Trigger: selected chips strip. */}
-        <button
-          type="button"
+        {/* A div, not a button: a chip being reworded holds an input. */}
+        <div
+          role="button"
+          tabIndex={0}
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
-          className="flex min-h-[46px] w-full flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setOpen((current) => !current);
+            }
+          }}
+          className="flex min-h-[46px] w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
         >
           {!value ? (
             <span className="text-gray-400">
               {loading && options.length === 0 ? "Loading..." : placeholder}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-              {value}
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={`Remove ${value}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChange("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onChange("");
-                  }
-                }}
-                className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
-              >
-                ×
-              </span>
-            </span>
+            <DiagnosisChip
+              label={displayValue || value}
+              original={value}
+              onRemove={() => onChange("")}
+              onEdit={onEditValue}
+            />
           )}
           <span
             className={
@@ -672,7 +810,7 @@ const DiagnosisCheckboxSelect: React.FC<{
           >
             <ChevronDownIcon />
           </span>
-        </button>
+        </div>
 
         {/* Dropdown body: rendered on click. */}
         {open && (
@@ -810,7 +948,20 @@ const DiagnosisScoreList: React.FC<{
   onAdd: DiagnosisAddHandler;
   systemDefault: (cancerType: string) => string;
   loading?: boolean;
-}> = ({ title, options, selected, onToggle, addTypes, onAdd, systemDefault, loading }) => {
+  labelOf?: (value: string) => string;
+  onEditValue?: (value: string, text: string) => void;
+}> = ({
+  title,
+  options,
+  selected,
+  onToggle,
+  addTypes,
+  onAdd,
+  systemDefault,
+  loading,
+  labelOf,
+  onEditValue,
+}) => {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -897,33 +1048,15 @@ const DiagnosisScoreList: React.FC<{
           className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus-within:border-transparent focus-within:ring-2 focus-within:ring-blue-500"
         >
           {selected.map((value) => {
-            const label = splitQualified(value).raw || value;
+            const original = splitQualified(value).raw || value;
             return (
-              <span
+              <DiagnosisChip
                 key={value}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
-              >
-                {label}
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Remove ${label}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggle(value);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onToggle(value);
-                    }
-                  }}
-                  className="inline-flex cursor-pointer items-center justify-center leading-none hover:text-blue-900"
-                >
-                  ×
-                </span>
-              </span>
+                label={labelOf ? labelOf(value) : original}
+                original={original}
+                onRemove={() => onToggle(value)}
+                onEdit={onEditValue ? (text) => onEditValue(value, text) : undefined}
+              />
             );
           })}
 
@@ -1048,9 +1181,29 @@ const matchesSubtypeKeywords = (
     });
 };
 
-/* "Cancer|label" entries -> "label, label" for the staging payload. */
-const joinRaw = (values: string[]): string =>
-  values.map((value) => splitQualified(value).raw).join(", ");
+/* The fields whose picked values the doctor may reword for this patient
+   (formData.valueEdits; the masters keep their wording). */
+type EditableField =
+  | "diseaseStatus"
+  | "bodySite"
+  | "subType"
+  | "cancerStage"
+  | "grade"
+  | "score"
+  | "tStage"
+  | "nStage"
+  | "mStage";
+const EDITABLE_ARRAY_FIELDS = [
+  "bodySite",
+  "subType",
+  "cancerStage",
+  "grade",
+  "score",
+  "tStage",
+  "nStage",
+  "mStage",
+] as const;
+const editKey = (field: EditableField, value: string) => `${field}|${value}`;
 
 /* YYYY-MM-DD / DD-MM-YYYY API date -> DD-MM-YYYY for the date fields. */
 const toPickedDateValue = (value?: string | null): string => {
@@ -1239,6 +1392,7 @@ const Diagnosis: React.FC<{
     notes: "",
     investigationReportDate: "",
     investigationResults: {},
+    valueEdits: {},
   });
 
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
@@ -1281,6 +1435,18 @@ const Diagnosis: React.FC<{
           typeof data.investigationResults === "object" &&
           !Array.isArray(data.investigationResults)
             ? data.investigationResults
+            : {},
+        /* Only text edits survive a malformed draft. */
+        valueEdits:
+          data.valueEdits &&
+          typeof data.valueEdits === "object" &&
+          !Array.isArray(data.valueEdits)
+            ? Object.fromEntries(
+                Object.entries(data.valueEdits).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === "string" && entry[1].trim() !== ""
+                )
+              )
             : {},
       }));
       const savedTypes = asArray(data.cancerTypes);
@@ -1440,6 +1606,72 @@ const Diagnosis: React.FC<{
         : { ...previous, [field]: [...current, value] };
     });
   };
+
+  /* ---- The doctor's own wording of a picked value (this patient only) ----
+     The selection keeps the master value (it is what the subtype id, the
+     grade / score systems and the stale T / N / M check match on); the
+     reworded text sits beside it in formData.valueEdits and is what gets
+     saved to the visit's staging detail. */
+  const labelOf = (field: EditableField, value: string) =>
+    formData.valueEdits[editKey(field, value)] ?? splitQualified(value).raw;
+
+  const joinLabels = (field: EditableField, values: string[]) =>
+    values.map((value) => labelOf(field, value)).join(", ");
+
+  /* Rewording back to the master value (or to nothing) drops the edit. */
+  const setValueEdit = (field: EditableField, value: string, text: string) =>
+    setFormData((previous) => {
+      const key = editKey(field, value);
+      const trimmed = text.trim();
+      const next = { ...previous.valueEdits };
+      if (!trimmed || trimmed === splitQualified(value).raw) {
+        delete next[key];
+      } else {
+        next[key] = trimmed;
+      }
+      return { ...previous, valueEdits: next };
+    });
+
+  const editProps = (field: EditableField) => ({
+    labelOf: (value: string) => labelOf(field, value),
+    onEditValue: (value: string, text: string) =>
+      setValueEdit(field, value, text),
+  });
+
+  /* An edit belongs to its picked value: unticking the value (or its
+     cancer type) drops the edit too. */
+  useEffect(() => {
+    setFormData((previous) => {
+      const keys = Object.keys(previous.valueEdits);
+      if (keys.length === 0) return previous;
+      const isPicked = (key: string) => {
+        const pipe = key.indexOf("|");
+        const field = key.slice(0, pipe);
+        const value = key.slice(pipe + 1);
+        if (field === "diseaseStatus") return previous.diseaseStatus === value;
+        const arrayField = EDITABLE_ARRAY_FIELDS.find((item) => item === field);
+        return Boolean(arrayField && previous[arrayField].includes(value));
+      };
+      const kept = keys.filter(isPicked);
+      if (kept.length === keys.length) return previous;
+      return {
+        ...previous,
+        valueEdits: Object.fromEntries(
+          kept.map((key) => [key, previous.valueEdits[key]])
+        ),
+      };
+    });
+  }, [
+    formData.diseaseStatus,
+    formData.bodySite,
+    formData.subType,
+    formData.cancerStage,
+    formData.grade,
+    formData.score,
+    formData.tStage,
+    formData.nStage,
+    formData.mStage,
+  ]);
 
   useEffect(() => {
     setSelectedCancerTypes((previous) => {
@@ -2541,7 +2773,7 @@ const Diagnosis: React.FC<{
 
     if (
       formData.mStage.some((stage) =>
-        splitQualified(stage).raw.trim().toUpperCase().startsWith("M1")
+        labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
       ) &&
       metastasisSites.length === 0
     ) {
@@ -2643,14 +2875,30 @@ const Diagnosis: React.FC<{
        unqualified value belongs to the primary type. Each cancer type's
        laterality / T / N / M is stored on its own row (primary: the
        staging detail; others: additional_cancers). */
-    const valueFor = (values: string[], cancerType: string) => {
-      const match = values.find((value) => {
+    const pickedFor = (values: string[], cancerType: string) =>
+      values.find((value) => {
         const parsed = splitQualified(value);
         return parsed.cancerType
           ? parsed.cancerType === cancerType
           : cancerType === formData.type;
       });
-      return match ? splitQualified(match).raw : undefined;
+    /* With a field, the doctor's wording of the picked value. */
+    const valueFor = (
+      values: string[],
+      cancerType: string,
+      field?: EditableField
+    ) => {
+      const match = pickedFor(values, cancerType);
+      if (!match) return undefined;
+      return field ? labelOf(field, match) : splitQualified(match).raw;
+    };
+    /* The histopathology reworded for this patient, else null (the
+       subtype's own name applies). */
+    const histopathologyFor = (cancerType: string) => {
+      const match = pickedFor(formData.subType, cancerType);
+      return match
+        ? formData.valueEdits[editKey("subType", match)] ?? null
+        : null;
     };
     const lateralityFor = (cancerType: string) =>
       lateralityTypes.includes(cancerType)
@@ -2681,6 +2929,30 @@ const Diagnosis: React.FC<{
       return;
     }
 
+    /* What is saved for the text columns: the doctor's wording of each
+       picked value. */
+    const clinicalStageText = joinLabels("cancerStage", formData.cancerStage);
+    const siteText = joinLabels("bodySite", formData.bodySite);
+    const gradeText = joinLabels("grade", formData.grade);
+    const scoreText = joinLabels("score", formData.score);
+    const diseaseStatusText = formData.diseaseStatus
+      ? labelOf("diseaseStatus", formData.diseaseStatus)
+      : "";
+    const tooLong = (
+      [
+        ["Cancer Stage", clinicalStageText],
+        ["Body Site", siteText],
+        ["Grade", gradeText],
+        ["Disease Status", diseaseStatusText],
+      ] as const
+    ).find(([, text]) => text.length > 100);
+    if (tooLong) {
+      setDiagnosisError(
+        `${tooLong[0]} is too long (max 100 characters) - shorten the selected values.`
+      );
+      return;
+    }
+
     setDiagnosisError("");
     setSavingDiagnosis(true);
 
@@ -2701,15 +2973,16 @@ const Diagnosis: React.FC<{
         .map((item) => ({
           cancer_type_id: item.cancer_type_id,
           cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
+          histopathology: histopathologyFor(item.cancer_type),
           laterality: lateralityFor(item.cancer_type) ?? null,
-          t_stage: valueFor(formData.tStage, item.cancer_type) ?? null,
-          n_stage: valueFor(formData.nStage, item.cancer_type) ?? null,
-          m_stage: valueFor(formData.mStage, item.cancer_type) ?? null,
+          t_stage: valueFor(formData.tStage, item.cancer_type, "tStage") ?? null,
+          n_stage: valueFor(formData.nStage, item.cancer_type, "nStage") ?? null,
+          m_stage: valueFor(formData.mStage, item.cancer_type, "mStage") ?? null,
         }));
 
-      const primaryTStage = valueFor(formData.tStage, formData.type);
-      const primaryNStage = valueFor(formData.nStage, formData.type);
-      const primaryMStage = valueFor(formData.mStage, formData.type);
+      const primaryTStage = valueFor(formData.tStage, formData.type, "tStage");
+      const primaryNStage = valueFor(formData.nStage, formData.type, "nStage");
+      const primaryMStage = valueFor(formData.mStage, formData.type, "mStage");
       const primaryLaterality = lateralityFor(formData.type);
 
       const diagnosisId = await resolveDiagnosisId(
@@ -2738,16 +3011,12 @@ const Diagnosis: React.FC<{
       const stagingFields: Record<string, unknown> = {
         cancer_type_id: matchedType?.cancer_type_id ?? "",
         cancer_subtype_id: matchedSubtype?.subtype_id ?? "",
+        /* Always sent: null clears an earlier rewording. */
+        histopathology: histopathologyFor(formData.type),
         /* Always sent: the list is replaced, so a deselected type is removed. */
         additional_cancers: additionalCancers,
         ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
-        ...(formData.cancerStage.length > 0
-          ? {
-              clinical_stage: formData.cancerStage
-                .map((stage) => splitQualified(stage).raw)
-                .join(", "),
-            }
-          : {}),
+        ...(clinicalStageText ? { clinical_stage: clinicalStageText } : {}),
         ...(primaryTStage ? { t_stage: primaryTStage } : {}),
         ...(primaryNStage ? { n_stage: primaryNStage } : {}),
         ...(primaryMStage ? { m_stage: primaryMStage } : {}),
@@ -2757,20 +3026,12 @@ const Diagnosis: React.FC<{
         ...(formData.preDiagnosis
           ? { pre_diagnosis: formData.preDiagnosis }
           : {}),
-        ...(formData.diseaseStatus
-          ? { disease_status: formData.diseaseStatus }
-          : {}),
+        ...(diseaseStatusText ? { disease_status: diseaseStatusText } : {}),
         ...(primaryLaterality ? { laterality: primaryLaterality } : {}),
-        ...(formData.bodySite.length > 0
-          ? { site: joinRaw(formData.bodySite) }
-          : {}),
-        ...(formData.grade.length > 0
-          ? { grade: joinRaw(formData.grade) }
-          : {}),
+        ...(siteText ? { site: siteText } : {}),
+        ...(gradeText ? { grade: gradeText } : {}),
         ...(gradeSystems ? { grade_system: gradeSystems } : {}),
-        ...(formData.score.length > 0
-          ? { score: joinRaw(formData.score) }
-          : {}),
+        ...(scoreText ? { score: scoreText } : {}),
         ...(scoreSystems ? { score_system: scoreSystems } : {}),
         ...(visitDateIso ? { visit_date: visitDateIso } : {}),
         ...(diagnosisDateIso ? { diagnosis_date: diagnosisDateIso } : {}),
@@ -3003,6 +3264,14 @@ const Diagnosis: React.FC<{
             }
             placeholder="Select Disease Status"
             onAdd={handleAddDiseaseStatus}
+            displayValue={
+              formData.diseaseStatus
+                ? labelOf("diseaseStatus", formData.diseaseStatus)
+                : ""
+            }
+            onEditValue={(text) =>
+              setValueEdit("diseaseStatus", formData.diseaseStatus, text)
+            }
           />
 
           {/* Cancer Type */}
@@ -3041,6 +3310,7 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             addTypes={optionTypes}
             onAdd={handleAddBodySite}
+            {...editProps("bodySite")}
           />
 
           {/* Histopathology */}
@@ -3057,6 +3327,7 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             addTypes={optionTypes}
             onAdd={handleAddSubtype}
+            {...editProps("subType")}
           />
 
           {/* Histomorphology 
@@ -3093,6 +3364,7 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             addTypes={optionTypes}
             onAdd={handleAddStage}
+            {...editProps("cancerStage")}
           />
 
           {/* Grade */}
@@ -3105,6 +3377,7 @@ const Diagnosis: React.FC<{
             addTypes={optionTypes}
             onAdd={handleAddGrade}
             systemDefault={gradeSystemDefault}
+            {...editProps("grade")}
           />
 
           {/* Score */}
@@ -3117,6 +3390,7 @@ const Diagnosis: React.FC<{
             onAdd={handleAddScore}
             systemDefault={scoreSystemDefault}
             loading={diagnosisLoading}
+            {...editProps("score")}
           />
 
           {/* TNM Staging */}
@@ -3130,6 +3404,7 @@ const Diagnosis: React.FC<{
               loading={diagnosisLoading}
               addTypes={optionTypes}
               onAdd={handleAddTnm("T")}
+              {...editProps("tStage")}
             />
 
 {/* N Stage */}
@@ -3141,6 +3416,7 @@ const Diagnosis: React.FC<{
               loading={diagnosisLoading}
               addTypes={optionTypes}
               onAdd={handleAddTnm("N")}
+              {...editProps("nStage")}
             />
 
             {/* M Stage */}
@@ -3152,12 +3428,13 @@ const Diagnosis: React.FC<{
               loading={diagnosisLoading}
               addTypes={optionTypes}
               onAdd={handleAddTnm("M")}
+              {...editProps("mStage")}
             />
           </div>
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
           {formData.mStage.some((stage) =>
-            splitQualified(stage).raw.trim().toUpperCase().startsWith("M1")
+            labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
           ) && (
             <div className="col-span-full">
               <label className="mb-2 block text-sm font-semibold text-gray-600">
