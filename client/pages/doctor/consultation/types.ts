@@ -56,6 +56,10 @@ export type FormData = {
 export type DischargeMedicineRecord = {
   discharge_instruction_id?: string;
   protocol_id?: string;
+  /* The protocol's discharge row can also name a drug the doctor typed, in
+     which case there is no medicine_id. */
+  medicine_id?: string | null;
+  drug_name?: string | null;
   drug_sequence?: number | null;
   drug_from?: string | null;
   frequency?: string | null;
@@ -126,6 +130,9 @@ export type RegimenProtocolItem = {
   medicine_id: string;
   drug_role: string | null;
   drug_sequence: number;
+  /* DILUTION DETAILS attached to this item; a dilution inherits the item's
+     cycle day. */
+  chemotherapy_protocol_dilutions?: RegimenProtocolDilution[] | null;
   drug_type: string | null;
   dosage: number | null;
   dosage_unit: string | null;

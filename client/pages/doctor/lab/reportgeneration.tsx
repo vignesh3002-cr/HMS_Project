@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
+import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 import { labReportApi, LabReportRecord, parseReportComment } from "@/api/labReport.api";
@@ -40,7 +41,7 @@ export interface ReportItem {
   completedDate: string;
   completedBy: string;
   sampleType: string;
-  status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL";
+  status: "GENERATED" | "REVIEWED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL";
   findingsSummary: string;
   parameters: QualityCheckParameter[];
   overallDecision?: "Approved" | "Rejected" | "Pending";
@@ -308,7 +309,7 @@ export default function ReportGeneration() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
+    "ALL" | "GENERATED" | "REVIEWED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
 
@@ -839,12 +840,10 @@ export default function ReportGeneration() {
 
   const handleSubmitReview = (proceedToApproval = false) => {
     if (!selectedReport) return;
-    const updatedStatus: "GENERATED" | "CRITICAL" | "UNDER_REVIEW" =
-      overallDecision === "Approved"
-        ? "GENERATED"
-        : overallDecision === "Rejected"
-          ? "CRITICAL"
-          : "UNDER_REVIEW";
+    const updatedStatus: "REVIEWED" | "CRITICAL" | "UNDER_REVIEW" =
+      overallDecision === "Rejected"
+        ? "CRITICAL"
+        : "REVIEWED";
 
     setReports((prev) =>
       prev.map((r) =>
@@ -868,6 +867,22 @@ export default function ReportGeneration() {
       parameters: currentParameters,
     } : null));
 
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(`report_status_${selectedReport.id}`, updatedStatus);
+        const rawId = selectedReport.id.replace("rep-", "").replace("item-", "");
+        localStorage.setItem(`report_status_${rawId}`, updatedStatus);
+        if (selectedReport.sampleId) {
+          localStorage.setItem(`report_status_${selectedReport.sampleId}`, updatedStatus);
+        }
+        if (selectedReport.reportId) {
+          localStorage.setItem(`report_status_${selectedReport.reportId}`, updatedStatus);
+        }
+      } catch (e) {
+        console.warn("Could not save review status to localStorage", e);
+      }
+    }
+
     if (proceedToApproval) {
       handleOpenApproveResults({
         ...selectedReport,
@@ -879,7 +894,7 @@ export default function ReportGeneration() {
     } else {
       toast({
         title: "Quality Review Submitted",
-        description: `Report ${selectedReport.reportId} decision marked as "${overallDecision}".`,
+        description: `Report ${selectedReport.reportId} marked as REVIEWED. Ready for Approve & Sign.`,
       });
       setViewMode("table");
     }
@@ -997,6 +1012,15 @@ export default function ReportGeneration() {
     setSelectedReport(updated);
 
     try {
+      localStorage.setItem(`report_status_${selectedReport.id}`, "GENERATED");
+      const rawId = selectedReport.id.replace("rep-", "").replace("item-", "");
+      localStorage.setItem(`report_status_${rawId}`, "GENERATED");
+      if (selectedReport.sampleId) {
+        localStorage.setItem(`report_status_${selectedReport.sampleId}`, "GENERATED");
+      }
+      if (selectedReport.reportId) {
+        localStorage.setItem(`report_status_${selectedReport.reportId}`, "GENERATED");
+      }
       localStorage.setItem(`report_approved_${selectedReport.id}`, "GENERATED");
       localStorage.setItem(`report_approved_rep_${selectedReport.reportId}`, "GENERATED");
       if (selectedReport.sampleId) {
@@ -1107,6 +1131,10 @@ export default function ReportGeneration() {
 
   const generatedCount = useMemo(
     () => reports.filter((r) => r.status === "GENERATED").length,
+    [reports],
+  );
+  const reviewedCount = useMemo(
+    () => reports.filter((r) => r.status === "REVIEWED").length,
     [reports],
   );
   const reviewCount = useMemo(
@@ -2131,24 +2159,8 @@ export default function ReportGeneration() {
               data-purpose="dashboard-header"
             >
               <div className="flex items-center gap-6">
-                {/* Notification Bell with Counter */}
-                <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
-                  <svg
-                    className="w-6 h-6 text-slate-600 stroke-[1.8]"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
-                    4
-                  </span>
-                </div>
+                {/* Lab Notification Bell with Live Alerts */}
+                <LabNotificationBell size="md" />
 
                 {/* Role Label & Profile Avatar & Logout */}
                 <div className="flex items-center gap-3 pl-1">
@@ -2451,6 +2463,21 @@ export default function ReportGeneration() {
                           <button
                             type="button"
                             onClick={() => {
+                              setStatusFilter("REVIEWED");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "REVIEWED"
+                                ? "font-semibold text-blue-700 bg-blue-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Reviewed ({reviewedCount})</span>
+                            {statusFilter === "REVIEWED" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
                               setStatusFilter("UNDER_REVIEW");
                               setIsFilterDropdownOpen(false);
                             }}
@@ -2557,7 +2584,15 @@ export default function ReportGeneration() {
                         filteredReports.map((r) => (
                           <tr
                             key={r.id}
-                            onClick={() => handleOpenQualityCheck(r)}
+                            onClick={() => {
+                              if (r.status === "REVIEWED") {
+                                handleOpenApproveResults(r);
+                              } else if (r.status === "GENERATED") {
+                                handleOpenDeliveredStatus(r);
+                              } else {
+                                handleOpenQualityCheck(r);
+                              }
+                            }}
                             className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           >
                             <td className="py-5 px-8 whitespace-nowrap">
@@ -2592,6 +2627,10 @@ export default function ReportGeneration() {
                                 <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#bbf7d0] text-[#15803d]">
                                   GENERATED
                                 </span>
+                              ) : r.status === "REVIEWED" ? (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-blue-100 text-blue-800 border border-blue-200">
+                                  REVIEWED
+                                </span>
                               ) : r.status === "UNDER_REVIEW" ? (
                                 <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#faecc5] text-[#715e17]">
                                   UNDER REVIEW
@@ -2607,64 +2646,81 @@ export default function ReportGeneration() {
                               )}
                             </td>
                             <td className="py-5 px-4 text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenQualityCheck(r);
-                                  }}
-                                  className="px-3 py-1.5 bg-[#0b57a4] hover:bg-[#094c94] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                                >
-                                  QC Review
-                                </button>
+                              {r.status === "REVIEWED" ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleOpenApproveResults(r);
                                   }}
-                                  className="px-3 py-1.5 bg-[#12a136] hover:bg-[#0f8b2e] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                  className="px-4 py-1.5 bg-[#12a136] hover:bg-[#0f8b2e] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
                                 >
+                                  <svg
+                                    className="w-3.5 h-3.5 stroke-[2.2]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                                    />
+                                  </svg>
                                   Approve &amp; Sign
                                 </button>
-                                {r.status === "GENERATED" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleOpenDeliveredStatus(r);
-                                      }}
-                                      className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#16a34a] border border-emerald-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                                      title="View Delivery Confirmation"
-                                    >
-                                      Delivery
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handlePrintReport(r);
-                                      }}
-                                      className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                                    >
-                                      PDF
-                                    </button>
-                                  </>
-                                )}
+                              ) : r.status === "GENERATED" ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate("/lab/report-transfer");
+                                    handleOpenDeliveredStatus(r);
                                   }}
-                                  className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                                  title="Transfer to Doctor / EMR"
+                                  className="px-4 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#16a34a] border border-emerald-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
                                 >
-                                  Dispatch
+                                  <svg
+                                    className="w-3.5 h-3.5 stroke-[2.2]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                                    />
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                    />
+                                  </svg>
+                                  View Report
                                 </button>
-                              </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenQualityCheck(r);
+                                  }}
+                                  className="px-4 py-1.5 bg-[#0b57a4] hover:bg-[#094c94] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
+                                >
+                                  <svg
+                                    className="w-3.5 h-3.5 stroke-[2.2]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                  </svg>
+                                  QC Review
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
