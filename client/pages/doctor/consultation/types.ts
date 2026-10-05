@@ -130,6 +130,9 @@ export type RegimenProtocolItem = {
   medicine_id: string;
   drug_role: string | null;
   drug_sequence: number;
+  /* DILUTION DETAILS attached to this item; a dilution inherits the item's
+     cycle day. */
+  chemotherapy_protocol_dilutions?: RegimenProtocolDilution[] | null;
   drug_type: string | null;
   dosage: number | null;
   dosage_unit: string | null;

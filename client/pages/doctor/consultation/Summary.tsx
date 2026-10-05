@@ -236,14 +236,16 @@ const DRUG_ROLE_CATEGORY: Record<string, string> = {
   PREMEDICATION: "Premedication",
   SUPPORTIVE: "Supportive",
   POSTMEDICATION: "Post-medication",
+  DILUTION: "Dilution",
 };
-const DRUG_ROLE_ORDER = ["PRIMARY", "PREMEDICATION", "SUPPORTIVE", "POSTMEDICATION"];
+const DRUG_ROLE_ORDER = ["PRIMARY", "PREMEDICATION", "SUPPORTIVE", "POSTMEDICATION", "DILUTION"];
 
 const CATEGORY_BADGE: Record<string, string> = {
   Chemotherapy: "bg-indigo-50 text-indigo-700 ring-indigo-200",
   Premedication: "bg-sky-50 text-sky-700 ring-sky-200",
   Supportive: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   "Post-medication": "bg-amber-50 text-amber-700 ring-amber-200",
+  Dilution: "bg-violet-50 text-violet-700 ring-violet-200",
 };
 
 /* "500 mL" from a volume + unit (either may be missing). */
