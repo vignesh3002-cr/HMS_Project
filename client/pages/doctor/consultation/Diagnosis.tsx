@@ -186,19 +186,215 @@ const buildCheckboxGroups = (
   }));
 };
 
+/* Saves a value a doctor typed into a Diagnosis dropdown (to its master
+   table, under a cancer type - "" for a field without one). A field whose
+   values carry a system (Grade, Score) passes `system`. */
+type DiagnosisAddHandler = (
+  cancerType: string,
+  text: string,
+  system?: string
+) => Promise<void>;
+
+/* The "+ Add" flow of a dropdown: saves at once, or - when the field's
+   values carry a system - first asks for it (prefilled per cancer type). */
+const useDiagnosisAdd = (
+  onAdd: DiagnosisAddHandler | undefined,
+  systemDefault: ((cancerType: string) => string) | undefined,
+  onDone: () => void
+) => {
+  const [pending, setPending] = React.useState<string | null>(null);
+  const [system, setSystem] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const save = async (cancerType: string, text: string, systemValue?: string) => {
+    if (!onAdd || !text.trim() || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onAdd(cancerType, text.trim(), systemValue?.trim());
+      setPending(null);
+      onDone();
+    } catch (error: any) {
+      console.error("Failed to add the value:", error);
+      setError(
+        error?.response?.data?.message || error?.message || "Failed to add the value."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const start = (cancerType: string, text: string) => {
+    if (systemDefault) {
+      setPending(cancerType);
+      setSystem(systemDefault(cancerType));
+      setError("");
+      return;
+    }
+    void save(cancerType, text);
+  };
+
+  const reset = () => {
+    setPending(null);
+    setError("");
+  };
+
+  return { pending, system, setSystem, saving, error, save, start, reset };
+};
+
+type DiagnosisAddState = ReturnType<typeof useDiagnosisAdd>;
+
+/* "+ Add" rows under a dropdown's search box: one per cancer type the typed
+   text isn't an option of yet (a single row for a field without one). */
+const DiagnosisAddRows: React.FC<{
+  add: DiagnosisAddState;
+  text: string;
+  targets: string[];
+  systemLabel?: string;
+}> = ({ add, text, targets, systemLabel = "System" }) => {
+  if (!text || (targets.length === 0 && !add.error)) return null;
+
+  return (
+    <div className="mb-3 space-y-1.5 border-b border-gray-100 pb-3">
+      {targets.map((cancerType) =>
+        add.pending === cancerType ? (
+          <div
+            key={cancerType || "_"}
+            className="rounded-md bg-blue-50 p-2 text-xs text-blue-800"
+          >
+            <div className="mb-1.5 font-medium">
+              Add “{text}”{cancerType ? ` to ${cancerType}` : ""}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5">
+                {systemLabel}
+                <input
+                  type="text"
+                  value={add.system}
+                  autoFocus
+                  onChange={(event) => add.setSystem(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void add.save(cancerType, text, add.system);
+                    } else if (event.key === "Escape") {
+                      add.reset();
+                    }
+                  }}
+                  className="w-40 rounded border border-blue-200 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={add.saving || !add.system.trim()}
+                onClick={() => void add.save(cancerType, text, add.system)}
+                className="rounded bg-[#1d4ed8] px-2.5 py-1 font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                {add.saving ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={add.saving}
+                onClick={add.reset}
+                className="rounded px-2 py-1 font-medium text-blue-700 hover:bg-blue-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            key={cancerType || "_"}
+            type="button"
+            disabled={add.saving}
+            onClick={() => add.start(cancerType, text)}
+            className="w-full rounded-md bg-blue-50 px-2 py-1.5 text-left text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+          >
+            {add.saving && !add.pending ? "Adding..." : `+ Add “${text}”`}
+            {cancerType ? ` to ${cancerType}` : ""}
+          </button>
+        )
+      )}
+
+      {add.error && <p className="text-xs text-red-600">{add.error}</p>}
+    </div>
+  );
+};
+
+/* Search box at the top of an open Diagnosis dropdown. Enter adds the text
+   when there is exactly one place to add it. */
+const DiagnosisSearchInput: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  onEnter: () => void;
+  onEscape: () => void;
+  placeholder: string;
+}> = ({ value, onChange, onEnter, onEscape, placeholder }) => (
+  <input
+    type="text"
+    value={value}
+    autoFocus
+    onChange={(event) => onChange(event.target.value)}
+    onKeyDown={(event) => {
+      /* Keep Enter from submitting the Diagnosis form. */
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onEnter();
+      } else if (event.key === "Escape") {
+        onEscape();
+      }
+    }}
+    placeholder={placeholder}
+    className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+);
+
 /* Checkbox multi-select shown as a dropdown (same interaction as the
    Cancer Type field): the selected-chips strip acts as the trigger and
-   the grouped checkbox list appears only on hover or click. */
+   the grouped checkbox list appears only on hover or click. With `onAdd`,
+   a search box filters the list and offers to add a missing value under
+   each of `addTypes` (the selected cancer types). */
 const DiagnosisCheckboxList: React.FC<{
   title: string;
   groups: { cancerType: string; items: { value: string; label: string }[] }[];
   selected: string[];
   onToggle: (value: string, select?: boolean) => void;
   loading?: boolean;
-}> = ({ title, groups, selected, onToggle, loading }) => {
+  addTypes?: string[];
+  onAdd?: DiagnosisAddHandler;
+  /* Set for a field whose values carry a system (Grade): the system the
+     Add row is prefilled with for a cancer type. */
+  systemDefault?: (cancerType: string) => string;
+}> = ({ title, groups, selected, onToggle, loading, addTypes = [], onAdd, systemDefault }) => {
   const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   const total = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const add = useDiagnosisAdd(onAdd, systemDefault, () => setQuery(""));
+
+  const text = query.trim();
+  const needle = text.toLowerCase();
+  const visibleGroups = needle
+    ? groups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) =>
+            item.label.toLowerCase().includes(needle)
+          ),
+        }))
+        .filter((group) => group.items.length > 0)
+    : groups;
+  /* The selected cancer types the typed text isn't an option of yet. */
+  const addTargets =
+    onAdd && text
+      ? addTypes.filter(
+          (cancerType) =>
+            !groups
+              .find((group) => group.cancerType === cancerType)
+              ?.items.some((item) => item.label.toLowerCase() === needle)
+        )
+      : [];
 
   /* Close on outside click, like the Cancer Type dropdown. */
   React.useEffect(() => {
@@ -213,6 +409,14 @@ const DiagnosisCheckboxList: React.FC<{
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  /* A closed dropdown starts over with an empty search. */
+  React.useEffect(() => {
+    if (open) return;
+    setQuery("");
+    add.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   return (
@@ -278,8 +482,25 @@ const DiagnosisCheckboxList: React.FC<{
 
         {/* Dropdown body: only rendered on hover or click. */}
         {open && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-60 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
-            {total === 0 && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-72 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
+            {onAdd && (
+              <DiagnosisSearchInput
+                value={query}
+                onChange={(value) => {
+                  setQuery(value);
+                  add.reset();
+                }}
+                onEnter={() => {
+                  if (addTargets.length === 1) add.start(addTargets[0], text);
+                }}
+                onEscape={() => setOpen(false)}
+                placeholder={`Search or add ${title.toLowerCase()}`}
+              />
+            )}
+
+            <DiagnosisAddRows add={add} text={text} targets={addTargets} />
+
+            {total === 0 && !text && (
               <p className="text-sm text-gray-400">
                 {loading
                   ? "Loading..."
@@ -287,7 +508,11 @@ const DiagnosisCheckboxList: React.FC<{
               </p>
             )}
 
-            {groups.map((group) => (
+            {text && visibleGroups.length === 0 && addTargets.length === 0 && (
+              <p className="text-sm text-gray-400">No matching options</p>
+            )}
+
+            {visibleGroups.map((group) => (
               <div key={group.cancerType} className="mb-3 last:mb-0">
                 <div className="mb-1.5 border-b border-gray-100 pb-1 text-[11px] font-bold uppercase tracking-wide text-[#1d4ed8]">
                   {group.cancerType}
@@ -347,9 +572,28 @@ const DiagnosisCheckboxSelect: React.FC<{
   onChange: (value: string) => void;
   placeholder?: string;
   loading?: boolean;
-}> = ({ title, options, value, onChange, placeholder = "Select one option below", loading }) => {
+  /* With it, a search box filters the list and offers to add a value it
+     doesn't have. */
+  onAdd?: (text: string) => Promise<void>;
+}> = ({ title, options, value, onChange, placeholder = "Select one option below", loading, onAdd }) => {
   const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const add = useDiagnosisAdd(
+    onAdd ? (_cancerType, text) => onAdd(text) : undefined,
+    undefined,
+    () => setQuery("")
+  );
+
+  const text = query.trim();
+  const needle = text.toLowerCase();
+  const visibleOptions = needle
+    ? options.filter((option) => option.toLowerCase().includes(needle))
+    : options;
+  const canAdd =
+    Boolean(onAdd) &&
+    Boolean(text) &&
+    !options.some((option) => option.toLowerCase() === needle);
 
   React.useEffect(() => {
     if (!open) return;
@@ -363,6 +607,14 @@ const DiagnosisCheckboxSelect: React.FC<{
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  /* A closed dropdown starts over with an empty search. */
+  React.useEffect(() => {
+    if (open) return;
+    setQuery("");
+    add.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const handleToggle = (option: string) => {
@@ -424,8 +676,25 @@ const DiagnosisCheckboxSelect: React.FC<{
 
         {/* Dropdown body: rendered on click. */}
         {open && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-60 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
-            {options.length === 0 && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-72 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
+            {onAdd && (
+              <DiagnosisSearchInput
+                value={query}
+                onChange={(next) => {
+                  setQuery(next);
+                  add.reset();
+                }}
+                onEnter={() => {
+                  if (canAdd) add.start("", text);
+                }}
+                onEscape={() => setOpen(false)}
+                placeholder={`Search or add ${title.toLowerCase()}`}
+              />
+            )}
+
+            <DiagnosisAddRows add={add} text={text} targets={canAdd ? [""] : []} />
+
+            {options.length === 0 && !text && (
               <p className="text-sm text-gray-400">
                 {loading
                   ? "Loading..."
@@ -433,7 +702,11 @@ const DiagnosisCheckboxSelect: React.FC<{
               </p>
             )}
 
-            {options.map((option) => (
+            {text && visibleOptions.length === 0 && !canAdd && (
+              <p className="text-sm text-gray-400">No matching options</p>
+            )}
+
+            {visibleOptions.map((option) => (
               <label
                 key={option}
                 className="flex cursor-pointer items-center gap-1.5 py-1 text-sm text-gray-700"
@@ -524,20 +797,30 @@ type ScoreOption = {
 
 /* Score field: a text input with a dropdown of the cancer_score values for
    the selected cancer type(s), grouped by cancer type then score system.
-   Typing filters the list; Enter picks an exact match or adds the typed
-   text as a custom score (e.g. an exact Ki-67 %). Selected scores show as
+   Typing filters the list; Enter picks an exact match, or adds the typed
+   text as a new score (e.g. an exact Ki-67 %) to the cancer type's scores,
+   under the score system the doctor confirms. Selected scores show as
    removable chips. */
 const DiagnosisScoreList: React.FC<{
   title: string;
   options: ScoreOption[];
   selected: string[];
   onToggle: (value: string, select?: boolean) => void;
-  onAddCustom: (text: string) => void;
+  addTypes: string[];
+  onAdd: DiagnosisAddHandler;
+  systemDefault: (cancerType: string) => string;
   loading?: boolean;
-}> = ({ title, options, selected, onToggle, onAddCustom, loading }) => {
+}> = ({ title, options, selected, onToggle, addTypes, onAdd, systemDefault, loading }) => {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const add = useDiagnosisAdd(onAdd, systemDefault, () => setQuery(""));
+
+  /* A closed list starts over with no pending add. */
+  React.useEffect(() => {
+    if (!open) add.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -572,18 +855,30 @@ const DiagnosisScoreList: React.FC<{
     groups.set(option.cancerType, systems);
   });
 
+  const text = query.trim();
+  /* The selected cancer types the typed text isn't a score of yet. */
+  const addTargets = text
+    ? addTypes.filter(
+        (cancerType) =>
+          !options.some(
+            (option) =>
+              option.cancerType === cancerType &&
+              option.value.toLowerCase() === text.toLowerCase()
+          )
+      )
+    : [];
+
   const commitQuery = () => {
-    const text = query.trim();
     if (!text) return;
     const exact = options.find(
       (option) => option.value.toLowerCase() === text.toLowerCase()
     );
     if (exact) {
       onToggle(`${exact.cancerType}|${exact.value}`, true);
-    } else {
-      onAddCustom(text);
+      setQuery("");
+    } else if (addTargets.length === 1) {
+      add.start(addTargets[0], text);
     }
-    setQuery("");
   };
 
   return (
@@ -639,6 +934,7 @@ const DiagnosisScoreList: React.FC<{
             onChange={(event) => {
               setQuery(event.target.value);
               setOpen(true);
+              add.reset();
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={(event) => {
@@ -672,21 +968,14 @@ const DiagnosisScoreList: React.FC<{
 
         {open && (
           <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-72 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
-            {query.trim() &&
-              !options.some(
-                (option) =>
-                  option.value.toLowerCase() === query.trim().toLowerCase()
-              ) && (
-                <button
-                  type="button"
-                  onClick={commitQuery}
-                  className="mb-2 w-full rounded-md bg-blue-50 px-2 py-1.5 text-left text-xs font-medium text-blue-700 hover:bg-blue-100"
-                >
-                  Add “{query.trim()}” as score
-                </button>
-              )}
+            <DiagnosisAddRows
+              add={add}
+              text={text}
+              targets={addTargets}
+              systemLabel="Score system"
+            />
 
-            {filtered.length === 0 && (
+            {filtered.length === 0 && addTargets.length === 0 && (
               <p className="text-sm text-gray-400">
                 {loading
                   ? "Loading..."
@@ -789,10 +1078,13 @@ type StagingReferenceItem = {
   m_values?: string[];
 };
 
+/* `created_by` is set only on rows a doctor added from the Diagnosis
+   dropdowns; seeded rows have none. */
 type AnatomicalSiteItem = {
   site_id: string;
   site_name: string;
   site_category: string | null;
+  created_by?: string | null;
 };
 
 type CancerGradeItem = {
@@ -800,7 +1092,30 @@ type CancerGradeItem = {
   grade_value: string;
   grade_system: string;
   description: string | null;
+  created_by?: string | null;
 };
+
+/* A T / N / M value doctors added for a cancer type (tnm_stage_master). */
+type TnmStageItem = {
+  tnm_id: string;
+  axis: "T" | "N" | "M";
+  stage_value: string;
+};
+
+type DiseaseStatusItem = {
+  disease_status_id: string;
+  status_name: string;
+};
+
+/* Shown until disease_status_master loads (or if it can't). */
+const DEFAULT_DISEASE_STATUSES = [
+  "Newly Diagnosed",
+  "In Remission",
+  "Recurrence",
+  "Progressive",
+  "Stable",
+  "Metastatic",
+];
 
 type CancerScoreItem = {
   score_id: string;
@@ -1286,6 +1601,11 @@ const Diagnosis: React.FC<{
   const [scoreMasterOptions, setScoreMasterOptions] = useState<
     ForCancerType<CancerScoreItem>[]
   >([]);
+  /* Disease Status values (disease_status_master), one list for every
+     cancer type. */
+  const [diseaseStatusOptions, setDiseaseStatusOptions] = useState<string[]>(
+    DEFAULT_DISEASE_STATUSES
+  );
   /* Investigation Results: the tests of the selected cancer types, every
      visit's saved values for this patient, and this visit's encounter. */
   const [investigationParameters, setInvestigationParameters] = useState<
@@ -1466,12 +1786,24 @@ const Diagnosis: React.FC<{
 
     Promise.all(
       selections.map((selection) =>
-        API.get<{ success: boolean; data: StagingReferenceItem[] }>(
-          "/oncology/reference/staging",
-          { params: { cancer_type_id: selection.cancerTypeId } }
-        ).then((response) => ({
+        Promise.all([
+          API.get<{ success: boolean; data: StagingReferenceItem[] }>(
+            "/oncology/reference/staging",
+            { params: { cancer_type_id: selection.cancerTypeId } }
+          ),
+          /* T / N / M values doctors added for this cancer type. */
+          API.get<{ success: boolean; data: TnmStageItem[] }>(
+            `/oncology/reference/cancer-types/${selection.cancerTypeId}/tnm-stages`
+          )
+            .then((response) => response.data.data ?? [])
+            .catch((error) => {
+              console.error("Failed to load added T / N / M stages:", error);
+              return [] as TnmStageItem[];
+            }),
+        ]).then(([response, added]) => ({
           cancerTypeName: selection.cancerTypeName,
           items: response.data.data,
+          added,
         }))
       )
     )
@@ -1488,7 +1820,7 @@ const Diagnosis: React.FC<{
         const gradeOptions: StageOption[] = [];
 
         for (const result of results) {
-          const { cancerTypeName, items } = result;
+          const { cancerTypeName, items, added } = result;
 
           for (const item of items) {
             const stageLabel = item.stage_label;
@@ -1522,19 +1854,28 @@ const Diagnosis: React.FC<{
           }
 
           /* T / N / M options: the storable values each criteria phrase
-             names, parsed server-side, merged per cancer type in AJCC
-             order - no "T1a/b/c"-style labels that can't be saved. */
-          const valuesOf = (key: "t_values" | "n_values" | "m_values") =>
-            [...new Set(items.flatMap((item) => item[key] ?? []))].sort(
-              compareTnm
-            );
-          for (const value of valuesOf("t_values")) {
+             names, parsed server-side, plus the ones doctors added for the
+             cancer type, merged per cancer type in AJCC order - no
+             "T1a/b/c"-style labels that can't be saved. */
+          const valuesOf = (
+            key: "t_values" | "n_values" | "m_values",
+            axis: TnmStageItem["axis"]
+          ) =>
+            [
+              ...new Set([
+                ...items.flatMap((item) => item[key] ?? []),
+                ...added
+                  .filter((row) => row.axis === axis)
+                  .map((row) => row.stage_value),
+              ]),
+            ].sort(compareTnm);
+          for (const value of valuesOf("t_values", "T")) {
             tOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
-          for (const value of valuesOf("n_values")) {
+          for (const value of valuesOf("n_values", "N")) {
             nOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
-          for (const value of valuesOf("m_values")) {
+          for (const value of valuesOf("m_values", "M")) {
             mOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
         }
@@ -1658,6 +1999,25 @@ const Diagnosis: React.FC<{
   useEffect(() => {
     let cancelled = false;
 
+    API.get<{ success: boolean; data: DiseaseStatusItem[] }>(
+      "/oncology/reference/disease-statuses"
+    )
+      .then((response) => {
+        const names = (response.data.data ?? []).map((item) => item.status_name);
+        if (!cancelled && names.length > 0) setDiseaseStatusOptions(names);
+      })
+      .catch((error) => {
+        console.error("Failed to load disease statuses:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     loadDiagnosisCatalog()
       .then((diagnoses) => {
         if (cancelled) return;
@@ -1755,15 +2115,28 @@ const Diagnosis: React.FC<{
     );
   });
 
+  /* A cancer type with no seeded master rows shows the built-in list; the
+     values doctors added (created_by set) are listed after it rather than
+     replacing it. */
+  const withFallback = (fallback: string[], added: string[]) => [
+    ...fallback,
+    ...added.filter(
+      (value) =>
+        !fallback.some((item) => item.toLowerCase() === value.toLowerCase())
+    ),
+  ];
+
   const bodySiteGroups = buildCheckboxGroups(
     optionTypes.flatMap((cancerType) => {
       const sites = bodySiteOptions.filter(
         (site) => site.cancerType === cancerType
       );
-      const names =
-        sites.length > 0
-          ? sites.map((site) => site.site_name)
-          : BODY_SITE_OPTIONS;
+      const names = sites.some((site) => !site.created_by)
+        ? sites.map((site) => site.site_name)
+        : withFallback(
+            BODY_SITE_OPTIONS,
+            sites.map((site) => site.site_name)
+          );
       return names.map((value) => ({ value, cancerType }));
     })
   );
@@ -1773,9 +2146,15 @@ const Diagnosis: React.FC<{
       const masters = gradeMasterOptions.filter(
         (grade) => grade.cancerType === cancerType
       );
-      return masters.length > 0
-        ? masters.map((grade) => ({ value: grade.grade_value, cancerType }))
-        : grades.filter((grade) => grade.cancerType === cancerType);
+      const names = masters.some((grade) => !grade.created_by)
+        ? masters.map((grade) => grade.grade_value)
+        : withFallback(
+            grades
+              .filter((grade) => grade.cancerType === cancerType)
+              .map((grade) => grade.value),
+            masters.map((grade) => grade.grade_value)
+          );
+      return names.map((value) => ({ value, cancerType }));
     })
   );
 
@@ -1965,7 +2344,12 @@ const Diagnosis: React.FC<{
 
   /* Multiple scores may be picked, but only one value per score system per
      cancer type (e.g. one IPI value), mirroring the T/N/M one-per-type rule. */
-  const handleScoreToggle = (value: string, select?: boolean) => {
+  const handleScoreToggle = (
+    value: string,
+    select?: boolean,
+    /* The system of a score just added, not yet in scoreMasterOptions. */
+    knownSystem?: string
+  ) => {
     setFormData((previous) => {
       const present = previous.score.includes(value);
       const adding = select ?? !present;
@@ -1976,7 +2360,7 @@ const Diagnosis: React.FC<{
         };
       }
       if (present) return previous;
-      const system = scoreSystemOf(value);
+      const system = knownSystem ?? scoreSystemOf(value);
       const { cancerType } = splitQualified(value);
       return {
         ...previous,
@@ -1993,17 +2377,141 @@ const Diagnosis: React.FC<{
     });
   };
 
-  /* Typed score that isn't in the master list; filed under the primary
-     cancer type. */
-  const handleScoreCustom = (text: string) => {
-    const cancerType = optionTypes[0] ?? "";
-    const value = cancerType ? `${cancerType}|${text}` : text;
-    setFormData((previous) =>
-      previous.score.includes(value)
-        ? previous
-        : { ...previous, score: [...previous.score, value] }
+  /* ---- Values the doctor adds from a dropdown ----
+     Each is saved to its master table (under the cancer type it was added
+     to), so it is offered for every patient from then on; it is then
+     listed here and ticked. A value already in the table comes back as the
+     existing row. */
+  const addReferenceValue = async <T,>(
+    path: string,
+    body: Record<string, string>
+  ) => {
+    const response = await API.post<{ success: boolean; data: T; created: boolean }>(
+      `/oncology/reference/${path}`,
+      body
     );
+    return response.data.data;
   };
+
+  const addForCancerType = <T,>(
+    cancerType: string,
+    path: string,
+    body: Record<string, string>
+  ) => {
+    const cancerTypeId = cancerTypes.find(
+      (item) => item.cancer_type === cancerType
+    )?.cancer_type_id;
+    if (!cancerTypeId) {
+      return Promise.reject(new Error(`Unknown cancer type: ${cancerType}`));
+    }
+    return addReferenceValue<T>(`cancer-types/${cancerTypeId}/${path}`, body);
+  };
+
+  /* Adds a row tagged with its cancer type, unless it is already listed. */
+  const appendTagged = <T,>(
+    setter: React.Dispatch<React.SetStateAction<ForCancerType<T>[]>>,
+    row: T,
+    cancerType: string,
+    sameRow: (a: T, b: T) => boolean
+  ) =>
+    setter((previous) =>
+      previous.some(
+        (item) => item.cancerType === cancerType && sameRow(item, row)
+      )
+        ? previous
+        : [...previous, { ...row, cancerType }]
+    );
+
+  const handleAddBodySite: DiagnosisAddHandler = async (cancerType, text) => {
+    const row = await addForCancerType<AnatomicalSiteItem>(cancerType, "sites", {
+      value: text,
+    });
+    appendTagged(setBodySiteOptions, row, cancerType, (a, b) => a.site_id === b.site_id);
+    handleMultiToggle("bodySite")(`${cancerType}|${row.site_name}`, true);
+  };
+
+  const handleAddSubtype: DiagnosisAddHandler = async (cancerType, text) => {
+    const row = await addForCancerType<CancerSubtypeItem>(cancerType, "subtypes", {
+      value: text,
+    });
+    appendTagged(setSubtypes, row, cancerType, (a, b) => a.subtype_id === b.subtype_id);
+    handleMultiToggle("subType")(`${cancerType}|${row.subtype_name}`, true);
+  };
+
+  const handleAddStage: DiagnosisAddHandler = async (cancerType, text) => {
+    const row = await addForCancerType<StagingReferenceItem>(cancerType, "stages", {
+      value: text,
+    });
+    const label = row.stage_label ?? text;
+    setStageLabels((previous) =>
+      previous.some(
+        (item) => item.cancerType === cancerType && item.value === label
+      )
+        ? previous
+        : [...previous, { value: label, cancerType }]
+    );
+    handleMultiToggle("cancerStage")(`${cancerType}|${label}`, true);
+  };
+
+  const handleAddGrade: DiagnosisAddHandler = async (cancerType, text, system) => {
+    const row = await addForCancerType<CancerGradeItem>(cancerType, "grades", {
+      value: text,
+      system: system || "Other",
+    });
+    appendTagged(setGradeMasterOptions, row, cancerType, (a, b) => a.grade_id === b.grade_id);
+    handleMultiToggle("grade")(`${cancerType}|${row.grade_value}`, true);
+  };
+
+  const handleAddScore: DiagnosisAddHandler = async (cancerType, text, system) => {
+    const row = await addForCancerType<CancerScoreItem>(cancerType, "scores", {
+      value: text,
+      system: system || "Other",
+    });
+    appendTagged(setScoreMasterOptions, row, cancerType, (a, b) => a.score_id === b.score_id);
+    handleScoreToggle(`${cancerType}|${row.score_value}`, true, row.score_system);
+  };
+
+  const handleAddTnm =
+    (axis: TnmStageItem["axis"]): DiagnosisAddHandler =>
+    async (cancerType, text) => {
+      const row = await addForCancerType<TnmStageItem>(cancerType, "tnm-stages", {
+        axis,
+        value: text,
+      });
+      const setter =
+        axis === "T" ? setTOptions : axis === "N" ? setNOptions : setMOptions;
+      setter((previous) =>
+        previous.some(
+          (item) =>
+            item.cancerType === cancerType && item.value === row.stage_value
+        )
+          ? previous
+          : [...previous, { value: row.stage_value, cancerType }].sort((a, b) =>
+              compareTnm(a.value, b.value)
+            )
+      );
+      const field = axis === "T" ? "tStage" : axis === "N" ? "nStage" : "mStage";
+      handleMultiToggle(field)(`${cancerType}|${row.stage_value}`, true);
+    };
+
+  const handleAddDiseaseStatus = async (text: string) => {
+    const row = await addReferenceValue<DiseaseStatusItem>("disease-statuses", {
+      value: text,
+    });
+    setDiseaseStatusOptions((previous) =>
+      previous.includes(row.status_name) ? previous : [...previous, row.status_name]
+    );
+    setFormData((previous) => ({ ...previous, diseaseStatus: row.status_name }));
+  };
+
+  /* The system an added Grade / Score is prefilled with: the cancer
+     type's own (first listed), else "Other". */
+  const gradeSystemDefault = (cancerType: string) =>
+    gradeMasterOptions.find((grade) => grade.cancerType === cancerType)
+      ?.grade_system || "Other";
+  const scoreSystemDefault = (cancerType: string) =>
+    scoreMasterOptions.find((score) => score.cancerType === cancerType)
+      ?.score_system || "Other";
 
   const handleNext = async () => {
     if (!resolvedPatientId) {
@@ -2485,14 +2993,7 @@ const Diagnosis: React.FC<{
           {/* Disease Status */}
           <DiagnosisCheckboxSelect
             title="Disease Status"
-            options={[
-              "Newly Diagnosed",
-              "In Remission",
-              "Recurrence",
-              "Progressive",
-              "Stable",
-              "Metastatic",
-            ]}
+            options={diseaseStatusOptions}
             value={formData.diseaseStatus}
             onChange={(value) =>
               setFormData((previous) => ({
@@ -2501,6 +3002,7 @@ const Diagnosis: React.FC<{
               }))
             }
             placeholder="Select Disease Status"
+            onAdd={handleAddDiseaseStatus}
           />
 
           {/* Cancer Type */}
@@ -2537,6 +3039,8 @@ const Diagnosis: React.FC<{
             selected={formData.bodySite}
             onToggle={handleMultiToggle("bodySite")}
             loading={diagnosisLoading}
+            addTypes={optionTypes}
+            onAdd={handleAddBodySite}
           />
 
           {/* Histopathology */}
@@ -2551,6 +3055,8 @@ const Diagnosis: React.FC<{
             selected={formData.subType}
             onToggle={handleMultiToggle("subType")}
             loading={diagnosisLoading}
+            addTypes={optionTypes}
+            onAdd={handleAddSubtype}
           />
 
           {/* Histomorphology 
@@ -2585,6 +3091,8 @@ const Diagnosis: React.FC<{
             selected={formData.cancerStage}
             onToggle={handleMultiToggle("cancerStage")}
             loading={diagnosisLoading}
+            addTypes={optionTypes}
+            onAdd={handleAddStage}
           />
 
           {/* Grade */}
@@ -2594,6 +3102,9 @@ const Diagnosis: React.FC<{
             selected={formData.grade}
             onToggle={handleMultiToggle("grade")}
             loading={diagnosisLoading}
+            addTypes={optionTypes}
+            onAdd={handleAddGrade}
+            systemDefault={gradeSystemDefault}
           />
 
           {/* Score */}
@@ -2602,7 +3113,9 @@ const Diagnosis: React.FC<{
             options={scoreOptions}
             selected={formData.score}
             onToggle={handleScoreToggle}
-            onAddCustom={handleScoreCustom}
+            addTypes={optionTypes}
+            onAdd={handleAddScore}
+            systemDefault={scoreSystemDefault}
             loading={diagnosisLoading}
           />
 
@@ -2615,6 +3128,8 @@ const Diagnosis: React.FC<{
               selected={formData.tStage}
               onToggle={handleMultiToggle("tStage")}
               loading={diagnosisLoading}
+              addTypes={optionTypes}
+              onAdd={handleAddTnm("T")}
             />
 
 {/* N Stage */}
@@ -2624,6 +3139,8 @@ const Diagnosis: React.FC<{
               selected={formData.nStage}
               onToggle={handleMultiToggle("nStage")}
               loading={diagnosisLoading}
+              addTypes={optionTypes}
+              onAdd={handleAddTnm("N")}
             />
 
             {/* M Stage */}
@@ -2633,6 +3150,8 @@ const Diagnosis: React.FC<{
               selected={formData.mStage}
               onToggle={handleMultiToggle("mStage")}
               loading={diagnosisLoading}
+              addTypes={optionTypes}
+              onAdd={handleAddTnm("M")}
             />
           </div>
 
