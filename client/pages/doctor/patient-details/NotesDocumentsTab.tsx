@@ -9,7 +9,6 @@ import {
   savePatientDocument,
   deletePatientDocument,
   downloadDocument,
-  downloadAllDocuments,
 } from "../../../utils/patientDocuments";
 import {
   type SummaryPlanItem,
@@ -308,6 +307,7 @@ const NotesDocumentsTab: React.FC<{
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [docSuccessMsg, setDocSuccessMsg] = useState<string | null>(null);
+  const [docTitle, setDocTitle] = useState("");
   const [previewDoc, setPreviewDoc] = useState<PatientDocumentItem | null>(null);
 
   /* Load stored patient documents from IndexedDB */
@@ -456,41 +456,47 @@ const NotesDocumentsTab: React.FC<{
   const prescriptionsCount = chemoPlanCurrentItems(notesPlan).length;
   const activities = notesActivities;
 
-  const handleFileUpload = async (files: FileList | File[] | null) => {
-    if (!files || files.length === 0) return;
-    setIsUploadingDoc(true);
-    const targetPatientId = patientId || "unknown";
-
-    const newItems: PatientDocumentItem[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file) continue;
-      try {
-        const savedDoc = await savePatientDocument(targetPatientId, file);
-        newItems.push(savedDoc);
-      } catch (err) {
-        console.error("Failed to save document:", file.name, err);
-      }
-    }
-
-    if (newItems.length > 0) {
-      setDocuments((prev) => [...newItems, ...prev]);
-      setSelectedFile(files[0]);
-      setDocSuccessMsg(
-        `${newItems.length === 1 ? `"${newItems[0].name}"` : `${newItems.length} documents`} uploaded to Document Library!`
-      );
-      setTimeout(() => setDocSuccessMsg(null), 4000);
-    }
-    setIsUploadingDoc(false);
+  /* Stage the picked file so the user can set a "Title name" before uploading. */
+  const stageFile = (files: FileList | File[] | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setSelectedFile(file);
+    setDocTitle("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
+  const clearStagedFile = () => {
+    setSelectedFile(null);
+    setDocTitle("");
+  };
+
+  const handleFileUpload = async () => {
+    if (!selectedFile) return;
+    setIsUploadingDoc(true);
+    const targetPatientId = patientId || "unknown";
+
+    try {
+      const savedDoc = await savePatientDocument(
+        targetPatientId,
+        selectedFile,
+        docTitle
+      );
+      setDocuments((prev) => [savedDoc, ...prev]);
+      clearStagedFile();
+      setDocSuccessMsg(`"${savedDoc.title}" uploaded to Document Library!`);
+      setTimeout(() => setDocSuccessMsg(null), 4000);
+    } catch (err) {
+      console.error("Failed to save document:", selectedFile.name, err);
+    }
+    setIsUploadingDoc(false);
+  };
+
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    handleFileUpload(event.target.files);
+    stageFile(event.target.files);
   };
 
   const handleSelectFiles = () => {
@@ -514,7 +520,7 @@ const NotesDocumentsTab: React.FC<{
     e.stopPropagation();
     setIsDraggingFile(false);
     if (e.dataTransfer?.files?.length) {
-      handleFileUpload(e.dataTransfer.files);
+      stageFile(e.dataTransfer.files);
     }
   };
 
@@ -634,9 +640,7 @@ const NotesDocumentsTab: React.FC<{
     setTimeout(() => setEditSuccessMsg(null), 3000);
   };
 
-  const handleSave = () => {
-    console.log("Save Notes & Changes clicked");
-  };
+  
 
   /* =========================================================
      CONTENT (TAB NAVIGATION + TWO COLUMN LAYOUT)
@@ -1241,20 +1245,26 @@ const NotesDocumentsTab: React.FC<{
                     <i className="fa-solid fa-trash-can text-sm" />
                   </button>
 
-                  {/* Icon */}
-                  <div
-                    className={`mb-3 text-2xl ${document.color}`}
-                  >
-                    <i className={`fa-solid ${document.icon}`} />
+                  {/* Icon + document name (custom title) */}
+                  <div className="mb-3 flex items-center gap-2.5 pr-6">
+                    <i
+                      className={`fa-solid ${document.icon} text-2xl ${document.color}`}
+                    />
+                    <h4
+                      className="min-w-0 truncate text-sm font-bold text-emerald-600"
+                      title={document.title}
+                    >
+                      {document.title}
+                    </h4>
                   </div>
 
-                  {/* Name */}
-                  <h4
-                    className="mb-1 truncate text-sm font-bold text-slate-900"
-                    title={document.name}
+                  {/* Original file name */}
+                  <p
+                    className="mb-1 truncate text-sm font-semibold text-slate-900"
+                    title={document.originalName}
                   >
-                    {document.name}
-                  </h4>
+                    {document.originalName}
+                  </p>
 
                   {/* Details */}
                   <p className="mb-4 text-xs text-slate-500">
@@ -1398,6 +1408,68 @@ const NotesDocumentsTab: React.FC<{
               Drag & Drop or click to browse files (PDF, JPG, PNG, DOCX)
             </p>
 
+            {selectedFile && (
+              <div
+                className="mb-4 w-full text-left"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="mb-4 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                  <i
+                    className={`fa-solid ${
+                      selectedFile.type.startsWith("image/")
+                        ? "fa-file-image text-emerald-500"
+                        : "fa-file-lines text-blue-500"
+                    } text-xl`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="truncate text-sm font-bold text-slate-900"
+                      title={selectedFile.name}
+                    >
+                      {selectedFile.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {(selectedFile.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearStagedFile}
+                    disabled={isUploadingDoc}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50"
+                    aria-label="Remove selected file"
+                  >
+                    <i className="fa-solid fa-xmark text-xs" />
+                  </button>
+                </div>
+
+                <label
+                  htmlFor="doc-title-name"
+                  className="mb-1.5 block text-sm font-medium text-slate-700"
+                >
+                  Document name
+                </label>
+                <input
+                  id="doc-title-name"
+                  type="text"
+                  value={docTitle}
+                  placeholder="Enter document name"
+                  onChange={(event) => setDocTitle(event.target.value)}
+                  disabled={isUploadingDoc}
+                  className="mb-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleFileUpload}
+                  disabled={isUploadingDoc || !docTitle.trim()}
+                  className="w-full rounded-md bg-blue-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isUploadingDoc ? "Uploading..." : "Upload"}
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               disabled={isUploadingDoc}
@@ -1413,7 +1485,6 @@ const NotesDocumentsTab: React.FC<{
             <input
               ref={fileInputRef}
               type="file"
-              multiple
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.txt"
               className="hidden"
               onChange={handleFileChange}
@@ -1880,53 +1951,10 @@ const NotesDocumentsTab: React.FC<{
             SCROLLABLE CONTENT
         ======================================================== */}
         <main className="relative flex-1 overflow-y-auto bg-slate-50">
-          <div className="mx-auto max-w-7xl px-6 pb-28 pt-6">
+          <div className="mx-auto max-w-7xl px-6 pb-6 pt-6">
             {content}
           </div>
         </main>
-
-        {/* =======================================================
-            BOTTOM ACTION BAR
-        ======================================================== */}
-        <div className="absolute bottom-0 left-0 right-0 z-20 flex h-16 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-
-          <div className="text-sm text-slate-500">
-            Showing {documents.length} of {documents.length} total records
-          </div>
-
-          <div className="flex space-x-3">
-
-            {/* Download All */}
-            <button
-              type="button"
-              disabled={documents.length === 0}
-              onClick={() => downloadAllDocuments(documents)}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <i className="fa-solid fa-download mr-2" />
-              Download All
-            </button>
-
-            {/* Export */}
-            <button
-              type="button"
-              onClick={() => console.log("Export Documents")}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              <i className="fa-solid fa-file-export mr-2" />
-              Export Documents
-            </button>
-
-            {/* Save */}
-            <button
-              type="button"
-              onClick={handleSave}
-              className="rounded-md bg-[#0052cc] px-6 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-            >
-              Save Notes & Changes
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
