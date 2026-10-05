@@ -357,6 +357,10 @@ const HistoryTab: React.FC<{
   const { vitals: patientVitals } = useLatestPatientVitals(patientId);
   const [timelineViewMode, setTimelineViewMode] = useState<"one-by-one" | "list">("one-by-one");
   const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
+  const [barTooltip, setBarTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [activeVitalChart, setActiveVitalChart] = useState<
+    "weight" | "bp" | "pulse" | "temp" | "painscore"
+  >("weight");
   const timelineScrollRef = useRef<HTMLDivElement>(null);
 
   /* Patient 360: the patient's visits - every saved staging detail
@@ -1033,31 +1037,96 @@ const HistoryTab: React.FC<{
   });
   adverseEventRows.sort((a, b) => b.date.localeCompare(a.date));
 
-  /* Per-cycle average weight for the vitals trend chart. */
-  const weightTrend = planCyclesSorted
-    .map((cycle) => {
-      const detail = cycleDetails.find(
-        (entry) => entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
-      );
-      const weights = (detail?.chemotherapy_vitals ?? [])
-        .map((vital) => Number(vital.weight))
-        .filter((value) => !Number.isNaN(value) && value > 0);
-      const avg =
-        weights.length > 0
-          ? weights.reduce((sum, value) => sum + value, 0) / weights.length
-          : null;
-      return {
-        cycleNumber: cycle.cycle_number,
-        weight: avg,
-      };
-    })
-    .filter((entry) => entry.weight != null);
-  const weightTrendMax = Math.max(...weightTrend.map((e) => e.weight ?? 0), 1);
+  /* One bar per calendar day — group encounter weights by date, last recorded value per day wins. */
+  const weightTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.weight != null && Number(enc.weight) > 0)
+      .sort((a, b) =>
+        (a.encounter_ts || a.created_at || "").localeCompare(
+          b.encounter_ts || b.created_at || ""
+        )
+      )
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.weight));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, weight]) => ({ date: day, weight }));
+  })();
+  const weightTrendMax = Math.max(...weightTrend.map((e) => e.weight), 1);
   const weightTrendAvg =
     weightTrend.length > 0
-      ? weightTrend.reduce((sum, entry) => sum + (entry.weight ?? 0), 0) /
+      ? weightTrend.reduce((sum, entry) => sum + entry.weight, 0) /
         weightTrend.length
       : null;
+
+  /* Per-day BP trend */
+  const bpTrend = (() => {
+    const byDay = new Map<string, { systolic: number; diastolic: number }>();
+    [...visitEncounters]
+      .filter((enc) => enc.systolic_bp != null && enc.diastolic_bp != null)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, { systolic: Number(enc.systolic_bp), diastolic: Number(enc.diastolic_bp) });
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, bp]) => ({ date: day, ...bp }));
+  })();
+
+  /* Per-day Pulse trend */
+  const pulseTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.pulse != null && Number(enc.pulse) > 0)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.pulse));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
+
+  /* Per-day Temperature trend */
+  const tempTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.temperature != null && Number(enc.temperature) > 0)
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        if (day) byDay.set(day, Number(enc.temperature));
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
+
+  /* Per-day Pain score trend (0-10). `pain_score` may arrive as a string. */
+  const painTrend = (() => {
+    const byDay = new Map<string, number>();
+    [...visitEncounters]
+      .filter((enc) => enc.pain_score != null && String(enc.pain_score).trim() !== "")
+      .sort((a, b) => (a.encounter_ts || a.created_at || "").localeCompare(b.encounter_ts || b.created_at || ""))
+      .forEach((enc) => {
+        const raw = enc.encounter_ts || enc.created_at || "";
+        const day = raw ? raw.slice(0, 10) : "";
+        const score = Number(enc.pain_score);
+        if (day && !Number.isNaN(score)) byDay.set(day, score);
+      });
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, value]) => ({ date: day, value }));
+  })();
 
   const fmtTimelineDate = (value?: string | Date | null): string => {
     if (!value) return "";
@@ -1709,6 +1778,30 @@ const HistoryTab: React.FC<{
               Vitals Trend History
             </h2>
 
+            <div className="flex flex-wrap gap-2 mb-4">
+              {([
+                { key: "weight", label: "Weight" },
+                { key: "bp", label: "BP" },
+                { key: "pulse", label: "Pulse" },
+                { key: "temp", label: "Temp" },
+                { key: "painscore", label: "Painscore" },
+              ] as const).map((chart) => (
+                <button
+                  key={chart.key}
+                  type="button"
+                  onClick={() => setActiveVitalChart(chart.key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                    activeVitalChart === chart.key
+                      ? "bg-[#004785] border-[#004785] text-white shadow-sm"
+                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-[#004785]"
+                  }`}
+                >
+                  {chart.label}
+                </button>
+              ))}
+            </div>
+
+            {activeVitalChart === "weight" && (
             <div className="mb-4">
               <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
                 <span>WEIGHT (KG)</span>
@@ -1719,43 +1812,204 @@ const HistoryTab: React.FC<{
                 </span>
               </div>
 
-              <div className="flex items-end h-12 gap-1">
+              <div className="flex items-end h-16 gap-1.5">
                 {weightTrend.length === 0 ? (
                   <p className="text-xs text-gray-400">
-                    No vitals recorded for any cycle yet.
+                    No weight recorded for any visit yet.
                   </p>
                 ) : (
-                  weightTrend.map((entry) => (
+                  weightTrend.map((entry, idx) => (
                     <div
-                      key={entry.cycleNumber}
-                      title={`Cycle ${entry.cycleNumber}: ${(
-                        entry.weight ?? 0
-                      ).toFixed(1)} kg`}
-                      className="w-full bg-blue-600 rounded-t"
+                      key={entry.date || idx}
+                      className="flex-1 min-w-[10px] max-w-[40px] bg-blue-500 rounded-t-md cursor-pointer hover:bg-blue-700 transition-colors"
                       style={{
                         height: `${Math.max(
-                          8,
-                          Math.round(((entry.weight ?? 0) / weightTrendMax) * 100)
+                          12,
+                          Math.round((entry.weight / weightTrendMax) * 100)
                         )}%`,
                       }}
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const label = entry.date
+                          ? new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                          : "Visit";
+                        setBarTooltip({ text: `${label}: ${entry.weight.toFixed(1)} kg`, x: rect.left + rect.width / 2, y: rect.top });
+                      }}
+                      onMouseLeave={() => setBarTooltip(null)}
                     />
                   ))
                 )}
               </div>
             </div>
+            )}
 
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-500 font-medium">
-                BP / PULSE / TEMP
-              </span>
+            {activeVitalChart !== "weight" && (
+              <div className="mt-4 space-y-5 border-t border-gray-100 pt-4">
 
-              <button
-                type="button"
-                className="text-blue-600 font-bold hover:underline"
+                {/* Blood Pressure */}
+                {activeVitalChart === "bp" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Blood Pressure (mmHg)</span>
+                    {bpTrend.length > 0 && (
+                      <span>
+                        Avg {Math.round(bpTrend.reduce((s, e) => s + e.systolic, 0) / bpTrend.length)}/
+                        {Math.round(bpTrend.reduce((s, e) => s + e.diastolic, 0) / bpTrend.length)}
+                      </span>
+                    )}
+                  </div>
+                  {bpTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No BP recorded yet.</p>
+                  ) : (
+                    <>
+                      <div className="flex items-end h-20 gap-2">
+                        {(() => {
+                          const maxSys = Math.max(...bpTrend.map((e) => e.systolic), 1);
+                          return bpTrend.map((entry, idx) => {
+                            const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                            const tip = `${label}: ${entry.systolic}/${entry.diastolic} mmHg`;
+                            return (
+                              <div key={entry.date || idx} className="flex items-end gap-0.5 flex-1 min-w-[16px] max-w-[48px] h-full">
+                                <div
+                                  className="flex-1 bg-blue-600 rounded-t cursor-pointer hover:bg-blue-700 transition-colors"
+                                  style={{ height: `${Math.max(10, Math.round((entry.systolic / maxSys) * 100))}%` }}
+                                  onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setBarTooltip({ text: tip, x: r.left + r.width / 2, y: r.top }); }}
+                                  onMouseLeave={() => setBarTooltip(null)}
+                                />
+                                <div
+                                  className="flex-1 bg-blue-300 rounded-t cursor-pointer hover:bg-blue-400 transition-colors"
+                                  style={{ height: `${Math.max(10, Math.round((entry.diastolic / maxSys) * 100))}%` }}
+                                  onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setBarTooltip({ text: tip, x: r.left + r.width / 2, y: r.top }); }}
+                                  onMouseLeave={() => setBarTooltip(null)}
+                                />
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                      <div className="flex gap-3 mt-1.5 text-[10px] text-gray-500">
+                        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-blue-600" />Systolic</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-blue-300" />Diastolic</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                )}
+
+                {/* Pulse */}
+                {activeVitalChart === "pulse" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Pulse (bpm)</span>
+                    {pulseTrend.length > 0 && (
+                      <span>Avg {Math.round(pulseTrend.reduce((s, e) => s + e.value, 0) / pulseTrend.length)}</span>
+                    )}
+                  </div>
+                  {pulseTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No pulse recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...pulseTrend.map((e) => e.value), 1);
+                        return pulseTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-rose-500 rounded-t-md cursor-pointer hover:bg-rose-600 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              setBarTooltip({ text: `${label}: ${entry.value} bpm`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {/* Temperature */}
+                {activeVitalChart === "temp" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Temperature (°C)</span>
+                    {tempTrend.length > 0 && (
+                      <span>Avg {(tempTrend.reduce((s, e) => s + e.value, 0) / tempTrend.length).toFixed(1)}</span>
+                    )}
+                  </div>
+                  {tempTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No temperature recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...tempTrend.map((e) => e.value), 1);
+                        return tempTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-orange-400 rounded-t-md cursor-pointer hover:bg-orange-500 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              setBarTooltip({ text: `${label}: ${entry.value.toFixed(1)} °C`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {/* Pain Score */}
+                {activeVitalChart === "painscore" && (
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                    <span>Pain Score (0-10)</span>
+                    {painTrend.length > 0 && (
+                      <span>Avg {(painTrend.reduce((s, e) => s + e.value, 0) / painTrend.length).toFixed(1)}</span>
+                    )}
+                  </div>
+                  {painTrend.length === 0 ? (
+                    <p className="text-xs text-gray-400">No pain score recorded yet.</p>
+                  ) : (
+                    <div className="flex items-end h-16 gap-1.5">
+                      {(() => {
+                        const max = Math.max(...painTrend.map((e) => e.value), 1);
+                        return painTrend.map((entry, idx) => (
+                          <div
+                            key={entry.date || idx}
+                            className="flex-1 min-w-[10px] max-w-[40px] bg-red-500 rounded-t-md cursor-pointer hover:bg-red-600 transition-colors"
+                            style={{ height: `${Math.max(12, Math.round((entry.value / max) * 100))}%` }}
+                            onMouseEnter={(e) => {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const label = new Date(entry.date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                              const score = Number.isInteger(entry.value) ? String(entry.value) : entry.value.toFixed(1);
+                              setBarTooltip({ text: `${label}: ${score}/10`, x: r.left + r.width / 2, y: r.top });
+                            }}
+                            onMouseLeave={() => setBarTooltip(null)}
+                          />
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+                )}
+
+              </div>
+            )}
+
+            {barTooltip && (
+              <div
+                className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs font-medium rounded px-2.5 py-1 whitespace-nowrap shadow-lg"
+                style={{ left: barTooltip.x, top: barTooltip.y - 8, transform: "translate(-50%, -100%)" }}
               >
-                VIEW DETAILED CHARTS
-              </button>
-            </div>
+                {barTooltip.text}
+              </div>
+            )}
           </div>
 
           {/* DOCUMENT HISTORY */}

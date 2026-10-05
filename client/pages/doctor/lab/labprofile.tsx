@@ -4,6 +4,7 @@ import LabNav from "./labnav";
 import Profile from "@/components/Forms/view/view profile ";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
 import { getUser, remove } from "@/utils/token";
 import { employeeApi } from "@/api/employee.api";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
@@ -93,6 +94,7 @@ export default function LabProfile() {
             </div>
 
             <div className="flex items-center space-x-3" data-purpose="user-badge">
+              <LabNotificationBell size="md" />
               <UserProfileDropdown
                 userName={displayName}
                 userSubtext={displayRole}
@@ -100,7 +102,7 @@ export default function LabProfile() {
                 avatarLoading={avatarLoading}
                 onLogout={() => setLogoutOpen(true)}
                 profilePath="/lab/profile"
-                notificationsPath="/doctor/notifications"
+                hideNotifications
               />
             </div>
           </header>
