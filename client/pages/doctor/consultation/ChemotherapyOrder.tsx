@@ -116,14 +116,22 @@ const dilutionToHydrationRow = (
    (item-attached or protocol-level) as a table row. The volume and its unit
    travel together in `volume` ("500 mL"), the one column the plan item
    stores, and `dilutionSolution` / `administrationDetail` carry the diluent
-   and the comment. */
+   and the comment. An item-attached dilution without a medicine of its own
+   is the dilution of its item's drug, so it takes that drug's name. */
 const protocolDilutionToDrug = (
   dilution: RegimenProtocolDilution,
-  index: number
+  index: number,
+  item?: RegimenProtocolItem
 ): Drug => ({
   id: index,
   name:
-    dilution.medicine_master?.medicine_name || dilution.drug_brand_name || "",
+    dilution.medicine_master?.medicine_name ||
+    dilution.drug_brand_name ||
+    (!dilution.medicine_id || dilution.medicine_id === item?.medicine_id
+      ? item?.medicine_master?.medicine_name ||
+        item?.medicine_master?.generic_name
+      : "") ||
+    "",
   form: dilution.form ?? "",
   dose: dilution.dose != null ? String(Number(dilution.dose)) : "",
   unit: dilution.dose_unit ?? "",
@@ -133,7 +141,7 @@ const protocolDilutionToDrug = (
   ]
     .filter(Boolean)
     .join(" "),
-  medicineId: dilution.medicine_id ?? undefined,
+  medicineId: dilution.medicine_id ?? item?.medicine_id ?? undefined,
   dilutionSolution: dilution.diluent ?? null,
   administrationDetail: dilution.comment ?? null,
 });
@@ -674,6 +682,28 @@ const ChemotherapyOrder: React.FC<{
       .sort((a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0))
       .map(planItemToDrug);
 
+  /* A saved order's Dilution rows. An order saved while the template
+     listed every item-attached dilution twice stored each one twice; an
+     exact repeat of an earlier row is dropped (the next save of the day
+     stores the list without it). */
+  const savedDilutionRows = (items: ChemotherapyPlanItem[]) => {
+    const seen = new Set<string>();
+    return planItemsForRole(items, "DILUTION").filter((drug) => {
+      const key = JSON.stringify([
+        drug.medicineId ?? drug.name.trim().toLowerCase(),
+        drug.form,
+        drug.dose,
+        drug.unit,
+        drug.volume,
+        drug.dilutionSolution ?? "",
+        drug.administrationDetail ?? "",
+      ]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   const templateHydration = () =>
     (protocolRef.current?.protocol_dilutions ?? [])
       .filter((dilution) => !!dilution.hydration_stage)
@@ -689,23 +719,56 @@ const ChemotherapyOrder: React.FC<{
   /* The Dilution tab's template for the selected cycle day: the protocol
      dilutions attached to the items of THIS day (a dilution inherits its
      item's day), plus the protocol-level dilutions, which carry no day of
-     their own and so apply to every day of the protocol. */
+     their own and so apply to every day of the protocol.
+     protocol_dilutions holds EVERY active dilution of the protocol (with its
+     medicine), item-attached ones included, and each item's
+     chemotherapy_protocol_dilutions repeats those (without the medicine) -
+     so each dilution is read once, by protocol_dilution_id, preferring the
+     protocol_dilutions copy. */
   const templateDilutions = (dayNumber: number | null): Drug[] => {
-    const attached = (
-      protocolRef.current?.chemotherapy_regimen_protocol_items ?? []
-    ).flatMap((item) =>
-      (item.chemotherapy_protocol_dilutions ?? []).filter(
-        (dilution) =>
-          dayNumber != null && protocolItemDay(item) === dayNumber
-      )
+    const items = protocolRef.current?.chemotherapy_regimen_protocol_items ?? [];
+    const itemById = new Map(items.map((item) => [item.protocol_item_id, item]));
+
+    const byId = new Map<string, RegimenProtocolDilution>();
+    for (const dilution of protocolRef.current?.protocol_dilutions ?? []) {
+      byId.set(dilution.protocol_dilution_id, dilution);
+    }
+    for (const item of items) {
+      for (const dilution of item.chemotherapy_protocol_dilutions ?? []) {
+        if (byId.has(dilution.protocol_dilution_id)) continue;
+        byId.set(dilution.protocol_dilution_id, {
+          ...dilution,
+          protocol_item_id: dilution.protocol_item_id ?? item.protocol_item_id,
+        });
+      }
+    }
+
+    /* The items of this day (a same-as-day-1 day uses day 1's). */
+    const dayItemIds = new Set(
+      dayNumber != null
+        ? resolveProtocolDayItems(protocolDaysRef.current, dayNumber).map(
+            (item) => item.protocol_item_id
+          )
+        : []
     );
 
+    const all = [...byId.values()];
     /* Detached protocol-level rows first, then the day's own, so a whole
        protocol's dilutions always read the same way. */
-    const protocolLevel = protocolRef.current?.protocol_dilutions ?? [];
+    const protocolLevel = all.filter((dilution) => !dilution.protocol_item_id);
+    const attached = all.filter(
+      (dilution) =>
+        !!dilution.protocol_item_id && dayItemIds.has(dilution.protocol_item_id)
+    );
 
     return [...protocolLevel, ...attached].map((dilution, index) =>
-      protocolDilutionToDrug(dilution, index)
+      protocolDilutionToDrug(
+        dilution,
+        index,
+        dilution.protocol_item_id
+          ? itemById.get(dilution.protocol_item_id)
+          : undefined
+      )
     );
   };
 
@@ -820,11 +883,15 @@ const ChemotherapyOrder: React.FC<{
       setSupportiveDrugs(planItemsForRole(items, "SUPPORTIVE"));
       /* A saved day that has no dilution rows of its own still shows the
          protocol's rows for that day, the same way an unsaved day does. */
-      setDilutionDrugs(
-        planItemsForRole(items, "DILUTION").length > 0
-          ? planItemsForRole(items, "DILUTION")
-          : templateDilutions(dayNumber)
-      );
+      {
+        const savedDilutions = savedDilutionRows(items);
+        const hasRealDilutions =
+          savedDilutions.length > 0 &&
+          savedDilutions.some((d) => (d.name ?? "").trim());
+        setDilutionDrugs(
+          hasRealDilutions ? savedDilutions : templateDilutions(dayNumber)
+        );
+      }
       setHydrationRows(
         saved.hydration_saved
           ? (saved.chemotherapy_plan_hydration ?? []).map(planHydrationToRow)
@@ -1776,15 +1843,16 @@ const ChemotherapyOrder: React.FC<{
         throw new Error(`${from} has no saved order to copy.`);
       }
       const items = order.chemotherapy_plan_items ?? [];
-      const dilution = planItemsForRole(items, "DILUTION");
+      const dilution = savedDilutionRows(items);
+      const hasRealDilutions =
+        dilution.length > 0 && dilution.some((d) => (d.name ?? "").trim());
       const next: Record<RowKind, Drug[]> = {
         drug: planItemsForRole(items, "PRIMARY"),
         premedication: planItemsForRole(items, "PREMEDICATION"),
         supportive: planItemsForRole(items, "SUPPORTIVE"),
-        dilution:
-          dilution.length > 0
-            ? dilution
-            : templateDilutions(source.cycle_day),
+        dilution: hasRealDilutions
+          ? dilution
+          : templateDilutions(source.cycle_day),
       };
       const hydration = order.hydration_saved
         ? (order.chemotherapy_plan_hydration ?? []).map(planHydrationToRow)
