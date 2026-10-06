@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { jsPDF } from "jspdf";
-import autoTable, { type RowInput, type Styles } from "jspdf-autotable";
+import { loadPatientDocuments } from "../../../utils/patientDocuments";
+import { downloadChemotherapySummaryDocx } from "../../../utils/chemotherapySummaryDocx";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
@@ -973,242 +973,33 @@ const Summary: React.FC<{
     return `${cycleLabel}${status}`;
   })();
 
-  const handleDownloadSummary = () => {
-    const doc = new jsPDF({
-      orientation: "landscape",
-      unit: "pt",
-      format: "a4",
-    });
-
-    doc.setFontSize(16);
-    doc.setTextColor(20, 30, 40);
-    doc.text("Chemotherapy Summary", 40, 44);
-
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    const infoLine = [
-      `Patient: ${patientName || resolvedPatientId}`,
-      cancerType && `Cancer Type: ${cancerType}`,
-      stage && `Stage: ${stage}`,
-      context && `Context: ${context}`,
-      protocol && `Protocol: ${protocol}`,
-      duration && `Duration: ${duration}`,
-      current && `Current: ${current}`,
-    ]
-      .filter(Boolean)
-      .join("   |   ");
-    doc.text(infoLine, 40, 60);
-
-    const tableStyles = {
-      fontSize: 8,
-      cellPadding: 5,
-      textColor: [30, 41, 59] as [number, number, number],
-      lineColor: [226, 232, 240] as [number, number, number],
-      lineWidth: 0.5,
-    };
-    const headStyles = {
-      fillColor: [0, 71, 133] as [number, number, number],
-      textColor: [255, 255, 255] as [number, number, number],
-      fontSize: 8.5,
-      fontStyle: "bold" as const,
-    };
-
-    let y = 88;
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-
-    /* A titled section table: an accent bar + title (with an optional
-       right-aligned note such as the cycle day), and a muted "none" row
-       when the list is empty. stageColumn colours PRE / POST. */
-    const renderTable = (
-      title: string,
-      head: string[],
-      body: string[][],
-      options: {
-        note?: string;
-        empty?: string;
-        columnStyles?: Record<number, Partial<Styles>>;
-        stageColumn?: number;
-      } = {}
-    ) => {
-      /* Keep a section title together with the start of its table. */
-      if (y > pageHeight - 110) {
-        doc.addPage();
-        y = 40;
-      }
-      doc.setFillColor(0, 71, 133);
-      doc.rect(40, y - 9, 3, 12, "F");
-      doc.setFontSize(11);
-      doc.setTextColor(49, 46, 129);
-      doc.text(title, 49, y);
-      if (options.note) {
-        doc.setFontSize(8.5);
-        doc.setTextColor(100, 116, 139);
-        doc.text(options.note, pageWidth - 40, y, { align: "right" });
-      }
-      y += 8;
-      const rows: RowInput[] =
-        body.length > 0
-          ? body.map((row) => row.map((cell) => cell || "-"))
-          : [
-              [
-                {
-                  content: options.empty ?? "None recorded",
-                  colSpan: head.length,
-                  styles: {
-                    halign: "center",
-                    fontStyle: "italic",
-                    textColor: [148, 163, 184],
-                  },
-                },
-              ],
-            ];
-      autoTable(doc, {
-        startY: y,
-        head: [head],
-        body: rows,
-        styles: { ...tableStyles, valign: "top", overflow: "linebreak" },
-        headStyles,
-        alternateRowStyles: { fillColor: [247, 249, 251] },
-        columnStyles: options.columnStyles,
-        margin: { left: 40, right: 40, bottom: 40 },
-        didParseCell: (data) => {
-          if (
-            options.stageColumn !== undefined &&
-            body.length > 0 &&
-            data.section === "body" &&
-            data.column.index === options.stageColumn
-          ) {
-            data.cell.styles.fontStyle = "bold";
-            data.cell.styles.textColor =
-              data.cell.raw === "POST" ? [180, 83, 9] : [29, 78, 216];
-          }
-        },
+  const handleDownloadSummary = async () => {
+    try {
+      const documents = resolvedPatientId
+        ? await loadPatientDocuments(resolvedPatientId)
+        : [];
+      await downloadChemotherapySummaryDocx({
+        patientName,
+        patientId: resolvedPatientId,
+        cancerType,
+        stage,
+        context,
+        protocol,
+        duration,
+        current,
+        visitCycleDay,
+        chemoOrders: chemotherapyOrders,
+        premedications,
+        hydration: hydrationRows,
+        adminInstructions: adminInstructionRows,
+        dischargeMedications,
+        nextVisitDate,
+        nextCycle,
+        documents,
       });
-      y = (doc as any).lastAutoTable?.finalY ?? y;
-      y += 24;
-    };
-
-    renderTable(
-      "Chemotherapy Orders",
-      ["Drug Name", "Form", "Dose", "Unit"],
-      chemotherapyOrders.map((row) => [
-        row.drug,
-        row.form,
-        row.dose,
-        row.unit,
-      ])
-    );
-    renderTable(
-      "Premedication",
-      ["Drug Name", "Dose", "Route", "Time"],
-      premedications.map((row) => [row.drug, row.dose, row.route, row.time])
-    );
-    renderTable(
-      "Hydration",
-      ["Stage", "Agent", "Diluent", "Volume", "Guidance"],
-      hydrationRows.map((row) => [
-        row.stage,
-        row.agent,
-        row.diluent,
-        row.volume,
-        row.guidance,
-      ]),
-      {
-        note: visitCycleDay,
-        empty: "No hydration ordered for this visit",
-        stageColumn: 0,
-        columnStyles: {
-          0: { cellWidth: 55 },
-          1: { cellWidth: 150 },
-          2: { cellWidth: 140 },
-          3: { cellWidth: 80 },
-        },
-      }
-    );
-    renderTable(
-      "Administration Instructions",
-      [
-        "Drug Name",
-        "Category",
-        "Route",
-        "Infusion",
-        "Frequency",
-        "Timing",
-        "Admin Detail",
-        "Remarks",
-      ],
-      adminInstructionRows.map((row) => [
-        row.drug,
-        row.category,
-        row.route,
-        row.infusion,
-        row.frequency,
-        row.timing,
-        row.detail,
-        row.remarks,
-      ]),
-      {
-        note: visitCycleDay,
-        empty: "No administration instructions for this visit",
-        columnStyles: {
-          0: { cellWidth: 115, fontStyle: "bold" },
-          1: { cellWidth: 78 },
-          2: { cellWidth: 50 },
-          3: { cellWidth: 82 },
-          4: { cellWidth: 70 },
-          5: { cellWidth: 80 },
-          7: { cellWidth: 110 },
-        },
-      }
-    );
-    renderTable(
-      "Discharge Medication",
-      ["Drug Name", "Dose", "Frequency", "Instruction", "Duration"],
-      dischargeMedications.map((row) => [
-        row.drug,
-        row.dose,
-        row.frequency,
-        row.instruction,
-        row.duration,
-      ])
-    );
-
-    y += 8;
-    if (y > pageHeight - 50) {
-      doc.addPage();
-      y = 40;
+    } catch (error) {
+      console.error("Failed to download chemotherapy summary:", error);
     }
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Next Visit Date: ${nextVisitDate || ""}`, 40, y);
-    doc.text(`Next Cycle: ${nextCycle || ""}`, 300, y);
-
-    /* Footer on every page: when it was generated, and page x of n. */
-    const generatedAt = new Date().toLocaleString();
-    const pageCount = doc.getNumberOfPages();
-    for (let page = 1; page <= pageCount; page++) {
-      doc.setPage(page);
-      doc.setDrawColor(226, 232, 240);
-      doc.setLineWidth(0.5);
-      doc.line(40, pageHeight - 30, pageWidth - 40, pageHeight - 30);
-      doc.setFontSize(7.5);
-      doc.setTextColor(148, 163, 184);
-      doc.text(`Generated ${generatedAt}`, 40, pageHeight - 18);
-      doc.text(`Page ${page} of ${pageCount}`, pageWidth - 40, pageHeight - 18, {
-        align: "right",
-      });
-    }
-
-    const blob = doc.output("blob");
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `chemotherapy-summary-${resolvedPatientId || "patient"}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
   };
 
   const [submittingSummary, setSubmittingSummary] = useState(false);
