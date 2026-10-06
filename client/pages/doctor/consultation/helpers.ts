@@ -400,6 +400,9 @@ export const resolveDiagnosisId = async (
       icdCode = "";
     }
   }
+  /* The field lists one code per selected cancer type ("C50.9, C34.9");
+     the diagnosis is the primary (first) type's. */
+  icdCode = icdCode.split(",")[0]?.trim() ?? "";
 
   try {
     const diagnoses = await loadAllIcdDiagnoses();

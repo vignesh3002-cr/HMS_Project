@@ -1886,8 +1886,7 @@ const Diagnosis: React.FC<{
      them into the Histopathology dropdown. Each option remembers its
      parent cancer type so the dropdown can show the mapping. */
   const loadSubtypesForCancerTypes = (
-    selections: { cancerTypeId: string; cancerTypeName: string }[],
-    autoSelectIcd = true
+    selections: { cancerTypeId: string; cancerTypeName: string }[]
   ) => {
     const ids = selections.filter(
       (selection) => Boolean(selection.cancerTypeId)
@@ -1922,15 +1921,7 @@ const Diagnosis: React.FC<{
             }
           }
         });
-        const items = Array.from(merged.values());
-        setSubtypes(items);
-        const first = items[0];
-        if (first && autoSelectIcd) {
-          setFormData((previous) => ({
-            ...previous,
-            icdCode: previous.icdCode || first.icd10_subtype || "",
-          }));
-        }
+        setSubtypes(Array.from(merged.values()));
       })
       .catch((error) => {
         console.error("Failed to load cancer subtypes:", error);
@@ -2178,9 +2169,33 @@ const Diagnosis: React.FC<{
           }));
 
         if (matchedSavedTypes.length > 0) {
+          /* A draft saved while the ICD Code wasn't filled for every
+             cancer type gets each type's code, in selection order. */
+          setFormData((previous) =>
+            previous.icdCode
+              ? previous
+              : {
+                  ...previous,
+                  icdCode: Array.from(
+                    new Set(
+                      matchedSavedTypes
+                        .map(
+                          (selection) =>
+                            fetched
+                              .find(
+                                (item) =>
+                                  item.cancer_type_id === selection.cancerTypeId
+                              )
+                              ?.icd10?.trim() ?? ""
+                        )
+                        .filter(Boolean)
+                    )
+                  ).join(", "),
+                }
+          );
           // Restoring a saved draft: reload options for every saved
           // cancer type without overwriting the user's selections.
-          loadSubtypesForCancerTypes(matchedSavedTypes, false);
+          loadSubtypesForCancerTypes(matchedSavedTypes);
           loadStagesForCancerTypes(matchedSavedTypes, false);
           loadMastersForCancerTypes(matchedSavedTypes);
           return;
@@ -2278,6 +2293,34 @@ const Diagnosis: React.FC<{
     }));
   };
 
+  /* The ICD Code field: one code per selected cancer type, in the order
+     the types were selected - the ICD-10 of the histopathology ticked
+     under the type when it has one, else the cancer type's own (the same
+     cascade the backend stores as icd10_code). */
+  const icdCodesFor = (typeNames: string[], subTypeValues: string[]) => {
+    const codes = typeNames.map((typeName, index) => {
+      const picked = subTypeValues.find((value) => {
+        const { cancerType } = splitQualified(value);
+        return cancerType ? cancerType === typeName : index === 0;
+      });
+      const subtype = picked
+        ? subtypes.find(
+            (item) =>
+              item.cancerType === typeName &&
+              item.subtype_name === splitQualified(picked).raw
+          )
+        : undefined;
+      return (
+        subtype?.icd10_subtype?.trim() ||
+        cancerTypes
+          .find((item) => item.cancer_type === typeName)
+          ?.icd10?.trim() ||
+        ""
+      );
+    });
+    return Array.from(new Set(codes.filter(Boolean))).join(", ");
+  };
+
   const handleTypesChange = (values: string[]) => {
     setSelectedCancerTypes(values);
 
@@ -2294,7 +2337,8 @@ const Diagnosis: React.FC<{
       type: primaryType,
       cancerTypes: values,
       subType: [],
-      icdCode: "",
+      /* Histopathology starts over, so each type's own code. */
+      icdCode: icdCodesFor(values, []),
       laterality: keepSelectedTypes(previous.laterality),
       bodySite: keepSelectedTypes(previous.bodySite),
       grade: keepSelectedTypes(previous.grade),
@@ -2326,6 +2370,28 @@ const Diagnosis: React.FC<{
       : formData.type
         ? [formData.type]
         : [];
+
+  /* "<Type>|<label>" values in the order their cancer types were selected
+     (not the order they were ticked); within one type the ticked order
+     stays. A legacy value without a type is the primary type's. */
+  const orderByType = (values: string[]) => {
+    const rank = (value: string) => {
+      const index = optionTypes.indexOf(
+        splitQualified(value).cancerType || formData.type
+      );
+      return index === -1 ? optionTypes.length : index;
+    };
+    return [...values].sort((a, b) => rank(a) - rank(b));
+  };
+
+  /* Ticking a histopathology also refreshes its type's ICD code. */
+  const handleSubtypeToggle = (value: string, select?: boolean) => {
+    handleMultiToggle("subType")(value, select);
+    setFormData((previous) => ({
+      ...previous,
+      icdCode: icdCodesFor(optionTypes, previous.subType),
+    }));
+  };
 
   /* Laterality only under the selected cancer types it applies to; older
      picks for other types (or retired values like "Midline") are ignored. */
@@ -2667,7 +2733,7 @@ const Diagnosis: React.FC<{
       value: text,
     });
     appendTagged(setSubtypes, row, cancerType, (a, b) => a.subtype_id === b.subtype_id);
-    handleMultiToggle("subType")(`${cancerType}|${row.subtype_name}`, true);
+    handleSubtypeToggle(`${cancerType}|${row.subtype_name}`, true);
   };
 
   const handleAddStage: DiagnosisAddHandler = async (cancerType, text) => {
@@ -2931,10 +2997,13 @@ const Diagnosis: React.FC<{
 
     /* What is saved for the text columns: the doctor's wording of each
        picked value. */
-    const clinicalStageText = joinLabels("cancerStage", formData.cancerStage);
-    const siteText = joinLabels("bodySite", formData.bodySite);
-    const gradeText = joinLabels("grade", formData.grade);
-    const scoreText = joinLabels("score", formData.score);
+    const clinicalStageText = joinLabels(
+      "cancerStage",
+      orderByType(formData.cancerStage)
+    );
+    const siteText = joinLabels("bodySite", orderByType(formData.bodySite));
+    const gradeText = joinLabels("grade", orderByType(formData.grade));
+    const scoreText = joinLabels("score", orderByType(formData.score));
     const diseaseStatusText = formData.diseaseStatus
       ? labelOf("diseaseStatus", formData.diseaseStatus)
       : "";
@@ -2995,7 +3064,7 @@ const Diagnosis: React.FC<{
       const uniqueJoin = (items: (string | undefined)[]) =>
         Array.from(new Set(items.filter(Boolean))).join(", ");
       const gradeSystems = uniqueJoin(
-        formData.grade.map((value) => {
+        orderByType(formData.grade).map((value) => {
           const { cancerType, raw } = splitQualified(value);
           return gradeMasterOptions.find(
             (item) =>
@@ -3004,7 +3073,9 @@ const Diagnosis: React.FC<{
           )?.grade_system;
         })
       );
-      const scoreSystems = uniqueJoin(formData.score.map(scoreSystemOf));
+      const scoreSystems = uniqueJoin(
+        orderByType(formData.score).map(scoreSystemOf)
+      );
 
       const visitDateIso = toIsoDate(visitDate);
 
@@ -3296,7 +3367,7 @@ const Diagnosis: React.FC<{
             <DiagnosisCheckboxList
               title="Laterality"
               groups={lateralityGroups}
-              selected={lateralitySelected}
+              selected={orderByType(lateralitySelected)}
               onToggle={handleMultiToggle("laterality")}
             />
           )}
@@ -3305,7 +3376,7 @@ const Diagnosis: React.FC<{
           <DiagnosisCheckboxList
             title="Body Site"
             groups={bodySiteGroups}
-            selected={formData.bodySite}
+            selected={orderByType(formData.bodySite)}
             onToggle={handleMultiToggle("bodySite")}
             loading={diagnosisLoading}
             addTypes={optionTypes}
@@ -3322,8 +3393,8 @@ const Diagnosis: React.FC<{
                 cancerType: item.cancerType,
               }))
             )}
-            selected={formData.subType}
-            onToggle={handleMultiToggle("subType")}
+            selected={orderByType(formData.subType)}
+            onToggle={handleSubtypeToggle}
             loading={diagnosisLoading}
             addTypes={optionTypes}
             onAdd={handleAddSubtype}
@@ -3359,7 +3430,7 @@ const Diagnosis: React.FC<{
           <DiagnosisCheckboxList
             title="Cancer Stage"
             groups={buildCheckboxGroups(stageLabels)}
-            selected={formData.cancerStage}
+            selected={orderByType(formData.cancerStage)}
             onToggle={handleMultiToggle("cancerStage")}
             loading={diagnosisLoading}
             addTypes={optionTypes}
@@ -3371,7 +3442,7 @@ const Diagnosis: React.FC<{
           <DiagnosisCheckboxList
             title="Grade"
             groups={gradeGroups}
-            selected={formData.grade}
+            selected={orderByType(formData.grade)}
             onToggle={handleMultiToggle("grade")}
             loading={diagnosisLoading}
             addTypes={optionTypes}
@@ -3384,7 +3455,7 @@ const Diagnosis: React.FC<{
           <DiagnosisScoreList
             title="Score"
             options={scoreOptions}
-            selected={formData.score}
+            selected={orderByType(formData.score)}
             onToggle={handleScoreToggle}
             addTypes={optionTypes}
             onAdd={handleAddScore}
@@ -3399,7 +3470,7 @@ const Diagnosis: React.FC<{
             <DiagnosisCheckboxList
               title="T Stage"
               groups={buildCheckboxGroups(tOptions)}
-              selected={formData.tStage}
+              selected={orderByType(formData.tStage)}
               onToggle={handleMultiToggle("tStage")}
               loading={diagnosisLoading}
               addTypes={optionTypes}
@@ -3411,7 +3482,7 @@ const Diagnosis: React.FC<{
             <DiagnosisCheckboxList
               title="N Stage"
               groups={buildCheckboxGroups(nOptions)}
-              selected={formData.nStage}
+              selected={orderByType(formData.nStage)}
               onToggle={handleMultiToggle("nStage")}
               loading={diagnosisLoading}
               addTypes={optionTypes}
@@ -3423,7 +3494,7 @@ const Diagnosis: React.FC<{
             <DiagnosisCheckboxList
               title="M Stage"
               groups={buildCheckboxGroups(mOptions)}
-              selected={formData.mStage}
+              selected={orderByType(formData.mStage)}
               onToggle={handleMultiToggle("mStage")}
               loading={diagnosisLoading}
               addTypes={optionTypes}
