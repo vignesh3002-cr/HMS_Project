@@ -62,6 +62,7 @@ const hasDraftContent = (raw: string): boolean => {
       "diagnosisDate",
       "progressionDate",
       "relapseDate",
+      "secondPrimaryDate",
       "preDiagnosis",
       "diseaseStatus",
       "survivor",
@@ -1373,6 +1374,7 @@ const Diagnosis: React.FC<{
     diagnosisDate: "",
     progressionDate: "",
     relapseDate: "",
+    secondPrimaryDate: "",
     preDiagnosis: "",
     diseaseStatus: "",
     laterality: [],
@@ -1468,10 +1470,11 @@ const Diagnosis: React.FC<{
     let cancelled = false;
     const hydrate = async () => {
       try {
-        /* This visit's own staging detail (the Diagnosis step reopened in
-           the same visit) seeds everything. Otherwise the latest earlier
-           one only carries the diagnosis / progression / relapse dates -
-           its visit date and notes belong to that earlier visit. */
+         /* This visit's own staging detail (the Diagnosis step reopened in
+            the same visit) seeds everything. Otherwise the latest earlier
+            one only carries the diagnosis / progression / relapse / second
+            primary dates - its visit date and notes belong to that earlier
+            visit. */
         const visitEncounterNo = await resolveVisitEncounterNo();
         const ownStagingId = visitEncounterNo
           ? await findStagingDetailForEncounter(resolvedPatientId, visitEncounterNo)
@@ -1489,6 +1492,7 @@ const Diagnosis: React.FC<{
             diagnosis_date?: string | null;
             progression_date?: string | null;
             relapse_date?: string | null;
+            second_primary_date?: string | null;
             notes?: string | null;
           } | null;
         }>(
@@ -1506,6 +1510,9 @@ const Diagnosis: React.FC<{
             toPickedDateValue(detail.progression_date),
           relapseDate:
             previous.relapseDate || toPickedDateValue(detail.relapse_date),
+          secondPrimaryDate:
+            previous.secondPrimaryDate ||
+            toPickedDateValue(detail.second_primary_date),
           notes: ownVisit ? previous.notes || detail.notes || "" : previous.notes,
         }));
         const visitDateIso = ownVisit
@@ -2850,11 +2857,13 @@ const Diagnosis: React.FC<{
     }
 
     /* Dates are typed or picked as DD-MM-YYYY; reject anything that isn't a
-       real date, and progression / relapse can't precede diagnosis. */
+       real date, and progression / relapse / second primary can't precede
+       diagnosis. */
     const dateFields = [
       { label: "Date of Diagnosis", value: formData.diagnosisDate },
       { label: "Date of Progression", value: formData.progressionDate },
       { label: "Date of Relapse", value: formData.relapseDate },
+      { label: "Date of Second Primary", value: formData.secondPrimaryDate },
     ];
     const invalidDate = dateFields.find(
       (field) => field.value.trim() && !parsePickedDate(field.value.trim())
@@ -2866,6 +2875,7 @@ const Diagnosis: React.FC<{
     const diagnosisDateIso = toIsoDate(formData.diagnosisDate);
     const progressionDateIso = toIsoDate(formData.progressionDate);
     const relapseDateIso = toIsoDate(formData.relapseDate);
+    const secondPrimaryDateIso = toIsoDate(formData.secondPrimaryDate);
     if (diagnosisDateIso) {
       if (progressionDateIso && progressionDateIso < diagnosisDateIso) {
         setDiagnosisError(
@@ -2876,6 +2886,12 @@ const Diagnosis: React.FC<{
       if (relapseDateIso && relapseDateIso < diagnosisDateIso) {
         setDiagnosisError(
           "Date of Relapse cannot be earlier than the Date of Diagnosis."
+        );
+        return;
+      }
+      if (secondPrimaryDateIso && secondPrimaryDateIso < diagnosisDateIso) {
+        setDiagnosisError(
+          "Date of Second Primary cannot be earlier than the Date of Diagnosis."
         );
         return;
       }
@@ -3110,6 +3126,9 @@ const Diagnosis: React.FC<{
           ? { progression_date: progressionDateIso }
           : {}),
         ...(relapseDateIso ? { relapse_date: relapseDateIso } : {}),
+        ...(secondPrimaryDateIso
+          ? { second_primary_date: secondPrimaryDateIso }
+          : {}),
         ...(formData.notes.trim() ? { notes: formData.notes.trim() } : {}),
       };
 
@@ -3296,6 +3315,19 @@ const Diagnosis: React.FC<{
             value={formData.relapseDate}
             onChange={(value) =>
               setFormData((previous) => ({ ...previous, relapseDate: value }))
+            }
+          />
+
+          {/* Date of Second Primary */}
+          <DiagnosisDateField
+            id="secondPrimaryDate"
+            title="Date of Second Primary"
+            value={formData.secondPrimaryDate}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                secondPrimaryDate: value,
+              }))
             }
           />
 

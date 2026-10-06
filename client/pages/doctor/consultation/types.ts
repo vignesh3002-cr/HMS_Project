@@ -25,6 +25,7 @@ export type FormData = {
   diagnosisDate: string;
   progressionDate: string;
   relapseDate: string;
+  secondPrimaryDate: string;
   preDiagnosis: string;
   diseaseStatus: string;
   /* Laterality / Body Site / Grade / Score are grouped per selected cancer
