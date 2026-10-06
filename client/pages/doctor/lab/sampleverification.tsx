@@ -10,6 +10,8 @@ import {
   LabOrderItemRecord,
 } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
+import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 
 function calculateAge(dobString?: string): number {
   if (!dobString) return 30;
@@ -680,6 +682,11 @@ export default function SampleVerification() {
                         : "Check if the sample transport conditions are appropriate"}
                     </p>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <LabNotificationBell size="md" />
+                  <UserProfileDropdown userName={displayName} userSubtext={displayRole} onLogout={handleLogout} profilePath="/lab/profile" hideNotifications />
                 </div>
               </div>
             </header>
@@ -2626,7 +2633,20 @@ export default function SampleVerification() {
           /* =========================================================================
              VIEW 2: SAMPLES QUEUE TABLE (Standard Table & Metrics View)
              ========================================================================= */
-          <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
+          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+            <header className="h-20 bg-white border-b border-slate-200/80 px-8 flex items-center justify-between sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">Samples Verification</h1>
+                  <p className="text-xs text-slate-500">Accessioning, specimen integrity check & barcode matching</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <LabNotificationBell size="md" />
+                <UserProfileDropdown userName={displayName} userSubtext={displayRole} onLogout={handleLogout} profilePath="/lab/profile" hideNotifications />
+              </div>
+            </header>
+            <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
             {/* StatCardsRow */}
             <section
               className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
@@ -3161,7 +3181,8 @@ export default function SampleVerification() {
               {/* END: TableContent */}
             </section>
           </main>
-        )}
+        </div>
+      )}
       </div>
     </div>
   );

@@ -9,7 +9,6 @@ import {
   savePatientDocument,
   deletePatientDocument,
   downloadDocument,
-  downloadAllDocuments,
 } from "../../../utils/patientDocuments";
 import { downloadPatientDocumentsDocx, downloadDocumentAsDocx } from "../../../utils/patientDocumentsDocx";
 import * as pdfjsLib from 'pdfjs-dist';
@@ -972,9 +971,7 @@ const NotesDocumentsTab: React.FC<{
     setTimeout(() => setEditSuccessMsg(null), 3000);
   };
 
-  const handleSave = () => {
-    console.log("Save Notes & Changes clicked");
-  };
+  
 
   /* =========================================================
      CONTENT (TAB NAVIGATION + TWO COLUMN LAYOUT)
@@ -2183,7 +2180,7 @@ const NotesDocumentsTab: React.FC<{
             SCROLLABLE CONTENT
         ======================================================== */}
         <main className="relative flex-1 overflow-y-auto bg-slate-50">
-          <div className="mx-auto max-w-7xl px-6 pb-28 pt-6">
+          <div className="mx-auto max-w-7xl px-6 pb-6 pt-6">
             {content}
           </div>
         </main>
@@ -2199,17 +2196,6 @@ const NotesDocumentsTab: React.FC<{
 
           <div className="flex space-x-3">
 
-            {/* Download All */}
-            <button
-              type="button"
-              disabled={documents.length === 0}
-              onClick={() => downloadAllDocuments(documents)}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <i className="fa-solid fa-download mr-2" />
-              Download All
-            </button>
-
             {/* Export */}
             <button
               type="button"
@@ -2219,15 +2205,6 @@ const NotesDocumentsTab: React.FC<{
             >
               <i className="fa-solid fa-file-export mr-2" />
               {isExportingDocs ? "Exporting…" : "Export Documents"}
-            </button>
-
-            {/* Save */}
-            <button
-              type="button"
-              onClick={handleSave}
-              className="rounded-md bg-[#0052cc] px-6 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-            >
-              Save Notes & Changes
             </button>
           </div>
         </div>
