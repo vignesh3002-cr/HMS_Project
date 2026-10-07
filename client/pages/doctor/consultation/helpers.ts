@@ -23,6 +23,67 @@ export const parsePickedDate = (value: string) => {
   return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
 };
 
+/* Strict DD-MM-YYYY -> YYYY-MM-DD. Rejects impossible dates such as
+   31-02-2026, which parsePickedDate would roll over into March. */
+export const dmyToIsoStrict = (value: string): string | undefined => {
+  const date = parsePickedDate(value.trim());
+  if (!date) return undefined;
+  const [day, month, year] = value.trim().split("-").map(Number);
+  if (
+    date.getDate() !== day ||
+    date.getMonth() !== month - 1 ||
+    date.getFullYear() !== year
+  ) {
+    return undefined;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+/* Formats a typed/pasted date as DD-MM-YYYY. Digits overflow into the next
+   part ("10102026" -> "10-10-2026"), "/" or "." count as "-", and while
+   typing forward a full day/month gets its "-" added and a separator after
+   a single digit pads it ("1-" -> "01-"). Deleting never re-adds a "-". */
+export const maskDmyInput = (next: string, prev: string) => {
+  const typingForward = next.length > prev.length;
+  const parts: string[] = [""];
+
+  for (const char of next) {
+    const last = parts.length - 1;
+    if (/\d/.test(char)) {
+      if (parts[last].length < (last < 2 ? 2 : 4)) parts[last] += char;
+      else if (last < 2) parts.push(char);
+    } else if (/[-/.]/.test(char) && last < 2 && parts[last]) {
+      parts.push("");
+    }
+  }
+
+  if (typingForward) {
+    const last = parts.length - 1;
+    if (/[-/.]$/.test(next) && last > 0 && parts[last] === "") {
+      parts[last - 1] = parts[last - 1].padStart(2, "0");
+    } else if (last < 2 && parts[last].length === 2) {
+      parts.push("");
+    }
+  }
+
+  return parts.join("-");
+};
+
+const todayIso = () => {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+};
+
+/* Validation message for an investigation's Target Date ("" when valid
+   or empty - the field is optional). */
+export const targetDateError = (value: string) => {
+  if (!value.trim()) return "";
+  const iso = dmyToIsoStrict(value);
+  if (!iso) return "Use DD-MM-YYYY";
+  if (iso < todayIso()) return "Date is in the past";
+  return "";
+};
+
 export const parseDateValue = (value?: string | null): Date | null => {
   if (!value) return null;
   const trimmed = value.trim();
