@@ -1144,7 +1144,7 @@ export default function PatientRegistrationForm({
                 />
               </div>
               <div>
-                <label className={labelCls}>Patient type <Req /></label>
+                <label className={labelCls}>Patient Joining type <Req /></label>
                 <FormDropdown
                   className={inputCls}
                   options={PATIENT_TYPE_OPTIONS}
@@ -1242,7 +1242,7 @@ export default function PatientRegistrationForm({
                     {needsReferralBranchName(formData.referral_type) && (
                       <div className="col-span-2">
                         <label className={labelCls}>
-                          Referral branch name <Req />
+                          Referral Hospital name <Req />
                         </label>
                         <input
                           type="text"

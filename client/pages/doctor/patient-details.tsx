@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import {
+  Activity,
+  Droplet,
+  Gauge,
+  HeartPulse,
+  PersonStanding,
+  Ruler,
+  Thermometer,
+  Weight,
+} from "lucide-react";
 import API from "../../api/axios";
 import { patientApi, type PatientRecord } from "../../api/patient.api";
 import {
@@ -65,9 +75,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     resolvedPatientId,
     selectedBranchId
   );
-  const { vitalEntries, scopeHint } = latestVitals;
-  const summaryHeaderVitals = (label: string) =>
-    vitalEntries.find(([key]) => key === label)?.[1] || "—";
+  const { scopeHint } = latestVitals;
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
 
@@ -272,56 +280,68 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 </div>
 </div>
-<div className="flex items-center">
-<div className="flex space-x-8 px-8 border-r border-[#e2e8f0]">
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("HEIGHT")}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("BP")}</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("WEIGHT")}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("PULSE")}</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("BSA")}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("TEMP")}</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("BMI")}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">{summaryHeaderVitals("SPO2")}</div>
-</div>
-</div>
-</div>
-<div className="pl-8">
+<div className="flex items-center gap-8">
+{(() => {
+  const v = latestVitals.vitals;
+  const TONE: Record<string, string> = {
+    danger: "bg-[#FBEAE9] text-[#B5433E]",
+    warning: "bg-[#FCF1DD] text-[#A8720F]",
+    success: "bg-[#E7F4EE] text-[#2E7D5B]",
+    purple: "bg-[#EEECF7] text-[#5A4E9C]",
+    accent: "bg-[#E6F1F5] text-[#1D6E8C]",
+  };
+  const SEV_BADGE: Record<string, string> = {
+    normal: "bg-green-50 text-green-600",
+    moderate: "bg-orange-50 text-orange-500",
+    critical: "bg-red-50 text-red-600",
+  };
+  const SEV_TEXT: Record<string, string> = {
+    normal: "text-green-700",
+    moderate: "text-orange-600",
+    critical: "text-red-600",
+  };
+  const band = (val: number, nL: number, nH: number, mL: number, mH: number): string =>
+    val >= nL && val <= nH ? "normal" : val >= mL && val <= mH ? "moderate" : "critical";
+  const bp = v.bpSystolic != null && v.bpDiastolic != null ? `${v.bpSystolic}/${v.bpDiastolic}` : null;
+  const bpSev = (() => {
+    if (!bp) return undefined;
+    const [s, d] = bp.split("/").map(Number);
+    const lvls = [...(!isNaN(s) ? [band(s, 90, 119, 120, 139)] : []), ...(!isNaN(d) ? [band(d, 60, 79, 80, 89)] : [])];
+    return lvls.includes("critical") ? "critical" : lvls.includes("moderate") ? "moderate" : lvls[0];
+  })();
+  type Tile = { key: string; label: string; Icon: React.ElementType; tone: string; value: string; sev?: string };
+  const tiles: Tile[] = [
+    { key: "height", label: "Height",         Icon: Ruler,         tone: "accent",  value: v.height != null ? `${v.height} cm` : "—" },
+    { key: "weight", label: "Weight",         Icon: Weight,        tone: "accent",  value: v.weight != null ? `${v.weight} kg` : "—" },
+    { key: "bsa",    label: "BSA",            Icon: PersonStanding,tone: "accent",  value: v.bsa != null ? `${v.bsa} m²` : "—" },
+    { key: "bmi",    label: "BMI",            Icon: Gauge,         tone: "accent",  value: v.bmi != null ? String(v.bmi) : "—", sev: v.bmi != null ? band(v.bmi, 18.5, 24.9, 17, 29.9) : undefined },
+    { key: "bp",     label: "Blood Pressure", Icon: Droplet,       tone: "danger",  value: bp ? `${bp} mmHg` : "—", sev: bpSev },
+    { key: "pulse",  label: "Pulse",          Icon: HeartPulse,    tone: "danger",  value: v.pulse != null ? `${v.pulse} bpm` : "—", sev: v.pulse != null ? band(v.pulse, 60, 100, 101, 110) : undefined },
+    { key: "temp",   label: "Temperature",    Icon: Thermometer,   tone: "warning", value: v.temp != null ? `${v.temp} °C` : "—", sev: v.temp != null ? (v.temp >= 38 || v.temp < 35.5 ? "critical" : v.temp > 37.2 || v.temp < 36.1 ? "moderate" : "normal") : undefined },
+    { key: "spo2",   label: "SPO2",           Icon: Activity,      tone: "success", value: v.spo2 != null ? `${v.spo2}%` : "—", sev: v.spo2 != null ? (v.spo2 < 90 ? "critical" : v.spo2 < 95 ? "moderate" : "normal") : undefined },
+    ...(v.painScore != null ? [{ key: "pain", label: "Pain Score", Icon: Activity, tone: "purple", value: `${v.painScore}/10`, sev: v.painScore >= 7 ? "critical" : v.painScore >= 4 ? "moderate" : "normal" } as Tile] : []),
+  ];
+  return (
+    <div className="grid grid-cols-3 gap-x-6 gap-y-4 border-r border-[#e2e8f0] pr-8">
+      {tiles.map((t) => (
+        <div key={t.key} className="flex items-start gap-2">
+          <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${t.sev ? SEV_BADGE[t.sev] : TONE[t.tone]}`}>
+            <t.Icon className="h-3.5 w-3.5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] text-slate-500 mb-0.5">{t.label}</p>
+            <p className={`text-xs font-semibold truncate ${t.sev ? SEV_TEXT[t.sev] : "text-slate-900"}`}>{t.value}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+})()}
 <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
 <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {orderIntent || "—"}</div>
 <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{orderTherapy || "—"}</div>
 <div className="flex items-center text-xs text-[#64748b] font-medium">
 <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
-                    </div>
 </div>
 </div>
 </div>

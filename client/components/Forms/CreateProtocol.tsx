@@ -48,7 +48,7 @@ const ptGridHead =
 const ptGridRow =
   "grid items-center gap-2.5 px-4 py-3 border-b border-[#edf1f5] last:border-0 hover:bg-[#f8f9fb] transition-colors";
 const ptInput =
-  "w-full h-[34px] px-2.5 bg-transparent border border-transparent rounded-lg text-[12.5px] text-[#17212e] placeholder:text-[#aeb8c3] transition-all duration-150 hover:border-[#dde4ec] hover:bg-[#f8fafc] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 focus:outline-none disabled:bg-transparent disabled:text-[#5b6b7c] disabled:cursor-not-allowed";
+  "w-full h-[34px] px-2.5 bg-white border border-[#dde4ec] rounded-lg text-[12.5px] text-[#17212e] placeholder:text-[#aeb8c3] transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f8fafc] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 focus:outline-none disabled:bg-[#f1f3f5] disabled:text-[#5b6b7c] disabled:cursor-not-allowed";
 
 function ProtocolGridTable({
   columns,
@@ -535,8 +535,8 @@ export default function CreateProtocol() {
   const getBrandDropdownOptions = (
     rows: Array<{ brandName?: string }>,
     current: string | undefined,
-    meds: MedicineOption[] = [],
-    selectedMedId?: string,
+    _meds: MedicineOption[] = [],
+    _selectedMedId?: string,
   ) => {
     const seen = new Set<string>();
     const opts: string[] = [];
@@ -549,15 +549,6 @@ export default function CreateProtocol() {
     };
     push(current);
     rows.forEach((r) => push(r.brandName));
-    meds.forEach((m) => {
-      push(m.medicine_name);
-      push(m.generic_name);
-    });
-    const selectedMed = meds.find((m) => m.medicine_id === selectedMedId);
-    if (selectedMed) {
-      push(selectedMed.medicine_name);
-      push(selectedMed.generic_name);
-    }
     return stripOthersStr(opts);
   };
 
@@ -566,6 +557,23 @@ export default function CreateProtocol() {
     "20", "25", "30", "40", "50", "60", "75", "80", "100", "120", "125", "140",
     "150", "160", "200", "210", "250", "300", "350", "400", "450", "500", "600",
     "750", "800", "1000", "1200", "1400", "1500", "2000", "2500", "3000", "3500", "4000",
+  ];
+
+  const PROTOCOL_FREQUENCY_OPTIONS = [
+    "0-0-1", "0-1-0", "1-0-0", "0-1-1", "1-0-1", "1-1-0", "1-1-1",
+    "0-0-2", "0-2-0", "2-0-0", "0-1-2", "0-2-1", "1-0-2", "1-2-0",
+    "2-0-1", "2-1-0", "1-1-2", "1-2-1", "2-1-1", "2-2-1", "2-1-2",
+    "1-2-2", "2-2-2", "0-0-0",
+    "1-1-1-1", "1-0-0-1", "1-0-1-0", "1-1-0-1", "1-1-1-0", "0-1-1-1",
+    "1-0-1-1", "1-1-0-0", "0-1-1-0", "2-0-0-2", "2-0-2-0", "2-2-2-2",
+  ];
+
+  const PROTOCOL_INSTRUCTION_OPTIONS = [
+    "Before Food", "After Food", "With Food", "Without Food",
+    "Before Breakfast", "After Breakfast", "Before Lunch", "After Lunch",
+    "Before Dinner", "After Dinner", "At Bedtime", "Early Morning",
+    "Morning", "Afternoon", "Evening", "Night",
+    "Empty Stomach", "Between Meals", "With or After Food",
   ];
 
   // Shared DOSE dropdown options: current value + doses used in the section +
@@ -2655,6 +2663,7 @@ export default function CreateProtocol() {
                     onAdd={addPost}
                     disabled={disabled}
                     addClassName="text-[#c0374a] hover:bg-[#fbecef]"
+                    boxClassName="min-w-[1450px] border border-[#edf1f5] rounded-xl bg-white"
                     rows={post.map((row, idx) => {
                       const isDurationFilledWithNumber = /^\d+(\.\d+)?$/.test(String(row.duration ?? "").trim());
                       return [
@@ -2744,18 +2753,20 @@ export default function CreateProtocol() {
                         placeholder="mg"
                         disabled={disabled}
                       />,
-                      <input
+                      <ProtocolSelect
                         key="fr"
-                        type="text"
+                        options={Array.from(new Set([...PROTOCOL_FREQUENCY_OPTIONS, row.frequency].filter(Boolean)))}
                         value={row.frequency}
-                        onChange={(e) => {
+                        allowCreate
+                        onValueChange={(v) => {
                           const n = [...post];
-                          n[idx].frequency = e.target.value;
+                          n[idx].frequency = v;
                           setPost(n);
                         }}
-                        className={ptInput}
-                        placeholder="1-0-1"
+                        placeholder="Select frequency"
+                        emptyMessage="No frequency options"
                         disabled={disabled}
+                        className="h-8"
                       />,
                       <input
                         key="i"
@@ -2770,18 +2781,20 @@ export default function CreateProtocol() {
                         placeholder="Enter notes"
                         disabled={disabled}
                       />,
-                      <input
+                      <ProtocolSelect
                         key="dur"
-                        type="text"
+                        options={Array.from(new Set([...PROTOCOL_INSTRUCTION_OPTIONS, row.duration].filter(Boolean)))}
                         value={row.duration}
-                        onChange={(e) => {
+                        allowCreate
+                        onValueChange={(v) => {
                           const n = [...post];
-                          n[idx].duration = e.target.value;
+                          n[idx].duration = v;
                           setPost(n);
                         }}
-                        className={ptInput}
-                        placeholder="Duration"
+                        placeholder="Select duration"
+                        emptyMessage="No duration options"
                         disabled={disabled}
+                        className="h-8"
                       />,
                       <ProtocolSelect
                         key="days"
