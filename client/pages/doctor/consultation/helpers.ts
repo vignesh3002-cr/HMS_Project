@@ -589,6 +589,22 @@ export const findStagingDetailForEncounter = async (
   return response.data.data?.[0]?.staging_detail_id ?? "";
 };
 
+/* The patient's latest staging detail on record (newest visit first), or
+   "". Asks the server - unlike resolveStagingDetailId, which prefers the
+   id this browser saved last. */
+export const findLatestStagingDetailId = async (
+  patientId: string
+): Promise<string> => {
+  if (!patientId) return "";
+  const response = await API.get<{
+    success: boolean;
+    data: { staging_detail_id: string }[];
+  }>("/oncology/staging-details", {
+    params: { patient_id: patientId, page: 1, limit: 1, view: "ids" },
+  });
+  return response.data.data?.[0]?.staging_detail_id ?? "";
+};
+
 /* The Consultation Notes part of an encounter's clinical_notes (the Past
    History section after PAST_HISTORY_MARKER is left out). */
 export const consultationNotesOf = (clinicalNotes?: string | null) => {
