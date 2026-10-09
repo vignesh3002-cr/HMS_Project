@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { jsPDF } from "jspdf";
-import autoTable, { type RowInput, type Styles } from "jspdf-autotable";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import type { Styles } from 'jspdf-autotable';
 import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
