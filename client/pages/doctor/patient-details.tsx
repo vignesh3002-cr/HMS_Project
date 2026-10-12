@@ -48,6 +48,9 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [selectedCycle] = useState(1);
 
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
+  /* Bumped when a tab changes the plan (e.g. a cycle day completed in
+     Administration) so the plan - and every tab reading it - reloads. */
+  const [planVersion, setPlanVersion] = useState(0);
   const [planNotice, setPlanNotice] = useState("");
   const [cycleMedicationsMap, setCycleMedicationsMap] = useState<Record<string, any[]>>({});
   const [patientAllergies, setPatientAllergies] = useState<
@@ -133,7 +136,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId, activeTab, selectedBranchId]);
+  }, [resolvedPatientId, activeTab, selectedBranchId, planVersion]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -401,7 +404,11 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   cycleMedicationsMap={cycleMedicationsMap}
 />
 ) : activeTab === "Administration" ? (
-<AdministrationTab patientId={resolvedPatientId} plan={savedPlan} />
+<AdministrationTab
+  patientId={resolvedPatientId}
+  plan={savedPlan}
+  onPlanChanged={() => setPlanVersion((version) => version + 1)}
+/>
 ) : activeTab === "Discharge" ? (
 <DischargeTab
   patientId={resolvedPatientId}

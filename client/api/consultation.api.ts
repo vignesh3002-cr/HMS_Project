@@ -88,6 +88,26 @@ export interface EncounterReportPayload {
   impression?: string | null;
 }
 
+/* Consultation > Personal History > Immunization details: one row per
+   selected immunization per visit (date + response), related to the
+   encounter. The selected immunization names still live in
+   patient_personal_history.immunization. */
+export interface EncounterImmunizationRecord {
+  encounter_immunization_id: string;
+  encounter_no: string;
+  immunization_code: string | null;
+  immunization_name: string;
+  immunization_date: string | null;
+  response: string | null;
+}
+
+export interface EncounterImmunizationPayload {
+  immunization_name: string;
+  immunization_code?: string | null;
+  immunization_date?: string | null;
+  response?: string | null;
+}
+
 export const consultationApi = {
   // ---------------- Master data ----------------
   getImmunizations: (search?: string) =>
@@ -205,5 +225,22 @@ export const consultationApi = {
   removeMolecularTest: (encounterMolecularTestId: string) =>
     API.delete<{ success: boolean; message: string }>(
       `/consultation/molecular-tests/${encounterMolecularTestId}`,
+    ),
+
+  // ---------------- Encounter immunization details ----------------
+  getEncounterImmunizations: (encounterNo: string) =>
+    API.get<{ success: boolean; data: EncounterImmunizationRecord[] }>(
+      `/consultation/encounters/${encounterNo}/immunizations`,
+    ),
+
+  /* Sends the full set of selected immunizations; rows missing from the
+     list are removed server-side (one bulk sync). */
+  saveEncounterImmunizations: (
+    encounterNo: string,
+    rows: EncounterImmunizationPayload[],
+  ) =>
+    API.put<{ success: boolean; message: string; data: EncounterImmunizationRecord[] }>(
+      `/consultation/encounters/${encounterNo}/immunizations`,
+      { rows },
     ),
 };

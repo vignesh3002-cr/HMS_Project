@@ -2054,26 +2054,6 @@ const Summary: React.FC<{
     }
   };
 
-  const closingCycleDay = () => {
-    const pending = visitOrders.filter(
-      (order) => order.order_status !== "COMPLETED"
-    );
-    const days = (plan?.chemotherapy_plan_items ?? []).map((item) => {
-      const day = Number(item.administration_day ?? item.cycle_day ?? 1);
-      return Number.isFinite(day) && day > 0 ? day : 1;
-    });
-    if (!plan || pending.length === 0 || days.length === 0) return null;
-    const lastDay = Math.max(...days);
-    const closing = pending.find((order) => order.cycle_day >= lastDay);
-    if (!closing) return null;
-    return {
-      cycle: closing.cycle_number,
-      label: cycleDayLabel(closing),
-      closesCourse:
-        (plan.completed_cycles ?? 0) + 1 >= (plan.planned_cycles ?? 0),
-    };
-  };
-
   const handleSubmitSummary = async () => {
     if (submittingSummary) return;
 
@@ -2116,20 +2096,6 @@ const Summary: React.FC<{
         return;
       }
 
-      /* Submitting completes this visit's cycle day order. Say so first
-         when that closes a cycle - or the whole course. */
-      const closing = closingCycleDay();
-      if (
-        closing &&
-        !window.confirm(
-          closing.closesCourse
-            ? `This completes ${closing.label}, the last day of the last cycle. The chemotherapy course will be closed and no more orders can be added to it. Continue?`
-            : `This completes ${closing.label}, the last day of Cycle ${closing.cycle}. Continue?`
-        )
-      ) {
-        return;
-      }
-
       await API.post("/prescriptions", {
         encounter_no: targetEncounterNo,
         ...(plan?.diagnosis_id ? { diagnosis_id: plan.diagnosis_id } : {}),
@@ -2138,8 +2104,11 @@ const Summary: React.FC<{
 
       await saveAdminInstructions();
 
-      /* The visit's cycle day order is now completed (read-only); its
-         last day completes the cycle, the last cycle the course. */
+      /* The visit's cycle day order is sent for administration (read-only).
+         The day - and on its last day the cycle, on the last cycle the
+         course - completes once every medicine is marked Given, Skipped or
+         Cancelled in Patient Details > Administration. A day without any
+         medicine to administer completes right away. */
       let completionNote = "";
       if (plan && !planClosed) {
         try {
@@ -2148,17 +2117,23 @@ const Summary: React.FC<{
             targetEncounterNo
           );
           const result = completion.data.data;
-          const done = (result?.completed_orders ?? []).map(
-            (order) => `Cycle ${order.cycle_number} / Day ${order.cycle_day}`
-          );
-          completionNote = result?.plan_completed
-            ? " The chemotherapy course is completed."
-            : done.length > 0
-              ? ` ${done.join(", ")} completed.`
-              : "";
+          const label = (order: { cycle_number: number; cycle_day: number }) =>
+            `Cycle ${order.cycle_number} / Day ${order.cycle_day}`;
+          const released = (result?.released_orders ?? []).map(label);
+          const done = (result?.completed_orders ?? []).map(label);
+          completionNote = [
+            released.length > 0
+              ? ` ${released.join(", ")} sent for administration - mark each medicine in Patient Details > Administration to complete the day.`
+              : "",
+            result?.plan_completed
+              ? " The chemotherapy course is completed."
+              : done.length > 0
+                ? ` ${done.join(", ")} completed.`
+                : "",
+          ].join("");
         } catch (completionError: any) {
-          console.error("Failed to complete the cycle day order:", completionError);
-          completionNote = ` The cycle day could not be marked completed: ${
+          console.error("Failed to submit the cycle day order:", completionError);
+          completionNote = ` The cycle day could not be sent for administration: ${
             completionError?.response?.data?.message ??
             completionError?.message ??
             "please try again"

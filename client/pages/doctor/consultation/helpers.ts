@@ -724,8 +724,9 @@ export const createChemotherapyPlanForPatient = async (
       localStorage.getItem(`hms_planned_start_date_${patientId}`)
   );
 
-  /* Saves planItems as the target cycle day's order - skipped when that
-     day was already completed (its consultation was submitted). */
+  /* Saves planItems as the target cycle day's order - skipped once that
+     day's consultation was submitted (sent for administration, or
+     completed): its order is read-only from then on. */
   const saveOrder = async (
     planId: string,
     orders: ChemoPlanOrderHeader[] | null | undefined
@@ -737,7 +738,9 @@ export const createChemotherapyPlanForPatient = async (
       (order) =>
         order.cycle_number === target.cycle && order.cycle_day === target.day
     );
-    if (saved?.order_status === "COMPLETED") return undefined;
+    if (saved?.order_status === "COMPLETED" || saved?.order_status === "IN_ADMINISTRATION") {
+      return undefined;
+    }
     try {
       await chemotherapyApi.savePlanOrder(planId, target.cycle, target.day, {
         items: planItems,

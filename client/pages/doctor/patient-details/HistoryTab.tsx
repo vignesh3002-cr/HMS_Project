@@ -1321,7 +1321,10 @@ const HistoryTab: React.FC<{
           const dayAdmin = (detail?.chemotherapy_administration ?? existing?.chemotherapy_administration ?? []).find(
             (adm: any) => Number(adm.administration_day) === dNum
           );
-          if (dayAdmin && (dayAdmin.administration_status === "Completed" || dayAdmin.infusion_completed)) {
+          if (
+            dayAdmin &&
+            (["Completed", "GIVEN"].includes(dayAdmin.administration_status) || dayAdmin.infusion_completed)
+          ) {
             dayCategory = "COMPLETED";
           } else if (currentCycleInfo?.day != null && hasManyDays) {
             if (dNum < currentCycleInfo.day) {
