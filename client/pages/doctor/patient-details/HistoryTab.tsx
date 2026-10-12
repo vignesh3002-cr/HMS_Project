@@ -61,6 +61,7 @@ type EncounterReportRow = {
   test_name: string | null;
   result: string | null;
   impression: string | null;
+  lab_test_master: { test_name: string } | null;
 };
 
 type InvestigationResultRow = {
@@ -382,6 +383,7 @@ const HistoryTab: React.FC<{
   const [stagingDetailsLoading, setStagingDetailsLoading] = useState(false);
   const [stagingHistoryOpen, setStagingHistoryOpen] = useState(false);
   const [labReportModalOpen, setLabReportModalOpen] = useState(false);
+  const [reportPage, setReportPage] = useState(0);
   const stagingHistoryScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1715,7 +1717,7 @@ const HistoryTab: React.FC<{
                 </h2>
                 <button
                   type="button"
-                  onClick={() => setLabReportModalOpen(true)}
+                  onClick={() => { setReportPage(0); setLabReportModalOpen(true); }}
                   className="px-4 py-1.5 rounded-lg bg-[#004785] hover:bg-[#003A6B] active:scale-[0.98] text-white text-xs font-semibold transition-all"
                 >
                   View Report
@@ -1735,7 +1737,7 @@ const HistoryTab: React.FC<{
                     {encounterReports.slice(0, 1).map((row) => (
                       <tr key={row.encounter_report_id} className="hover:bg-gray-50/60 transition-colors">
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{fmtHistoryDate(row.report_completed_date ?? "") || "—"}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{row.test_name || "—"}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{row.lab_test_master?.test_name || "—"}</td>
                         <td className="px-4 py-3 text-gray-700">{row.result || "—"}</td>
                         <td className="px-4 py-3 text-gray-600 max-w-[200px]">{row.impression || "—"}</td>
                       </tr>
@@ -2593,7 +2595,7 @@ const HistoryTab: React.FC<{
               </div>
 
               {/* Table */}
-              <div className="overflow-auto max-h-[290px]" style={{ scrollbarWidth: "thin" }}>
+              <div className="overflow-x-auto">
                 {encounterReports.length === 0 ? (
                   <p className="text-sm text-gray-500 py-8 text-center">
                     No lab reports recorded for this patient yet.
@@ -2609,18 +2611,18 @@ const HistoryTab: React.FC<{
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {encounterReports.map((row, idx) => (
+                      {encounterReports.slice(reportPage * 5, reportPage * 5 + 5).map((row, idx) => (
                         <tr
                           key={row.encounter_report_id || idx}
                           className={idx === 0 ? "bg-blue-50/40" : "hover:bg-gray-50/60 transition-colors"}
                         >
                           <td className="px-5 py-3 text-gray-700 whitespace-nowrap">
                             {fmtHistoryDate(row.report_completed_date ?? "") || "—"}
-                            {idx === 0 && (
+                            {reportPage === 0 && idx === 0 && (
                               <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[#004785]">Latest</span>
                             )}
                           </td>
-                          <td className="px-5 py-3 font-medium text-gray-900">{row.test_name || "—"}</td>
+                          <td className="px-5 py-3 font-medium text-gray-900">{row.lab_test_master?.test_name || "—"}</td>
                           <td className="px-5 py-3 text-gray-700 whitespace-nowrap">{row.result || "—"}</td>
                           <td className="px-5 py-3 text-gray-600">{row.impression || "—"}</td>
                         </tr>
@@ -2629,6 +2631,30 @@ const HistoryTab: React.FC<{
                   </table>
                 )}
               </div>
+
+              {/* Pagination — up/down arrows, right-aligned */}
+              {encounterReports.length > 5 && (
+                <div className="flex justify-end items-center gap-2 px-5 py-2 border-t border-gray-100">
+                  {reportPage > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setReportPage((p) => p - 1)}
+                      className="w-7 h-7 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-[#004785] flex items-center justify-center transition-colors shadow-sm"
+                    >
+                      <i className="fa-solid fa-chevron-up text-[11px]" />
+                    </button>
+                  )}
+                  {(reportPage + 1) * 5 < encounterReports.length && (
+                    <button
+                      type="button"
+                      onClick={() => setReportPage((p) => p + 1)}
+                      className="w-7 h-7 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-[#004785] flex items-center justify-center transition-colors shadow-sm"
+                    >
+                      <i className="fa-solid fa-chevron-down text-[11px]" />
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Footer */}
               <div className="px-5 py-3 border-t border-gray-100 bg-[#F7F9FB] flex justify-end">
