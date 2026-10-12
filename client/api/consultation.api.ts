@@ -108,6 +108,27 @@ export interface EncounterImmunizationPayload {
   response?: string | null;
 }
 
+/* Consultation > Past History treatments: one row per selected Treatment
+   Type per visit (date + brief note + treatment response), related to the
+   encounter. */
+export interface EncounterPastTreatmentRecord {
+  encounter_past_treatment_id: string;
+  encounter_no: string;
+  treatment_type_code: string | null;
+  treatment_type: string;
+  treatment_date: string | null;
+  note: string | null;
+  treatment_response: string | null;
+}
+
+export interface EncounterPastTreatmentPayload {
+  treatment_type: string;
+  treatment_type_code?: string | null;
+  treatment_date?: string | null;
+  note?: string | null;
+  treatment_response?: string | null;
+}
+
 export const consultationApi = {
   // ---------------- Master data ----------------
   getImmunizations: (search?: string) =>
@@ -241,6 +262,23 @@ export const consultationApi = {
   ) =>
     API.put<{ success: boolean; message: string; data: EncounterImmunizationRecord[] }>(
       `/consultation/encounters/${encounterNo}/immunizations`,
+      { rows },
+    ),
+
+  // ---------------- Encounter past history treatments ----------------
+  getEncounterPastTreatments: (encounterNo: string) =>
+    API.get<{ success: boolean; data: EncounterPastTreatmentRecord[] }>(
+      `/consultation/encounters/${encounterNo}/past-treatments`,
+    ),
+
+  /* Sends the full set of selected treatment types; rows missing from the
+     list are removed server-side (one bulk sync). */
+  saveEncounterPastTreatments: (
+    encounterNo: string,
+    rows: EncounterPastTreatmentPayload[],
+  ) =>
+    API.put<{ success: boolean; message: string; data: EncounterPastTreatmentRecord[] }>(
+      `/consultation/encounters/${encounterNo}/past-treatments`,
       { rows },
     ),
 };

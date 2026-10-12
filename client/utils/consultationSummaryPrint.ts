@@ -37,12 +37,12 @@ export interface ConsultationSummaryPrintData {
   systemicExamination: { label: string; value: string }[];
   clinicalFindings?: string;
   pastHistory?: string;
-  pastTreatment?: {
+  pastTreatments: {
     type: string;
     date?: string;
     note?: string;
     response?: string;
-  };
+  }[];
   previousReports: { test: string; date?: string; result?: string; impression?: string }[];
   previousReportsText?: string;
   molecularTests: { test: string; date?: string; result?: string; impression?: string }[];
@@ -318,19 +318,21 @@ export const buildConsultationSummaryHtml = (data: ConsultationSummaryPrintData)
       "Past History",
       [
         has(data.pastHistory) ? text(data.pastHistory) : "",
-        data.pastTreatment && has(data.pastTreatment.type)
-          ? subsection(
+        ...data.pastTreatments
+          .filter((treatment) => has(treatment.type))
+          .map((treatment) =>
+            subsection(
               "Previous Treatment",
               fields([
-                { label: "Treatment Type", value: data.pastTreatment.type },
-                { label: "Date", value: data.pastTreatment.date },
+                { label: "Treatment Type", value: treatment.type },
+                { label: "Date", value: treatment.date },
               ]) +
-                (has(data.pastTreatment.note) ? text(data.pastTreatment.note) : "") +
-                (has(data.pastTreatment.response)
-                  ? fields([{ label: "Treatment Response", value: data.pastTreatment.response }])
+                (has(treatment.note) ? text(treatment.note) : "") +
+                (has(treatment.response)
+                  ? fields([{ label: "Treatment Response", value: treatment.response }])
                   : "")
             )
-          : "",
+          ),
       ].join("")
     ),
 

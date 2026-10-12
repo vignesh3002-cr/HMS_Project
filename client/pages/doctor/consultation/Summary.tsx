@@ -22,6 +22,7 @@ import {
   consultationApi,
   type PersonalHistoryItem,
   type EncounterReportRecord,
+  type EncounterPastTreatmentRecord,
 } from "../../../api/consultation.api";
 import {
   labTestMasterApi,
@@ -387,13 +388,9 @@ const Summary: React.FC<{
   const [summaryPerAbdomen, setSummaryPerAbdomen] = useState("");
   const [summaryRespiratory, setSummaryRespiratory] = useState("");
   const [summaryGenExam, setSummaryGenExam] = useState<string[]>([]);
-  const [summaryPastHistoryTreatment, setSummaryPastHistoryTreatment] =
-    useState<{
-      type: string;
-      date: string;
-      note: string;
-      response: string;
-    } | null>(null);
+  const [summaryPastTreatments, setSummaryPastTreatments] = useState<
+    EncounterPastTreatmentRecord[]
+  >([]);
   const [summaryPreviousReports, setSummaryPreviousReports] = useState("");
   const [summaryImmunization, setSummaryImmunization] = useState<
     PersonalHistoryItem[]
@@ -541,21 +538,6 @@ const Summary: React.FC<{
             ),
           ].filter(Boolean)
         );
-        setSummaryPastHistoryTreatment(
-          enc?.past_history_treatment_type ||
-            enc?.past_history_treatment_date ||
-            enc?.past_history_treatment_note ||
-            enc?.past_history_treatment_response
-            ? {
-                type: enc?.past_history_treatment_type ?? "",
-                date: enc?.past_history_treatment_date
-                  ? enc.past_history_treatment_date.slice(0, 10)
-                  : "",
-                note: enc?.past_history_treatment_note ?? "",
-                response: enc?.past_history_treatment_response ?? "",
-              }
-            : null
-        );
         setSummaryPreviousReports(enc?.previous_reports ?? "");
         setResolvedSummaryEncounterNo(enc?.encounter_no ?? "");
         setEncounterCheckIn(enc?.encounter_ts ?? enc?.created_at ?? "");
@@ -585,6 +567,15 @@ const Summary: React.FC<{
       })
       .catch((error) =>
         console.error("Failed to load summary personal history:", error)
+      );
+
+    consultationApi
+      .getEncounterPastTreatments(targetEncounterNo)
+      .then((response) => {
+        if (!cancelled) setSummaryPastTreatments(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load summary past treatments:", error)
       );
 
     setSummaryReportsLoading(true);
@@ -2543,49 +2534,56 @@ const Summary: React.FC<{
           {/* =================================================
               PAST HISTORY TREATMENT + PREVIOUS REPORTS
           ================================================== */}
-          {(summaryPastHistoryTreatment || summaryPreviousReports) && (
+          {(summaryPastTreatments.length > 0 || summaryPreviousReports) && (
             <section>
-              {summaryPastHistoryTreatment && (
+              {summaryPastTreatments.length > 0 && (
                 <>
                   <h3 className="mb-4 text-lg font-medium text-indigo-900">
                     Past History Treatment
                   </h3>
 
-                  <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Treatment Type
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {summaryPastHistoryTreatment.type || "Not recorded"}
-                      </p>
-                    </div>
+                  {summaryPastTreatments.map((treatment) => (
+                    <div
+                      key={treatment.encounter_past_treatment_id}
+                      className="mb-6 grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3"
+                    >
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Treatment Type
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {treatment.treatment_type || "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">Date</p>
-                      <p className="text-sm text-slate-500">
-                        {summaryPastHistoryTreatment.date || "Not recorded"}
-                      </p>
-                    </div>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">Date</p>
+                        <p className="text-sm text-slate-500">
+                          {treatment.treatment_date
+                            ? treatment.treatment_date.slice(0, 10)
+                            : "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Brief Note
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {summaryPastHistoryTreatment.note || "Not recorded"}
-                      </p>
-                    </div>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Brief Note
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {treatment.note || "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Treatment Response
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {summaryPastHistoryTreatment.response || "Not recorded"}
-                      </p>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Treatment Response
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {treatment.treatment_response || "Not recorded"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ))}
                 </>
               )}
 
