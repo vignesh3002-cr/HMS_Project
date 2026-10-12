@@ -266,7 +266,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="flex-1 overflow-y-auto relative">
 <div className="p-8 max-w-[1400px] mx-auto pb-32">
 {/* BEGIN: Patient Header Card */}
-<div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
+<div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 <div className="flex items-center">
 <img alt={patientName} className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src={patientPhoto}/>
 <div className="ml-6">
@@ -350,7 +350,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* END: Patient Header Card */}
 {/* BEGIN: Alerts Banner */}
 <div className="flex items-center justify-between text-sm mb-8 border-b border-[#e2e8f0] pb-4">
-<div className="flex items-center space-x-8">
+<div className="flex items-center space-x-8 md:max-lg:flex-col md:max-lg:items-start md:max-lg:space-x-0 md:max-lg:space-y-2">
 <div className="flex items-center">
 <i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
 <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{recentAllergyNames || "—"}</span>

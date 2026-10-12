@@ -781,7 +781,7 @@ const Consultation: React.FC = () => {
 
                   <section className="flex w-full flex-col gap-5 bg-white p-5">
 
-                    <div className="flex w-full items-center justify-between gap-4">
+                    <div className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-4 lg:flex-nowrap">
 
                       <div className="relative shrink-0">
                         <img
@@ -897,7 +897,7 @@ const Consultation: React.FC = () => {
                           Same tile style as the admin-side PatientVitalsPanel:
                           pastel circular icon, muted label, bold reading. */}
 
-                      <div className="grid grid-cols-5 gap-x-6 gap-y-4">
+                      <div className="grid w-full grid-cols-3 gap-x-4 gap-y-4 lg:w-auto lg:grid-cols-5 lg:gap-x-6">
 
                         {measurementTiles.map((tile) => {
                           const Icon = tile.icon;

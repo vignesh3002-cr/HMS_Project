@@ -559,7 +559,7 @@ export default function LabOrders() {
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {/* Progress banner */}
               <div className={`p-4 rounded-xl border ${selectedOrder.completionPct === 100 ? "bg-emerald-50/70 border-emerald-200" : selectedOrder.completionPct > 0 ? "bg-amber-50/70 border-amber-200" : "bg-slate-50 border-slate-200"}`}>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 md:max-lg:flex-wrap md:max-lg:gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Completion</span>
                   <span className={`text-sm font-extrabold ${selectedOrder.completionPct === 100 ? "text-emerald-700" : selectedOrder.completionPct > 0 ? "text-amber-700" : "text-slate-600"}`}>{selectedOrder.completedTests} of {selectedOrder.totalTests} Tests ({selectedOrder.completionPct}%)</span>
                 </div>
