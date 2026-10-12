@@ -943,16 +943,31 @@ const Summary: React.FC<{
     };
   }, [dischargeProtocolId]);
 
-  /* This visit's drugs: the cycle day order(s) saved in this encounter,
-     else the plan's current order, else its baseline (a plan saved before
-     cycle day orders). A closed course orders nothing more. */
+  /* This visit's drugs: only the current cycle day - of the orders saved
+     in this encounter, the plan's current order, else the latest still
+     open day, else the latest day (completed days are left out) - else the
+     plan's current order, else its baseline (a plan saved before cycle day
+     orders). A closed course orders nothing more. */
   const planClosed = isChemoPlanClosed(plan);
-  const visitOrders: SummaryPlanOrder[] =
-    encounterOrders.length > 0
-      ? encounterOrders
-      : !planClosed && plan?.current_order
-        ? [plan.current_order]
-        : [];
+  const currentEncounterOrder: SummaryPlanOrder | undefined = (() => {
+    if (encounterOrders.length === 0) return undefined;
+    const current = encounterOrders.find(
+      (order) => order.plan_order_id === plan?.current_order?.plan_order_id
+    );
+    if (current) return current;
+    const latestFirst = [...encounterOrders].sort(
+      (a, b) => b.cycle_number - a.cycle_number || b.cycle_day - a.cycle_day
+    );
+    return (
+      latestFirst.find((order) => order.order_status !== "COMPLETED") ??
+      latestFirst[0]
+    );
+  })();
+  const visitOrders: SummaryPlanOrder[] = currentEncounterOrder
+    ? [currentEncounterOrder]
+    : !planClosed && plan?.current_order
+      ? [plan.current_order]
+      : [];
   const planItems: SummaryPlanItem[] =
     visitOrders.length > 0
       ? visitOrders.flatMap((order) => order.chemotherapy_plan_items ?? [])
@@ -1166,9 +1181,19 @@ const Summary: React.FC<{
   const admissionDate =
     dateOnlyDMY(appointmentDate) || (encounterCheckIn ? formatDateDMY(encounterCheckIn) : "");
 
-  /* Pharmacy Slip: the visit's slip items, else (no slip yet) the cycle
-     day order's medicines with only their name and type. */
-  const slipItems = pharmacySlips.flatMap((slip) => slip.pharmacy_slip_item ?? []);
+  /* Pharmacy Slip: the current cycle day's slip items, else (no slip yet)
+     the cycle day order's medicines with only their name and type. */
+  const slipItems = pharmacySlips
+    .filter((slip) =>
+      visitOrders.length === 0 ||
+      visitOrders.some((order) =>
+        slip.plan_order_id
+          ? slip.plan_order_id === order.plan_order_id
+          : slip.cycle_number === order.cycle_number &&
+            slip.cycle_day === order.cycle_day
+      )
+    )
+    .flatMap((slip) => slip.pharmacy_slip_item ?? []);
   const pharmacySlipRows: PharmacySlipRow[] =
     slipItems.length > 0
       ? slipItems.map((item) => ({
