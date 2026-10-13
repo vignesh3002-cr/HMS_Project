@@ -254,7 +254,17 @@ const Consultation: React.FC = () => {
   const [labTestsError, setLabTestsError] = useState("");
 
   const [showLabReview, setShowLabReview] = useState(false);
-  const [activeStep, setActiveStep] = useState("CONSULTATION");
+  // The inpatient entry ("Open consultation") can open straight on a
+  // directly-accessible step; anything else starts at CONSULTATION.
+  const entryState = useLocation().state as ConsultationState | null;
+  const [activeStep, setActiveStep] = useState(() =>
+    entryState?.initialStep &&
+    ["DISCHARGE MEDICATION", "CHEMOTHERAPY ORDER", "FOLLOW UP", "DIAGNOSIS"].includes(
+      entryState.initialStep
+    )
+      ? entryState.initialStep
+      : "CONSULTATION"
+  );
   const [tabsHovered, setTabsHovered] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
 
@@ -386,11 +396,22 @@ const Consultation: React.FC = () => {
     }
     let cancelled = false;
     setEncounterError("");
-    findActiveEncounter(
-      patientId,
-      consultationState?.appointmentId,
-      consultationState?.branchId,
-    )
+    // Inpatient entry passes the admission's own encounter -- use exactly
+    // that one; the appointment-based entry resolves as before.
+    const explicitEncounterNo = consultationState?.encounterNo;
+    const encounterLookup = explicitEncounterNo
+      ? encounterApi.getByNumber(explicitEncounterNo).then((response) => {
+          const found = response.data?.data ?? null;
+          return found && found.patient_id === patientId
+            ? { encounter: found, scopeError: undefined }
+            : { encounter: null, scopeError: "This admission's encounter does not belong to this patient." };
+        })
+      : findActiveEncounter(
+          patientId,
+          consultationState?.appointmentId,
+          consultationState?.branchId,
+        );
+    encounterLookup
       .then(({ encounter: current, scopeError }) => {
         if (cancelled) return;
         setEncounter(current);

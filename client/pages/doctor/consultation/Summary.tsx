@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { InpatientDischargeHistory } from "../patient-details/InpatientDischargeHistory";
 import { useLocation, useNavigate } from "react-router-dom";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -2438,6 +2439,9 @@ const Summary: React.FC<{
               </aside>
             </div>
           </section>
+
+          {/* Inpatient stays: discharged + pending (renders nothing otherwise) */}
+          <InpatientDischargeHistory patientId={patientId ?? ""} />
 
           {/* =================================================
               GENERAL EXAMINATION

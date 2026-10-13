@@ -21,8 +21,20 @@ import {
 import {
   createChemotherapyPlanForPatient,
   findActiveEncounter,
-  toIsoDate,
+    toIsoDate,
 } from "./helpers";
+import {
+  ipdApi,
+  PATIENT_STATUS_AT_DISCHARGE_OPTIONS,
+  type AdmissionRecord,
+  type DiseaseStatusRecord,
+  type DischargeTypeRecord,
+} from "../../../api/ipd.api";
+
+/* Dropdown value for "Others" -- the free text typed next to it is saved to
+   the master on Save, so it is offered to everyone next time. */
+const OTHERS_OPTION = "__OTHERS__";
+import { EncounterDocuments } from "../../../components/hms/EncounterDocuments";
 import { ArrowLeftIcon, BellIcon, DoubleArrowIcon, PhoneIcon } from "./icons";
 
 /* ============================================================
@@ -196,6 +208,156 @@ const DischargeMedication: React.FC<{
   const [savingMeds, setSavingMeds] = useState(false);
   const [medsError, setMedsError] = useState("");
   const [medsLoading, setMedsLoading] = useState(false);
+
+  /* ----------------------------------------------------------------
+   * Inpatient Discharge details -- shown only when this consultation's
+   * encounter is an inpatient stay: encounter.encounter_type = 'IPD' and an
+   * ADMITTED admission whose encounter_no is this encounter. The doctor
+   * saves the details on the admission (patient stays admitted); an admin
+   * confirms the discharge later. An OPD consultation never sees this.
+   * ---------------------------------------------------------------- */
+  const [activeAdmission, setActiveAdmission] = useState<AdmissionRecord | null>(null);
+  const [admissionChecked, setAdmissionChecked] = useState(false);
+  const [diseaseStatusOptions, setDiseaseStatusOptions] = useState<DiseaseStatusRecord[]>([]);
+  const [dischargeTypeOptions, setDischargeTypeOptions] = useState<DischargeTypeRecord[]>([]);
+  const [otherDischargeType, setOtherDischargeType] = useState("");
+  const [otherDiseaseStatus, setOtherDiseaseStatus] = useState("");
+  const [ipdDischargeType, setIpdDischargeType] = useState("RECOVERED");
+  const [ipdPatientStatus, setIpdPatientStatus] = useState("");
+  const [ipdDiseaseStatus, setIpdDiseaseStatus] = useState("");
+  const [ipdDischargeSummary, setIpdDischargeSummary] = useState("");
+  const [ipdDischargeAdvice, setIpdDischargeAdvice] = useState("");
+  const [ipdReviewDate, setIpdReviewDate] = useState("");
+  const [ipdDischargeError, setIpdDischargeError] = useState("");
+  const [ipdDischargeSubmitting, setIpdDischargeSubmitting] = useState(false);
+  const [ipdDischargeDone, setIpdDischargeDone] = useState(false);
+
+  /* Fills the card from what is saved on the admission. */
+  const applySavedDischargeDetails = (admission: AdmissionRecord) => {
+    setIpdDischargeType(admission.discharge_type || "RECOVERED");
+    setIpdPatientStatus(admission.patient_status_at_discharge || "");
+    setIpdDiseaseStatus(admission.discharge_disease_status || "");
+    setIpdDischargeSummary(admission.discharge_summary || "");
+    setIpdDischargeAdvice(admission.discharge_advice || "");
+    setIpdReviewDate(admission.review_date ? String(admission.review_date).slice(0, 10) : "");
+    setIpdDischargeDone(Boolean(admission.discharge_details_at));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setActiveAdmission(null);
+    setAdmissionChecked(false);
+
+    const checkInpatientEncounter = async (): Promise<AdmissionRecord | null> => {
+      if (!resolvedPatientId) return null;
+      const encNo = await resolveEncounterNo();
+      if (!encNo) return null;
+      const encounterResponse = await encounterApi.getByNumber(encNo);
+      if (encounterResponse.data?.data?.encounter_type !== "Inpatient (IPD)") return null;
+      const admissionsResponse = await ipdApi.getAll({
+        patientId: resolvedPatientId,
+        status: "ADMITTED",
+        limit: 10,
+      });
+      return (
+        (admissionsResponse.data?.data?.admissions ?? []).find(
+          (a) => a.encounter_no === encNo
+        ) ?? null
+      );
+    };
+
+    checkInpatientEncounter()
+      .catch((error) => {
+        console.error("Inpatient encounter check failed:", error);
+        return null;
+      })
+      .then((admission) => {
+        if (cancelled) return;
+        setActiveAdmission(admission);
+        setAdmissionChecked(true);
+        if (!admission) return;
+        applySavedDischargeDetails(admission);
+        ipdApi
+          .listDiseaseStatuses()
+          .then((res) => {
+            if (!cancelled) setDiseaseStatusOptions(res.data?.data || []);
+          })
+          .catch(() => {
+            // Non-fatal -- the dropdown just shows no options.
+          });
+        ipdApi
+          .listDischargeTypes()
+          .then((res) => {
+            if (!cancelled) setDischargeTypeOptions(res.data?.data || []);
+          })
+          .catch(() => {
+            // Non-fatal -- the dropdown shows no options.
+          });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedPatientId, encounterNo]);
+
+  /* Saves the details on the admission. Does NOT discharge -- the patient
+     stays admitted until an admin confirms. Can be saved again until then.
+     Times are stamped by the server (saved-at now, discharge at confirm). */
+  const handleSaveIpdDischargeDetails = async () => {
+    if (!activeAdmission || ipdDischargeSubmitting) return;
+    setIpdDischargeError("");
+    setIpdDischargeSubmitting(true);
+    const isDeceased = ipdDischargeType === "DECEASED";
+    try {
+      /* "Others": add the typed value to its master first (shared with the
+         whole hospital), then save it like any listed option. */
+      let dischargeType = ipdDischargeType;
+      if (dischargeType === OTHERS_OPTION) {
+        if (!otherDischargeType.trim()) throw new Error("Enter the discharge type");
+        const added = (await ipdApi.addDischargeType(otherDischargeType.trim())).data?.data;
+        if (!added) throw new Error("Could not add the discharge type");
+        setDischargeTypeOptions((prev) =>
+          prev.some((o) => o.type_code === added.type_code) ? prev : [...prev, added]
+        );
+        setIpdDischargeType(added.type_code);
+        setOtherDischargeType("");
+        dischargeType = added.type_code;
+      }
+      let diseaseStatus = ipdDiseaseStatus;
+      if (diseaseStatus === OTHERS_OPTION) {
+        if (!otherDiseaseStatus.trim()) throw new Error("Enter the disease status");
+        const added = (await ipdApi.addDiseaseStatus(otherDiseaseStatus.trim())).data?.data;
+        if (!added) throw new Error("Could not add the disease status");
+        setDiseaseStatusOptions((prev) =>
+          prev.some((o) => o.status_name === added.status_name) ? prev : [...prev, added]
+        );
+        setIpdDiseaseStatus(added.status_name);
+        setOtherDiseaseStatus("");
+        diseaseStatus = added.status_name;
+      }
+      const response = await ipdApi.saveDischargeDetails(activeAdmission.admission_id, {
+        discharge_type: dischargeType,
+        patient_status_at_discharge: isDeceased ? "DECEASED" : ipdPatientStatus || undefined,
+        discharge_disease_status: diseaseStatus || undefined,
+        discharge_summary: ipdDischargeSummary.trim() || undefined,
+        discharge_advice: ipdDischargeAdvice.trim() || undefined,
+      });
+      const saved = response.data?.data;
+      if (saved) {
+        setActiveAdmission(saved);
+        applySavedDischargeDetails(saved);
+      } else {
+        setIpdDischargeDone(true);
+      }
+    } catch (err: any) {
+      setIpdDischargeError(
+        err?.response?.data?.message || err?.message || "Could not save discharge details."
+      );
+    } finally {
+      setIpdDischargeSubmitting(false);
+    }
+  };
   const [medsProtocolId, setMedsProtocolId] = useState("");
   /* The patient's chemo plan, where added discharge rows are saved. */
   const [medsPlanId, setMedsPlanId] = useState("");
@@ -1211,6 +1373,159 @@ if (embedded) {
 
         {!medsLoading && !medsError && renderAddMedicineButton()}
       </div>
+
+      {/* INPATIENT DISCHARGE -- only when this patient currently has an
+          ADMITTED admission. A plain OPD/day-care consultation never sees
+          this card. */}
+      {admissionChecked && activeAdmission && (
+        <div className="mb-6 w-full overflow-hidden rounded-xl border border-amber-200 bg-amber-50/40 shadow-sm">
+          <div className="border-b border-amber-200 bg-amber-50 px-8 py-5">
+            <h3 className="text-base font-bold text-amber-900">
+              Inpatient Discharge -- IP {activeAdmission.ip_number}
+            </h3>
+            <p className="mt-0.5 text-xs text-amber-700">
+              Save the clinical discharge details here. The admin confirms the discharge (bed{" "}
+              {activeAdmission.bed_master?.bed_number || "—"} released); the discharge time is captured automatically.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 p-8 sm:grid-cols-2">
+            {ipdDischargeDone && (
+              <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+                Discharge details saved{activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}. The patient stays admitted until the admin confirms the discharge. You can still edit and save again.
+              </div>
+            )}
+            {(
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Discharge Type *</label>
+                  <SingleSelectDropdown
+                    value={ipdDischargeType}
+                    onValueChange={(val) => {
+                      setIpdDischargeType(val);
+                      if (val === "DECEASED") {
+                        setIpdPatientStatus("DECEASED");
+                        setIpdReviewDate("");
+                      }
+                    }}
+                    options={[
+                      ...dischargeTypeOptions.map((o) => ({ label: o.type_name, value: o.type_code })),
+                      { label: "Others", value: OTHERS_OPTION },
+                    ]}
+                  />
+                  {ipdDischargeType === OTHERS_OPTION && (
+                    <input
+                      type="text"
+                      maxLength={100}
+                      value={otherDischargeType}
+                      onChange={(e) => setOtherDischargeType(e.target.value)}
+                      placeholder="Type the discharge type"
+                      className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Patient Status at Discharge</label>
+                  <SingleSelectDropdown
+                    value={ipdPatientStatus}
+                    onValueChange={setIpdPatientStatus}
+                    disabled={ipdDischargeType === "DECEASED"}
+                    placeholder="Select condition at discharge"
+                    options={PATIENT_STATUS_AT_DISCHARGE_OPTIONS}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Disease Status</label>
+                  <SingleSelectDropdown
+                    value={ipdDiseaseStatus}
+                    onValueChange={setIpdDiseaseStatus}
+                    placeholder="Select disease status"
+                    options={[
+                      ...diseaseStatusOptions.map((o) => ({
+                        label: o.status_name,
+                        value: o.status_name,
+                      })),
+                      { label: "Others", value: OTHERS_OPTION },
+                    ]}
+                  />
+                  {ipdDiseaseStatus === OTHERS_OPTION && (
+                    <input
+                      type="text"
+                      maxLength={100}
+                      value={otherDiseaseStatus}
+                      onChange={(e) => setOtherDiseaseStatus(e.target.value)}
+                      placeholder="Type the disease status"
+                      className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  )}
+                </div>
+
+                {ipdDischargeType !== "DECEASED" && (
+                  <div className="space-y-1.5">
+                    {/* Read-only: set in the Follow Up step (Next Visit Date). */}
+                    <label className="text-xs font-semibold text-gray-700">Next Visit Date (from Follow Up)</label>
+                    <div className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                      {ipdReviewDate
+                        ? new Date(ipdReviewDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                        : "Not set -- add it in the Follow Up step"}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-semibold text-gray-700">Discharge Summary / Notes</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Clinical discharge summary for the medical record..."
+                    value={ipdDischargeSummary}
+                    onChange={(e) => setIpdDischargeSummary(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-semibold text-gray-700">Discharge Advice</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Diet, activity, wound care, when to come back..."
+                    value={ipdDischargeAdvice}
+                    onChange={(e) => setIpdDischargeAdvice(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+
+                {/* Attachments -- biopsy reports, discharge documents; scoped to
+                    this stay (IPD encounter), so they also show on the
+                    Admission view and the patient Notes & Documents tab. */}
+                <div className="sm:col-span-2">
+                  <EncounterDocuments
+                    encounterNo={activeAdmission.encounter_no}
+                    patientId={activeAdmission.patient_id}
+                    title="Attachments"
+                  />
+                </div>
+
+                {ipdDischargeError && (
+                  <div className="sm:col-span-2 text-sm font-medium text-red-600">{ipdDischargeError}</div>
+                )}
+
+                <div className="sm:col-span-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveIpdDischargeDetails}
+                    disabled={ipdDischargeSubmitting}
+                    className="rounded-md bg-amber-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {ipdDischargeSubmitting ? "Saving..." : "Save Discharge Details"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* FOOTER ACTION */}
       <div className="mb-8 flex w-full flex-col items-end gap-2">

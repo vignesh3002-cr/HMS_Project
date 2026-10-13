@@ -20,6 +20,7 @@ import {
   computeProtocolNextVisitDate,
   findActiveEncounter,
   formatPickedDate,
+  dmyToIsoStrict,
   parsePickedDate,
   resolveEffectiveStartDate,
 } from "./helpers";
@@ -60,6 +61,8 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  // Set when opened on an inpatient's admission encounter (doctor dashboard).
+  const stateEncounterNo = (location.state as ConsultationState | null)?.encounterNo ?? "";
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
@@ -241,16 +244,22 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
     setSubmittingFollowUp(true);
 
     try {
-      const { encounter } = await findActiveEncounter(resolvedPatientId);
+      const encounter = stateEncounterNo
+        ? (await encounterApi.getByNumber(stateEncounterNo)).data?.data
+        : (await findActiveEncounter(resolvedPatientId)).encounter;
 
       if (encounter?.encounter_no) {
+        // Next Visit Date is the single source of the follow-up date. For an
+        // inpatient encounter the backend copies it onto the admission's
+        // review date, so the discharge details show the same date.
+        const hasReviewDate = nextVisitDate.trim();
+
         const followUpLines: string[] = [];
-        if (nextVisitDate.trim()) followUpLines.push(`Next Visit: ${nextVisitDate}`);
+        if (hasReviewDate) followUpLines.push(`Next Visit: ${nextVisitDate}`);
         if (nextCycle) followUpLines.push(`Next Cycle: ${nextCycle}`);
         if (plan.trim()) followUpLines.push(`Plan: ${plan}`);
         if (notes.trim()) followUpLines.push(`Notes: ${notes}`);
 
-        const payload: { advice?: string } = {};
         const existingAdvice = encounter.advice ?? "";
         const cleanedAdvice = existingAdvice
           .replace(/\n*\[Follow Up\][\s\S]*$/, "")
@@ -259,7 +268,18 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
         if (followUpLines.length > 0) {
           parts.push("[Follow Up]", ...followUpLines);
         }
-        payload.advice = parts.filter(Boolean).join("\n\n").trim();
+
+        const payload: { advice?: string; follow_up_date?: string } = {
+          advice: parts.filter(Boolean).join("\n\n").trim(),
+        };
+        // The real structured column (previously unused -- this text line
+        // above was the only record of it).
+        // The picker holds DD-MM-YYYY; the API takes YYYY-MM-DD.
+        if (hasReviewDate) {
+          const isoDate = dmyToIsoStrict(nextVisitDate) ?? (/^\d{4}-\d{2}-\d{2}$/.test(nextVisitDate.trim()) ? nextVisitDate.trim() : undefined);
+          if (!isoDate) throw new Error("Enter the Next Visit Date as DD-MM-YYYY");
+          payload.follow_up_date = isoDate;
+        }
 
         await encounterApi.update(encounter.encounter_no, payload);
       }

@@ -2,6 +2,7 @@ import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import { ipdApi, type AdmissionRecord } from "../../../api/ipd.api";
 import {
   chemotherapyApi,
   isChemoPlanClosed,
@@ -474,6 +475,28 @@ export const findActiveEncounter = async (
         }`
       : undefined,
   };
+};
+
+/*
+ * Does this patient currently have an active (ADMITTED) inpatient stay?
+ * Shared by the Discharge Medication step (which renders the Inpatient
+ * Discharge section only when one exists) and the Follow Up step (which
+ * routes the review/follow-up date to admission.review_date instead of
+ * encounter.follow_up_date when one exists) -- one lookup, one source of
+ * truth, so the two steps never disagree about whether this is an inpatient.
+ */
+export const findActiveAdmission = async (
+  patientId: string
+): Promise<AdmissionRecord | null> => {
+  if (!patientId) return null;
+  try {
+    const response = await ipdApi.getAll({ patientId, status: "ADMITTED", limit: 1 });
+    const admissions = response.data?.data?.admissions || [];
+    return admissions[0] || null;
+  } catch (error) {
+    console.error("findActiveAdmission failed:", error);
+    return null;
+  }
 };
 
 /* ============================================================
