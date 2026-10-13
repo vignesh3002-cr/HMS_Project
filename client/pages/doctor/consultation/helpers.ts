@@ -98,6 +98,28 @@ export const dateOnlyDMY = (value?: string | null) => {
 };
 
 /* A DATE column value moved by whole days, as YYYY-MM-DD. */
+/* The planned date (DD-MM-YYYY) of a "Cycle N / Day M" label in the
+   patient's chemotherapy plan schedule; "" when the plan (or that day)
+   has none. */
+export const fetchScheduledDate = async (
+  patientId: string,
+  cycleLabel: string
+): Promise<string> => {
+  const match = cycleLabel.match(/Cycle\s*(\d+)\s*\/\s*Day\s*(\d+)/i);
+  if (!patientId || !match) return "";
+  try {
+    const response = await chemotherapyApi.getLatestPlanForPatient(patientId);
+    const row = (response.data.data?.chemotherapy_plan_schedule ?? []).find(
+      (entry) =>
+        entry.cycle_number === Number(match[1]) &&
+        entry.cycle_day === Number(match[2])
+    );
+    return row ? dateOnlyDMY(row.planned_date) : "";
+  } catch {
+    return "";
+  }
+};
+
 export const addDaysToIsoDate = (value: string, days: number) => {
   const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!iso) return "";
@@ -695,6 +717,9 @@ export type PlanOrderTarget = {
      what the day's order already has. */
   chemoInstructions?: string;
   additionalNotes?: string;
+  /* The day's planned date (YYYY-MM-DD) from the Start Date; moves only
+     this cycle day. */
+  plannedDate?: string;
 };
 
 export const COURSE_CLOSED_MESSAGE =
@@ -776,6 +801,7 @@ export const createChemotherapyPlanForPatient = async (
         ...(target.additionalNotes !== undefined
           ? { additional_notes: target.additionalNotes }
           : {}),
+        ...(target.plannedDate ? { planned_date: target.plannedDate } : {}),
       });
       return undefined;
     } catch (orderError: any) {

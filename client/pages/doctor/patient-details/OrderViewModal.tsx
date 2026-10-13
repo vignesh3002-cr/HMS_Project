@@ -121,6 +121,7 @@ export default function OrderViewModal({
                   </span>
                 ),
               },
+              { label: "Planned Date", value: order.planned_date ? fmtDate(order.planned_date.slice(0, 10)) : "" },
               { label: "Ordered On", value: order.created_at ? `${fmtDate(order.created_at)} ${fmtTime(order.created_at)}` : "" },
               { label: "Completed On", value: order.completed_at ? `${fmtDate(order.completed_at)} ${fmtTime(order.completed_at)}` : "" },
               { label: "Height", value: num(order.dosing_height_cm, "cm") },

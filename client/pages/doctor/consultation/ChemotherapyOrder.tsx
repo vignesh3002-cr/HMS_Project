@@ -8,6 +8,7 @@ import {
   type ChemoPlanItem,
   type ChemoPlanOrder,
   type ChemoPlanOrderHeader,
+  type ChemoPlanScheduleRow,
 } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { Calendar } from "../../../components/ui/calendar";
@@ -28,8 +29,10 @@ import type {
   RegimenProtocolItem,
 } from "./types";
 import {
+  addDaysToIsoDate,
   COURSE_CLOSED_MESSAGE,
   createChemotherapyPlanForPatient,
+  dateOnlyDMY,
   findActiveEncounter,
   formatDateDMY,
   orderDosingFromSnapshot,
@@ -185,6 +188,8 @@ type ChemotherapyPlan = {
   /* Saved cycle day orders (by cycle / day) and the current one. */
   plan_orders?: ChemoPlanOrderHeader[] | null;
   current_order?: ChemoPlanOrder | null;
+  /* The planned date of every cycle day. */
+  chemotherapy_plan_schedule?: ChemoPlanScheduleRow[] | null;
 };
 
 const orderKey = (cycle: number, day: number) => `${cycle}/${day}`;
@@ -291,6 +296,11 @@ const ChemotherapyOrder: React.FC<{
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
+  /* Start Date is per cycle day: the plan's schedule gives each day's
+     planned date, and a date the doctor picks applies to that day only
+     ("cycle/day" -> DD-MM-YYYY). */
+  const scheduleRef = useRef<ChemoPlanScheduleRow[]>([]);
+  const editedDatesRef = useRef(new Map<string, string>());
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
   const cycleDayRef = useRef<string>("");
   const planIdRef = useRef<string>("");
@@ -413,11 +423,6 @@ const ChemotherapyOrder: React.FC<{
     const baseStart = new Date(baseDate);
     baseStart.setHours(0, 0, 0, 0);
 
-    const formDate = new Date(baseStart);
-    formDate.setDate(
-      formDate.getDate() + (formCycleNumber - 1) * interval
-    );
-
     const formatDate = (date: Date) => {
       const day = String(date.getDate()).padStart(2, "0");
       const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -442,7 +447,7 @@ const ChemotherapyOrder: React.FC<{
     );
 
     updateCycleDay(formCycleStr);
-    setStartDate(formatDate(formDate));
+    showDayDate(formCycleStr);
     localStorage.setItem(
       `hms_next_cycle_${resolvedPatientId}`,
       nextCycleStr
@@ -471,6 +476,43 @@ const ChemotherapyOrder: React.FC<{
   const getCycleNumber = (value: string): number | null => {
     const match = value.trim().match(/Cycle\s*(\d+)/i);
     return match ? Number(match[1]) : null;
+  };
+
+  /* "c/d" of a "Cycle N / Day M" label. */
+  const dayKeyOf = (value: string) =>
+    orderKey(getCycleNumber(value) ?? 1, getCycleDayNumber(value) ?? 1);
+
+  /* A cycle day's Start Date: the date picked for it this session, else
+     its planned date in the plan's schedule, else (no plan yet) the planned
+     treatment start + (day - 1). */
+  const dayPlannedDate = (cycle: number, day: number): string => {
+    const edited = editedDatesRef.current.get(orderKey(cycle, day));
+    if (edited) return edited;
+    const scheduled = scheduleRef.current.find(
+      (row) => row.cycle_number === cycle && row.cycle_day === day
+    );
+    if (scheduled) return dateOnlyDMY(scheduled.planned_date);
+    const base =
+      toIsoDate(
+        localStorage.getItem(`hms_planned_start_date_${resolvedPatientId}`)
+      ) || toIsoDate(new Date().toISOString());
+    return base ? dateOnlyDMY(addDaysToIsoDate(base, day - 1)) : "";
+  };
+
+  /* Show the Start Date of the cycle day in the Cycle / Day field. */
+  const showDayDate = (value: string = cycleDayRef.current) => {
+    if (!value) return;
+    const cycle = getCycleNumber(value) ?? 1;
+    const day = getCycleDayNumber(value) ?? 1;
+    userTouched.current.startDate = editedDatesRef.current.has(orderKey(cycle, day));
+    setStartDate(dayPlannedDate(cycle, day));
+  };
+
+  /* The doctor picked / typed a Start Date for the cycle day on screen. */
+  const editStartDate = (value: string) => {
+    editedDatesRef.current.set(dayKeyOf(cycleDayRef.current), value);
+    userTouched.current.startDate = true;
+    setStartDate(value);
   };
 
   const getCycleAndDay = (
@@ -916,6 +958,8 @@ const ChemotherapyOrder: React.FC<{
       const data = JSON.parse(saved) as {
         cycleDay?: string;
         startDate?: string;
+        /* "cycle/day" the Start Date was picked for. */
+        startDateKey?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
@@ -947,9 +991,10 @@ const ChemotherapyOrder: React.FC<{
         setSerumCreatinine(data.serumCreatinine);
       }
 
-      if (data.startDate) {
-        setStartDate(data.startDate);
-        userTouched.current.startDate = true;
+      /* A Start Date picked earlier belongs to its own cycle day (older
+         drafts without the day are dropped). */
+      if (data.startDate && data.startDateKey) {
+        editedDatesRef.current.set(data.startDateKey, data.startDate);
       }
 
       if (Array.isArray(data.drugs) && data.drugs.length > 0) {
@@ -994,6 +1039,7 @@ const ChemotherapyOrder: React.FC<{
       JSON.stringify({
         cycleDay: userTouched.current.cycleDay ? cycleDay : "",
         startDate: userTouched.current.startDate ? startDate : "",
+        startDateKey: userTouched.current.startDate ? dayKeyOf(cycleDay) : "",
         drugs: userTouched.current.drugs ? drugs : [],
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
@@ -1094,6 +1140,7 @@ const ChemotherapyOrder: React.FC<{
       : (availableDays[0] ?? 1);
     const value = `Cycle ${cycle} / Day ${day}`;
     updateCycleDay(value);
+    showDayDate(value);
     applySelectedDay(value);
   };
 
@@ -1105,6 +1152,7 @@ const ChemotherapyOrder: React.FC<{
     const currentCycle = getCycleNumber(cycleDay) || 1;
     const value = `Cycle ${currentCycle} / Day ${day}`;
     updateCycleDay(value);
+    showDayDate(value);
     applySelectedDay(value);
   };
 
@@ -1211,6 +1259,12 @@ const ChemotherapyOrder: React.FC<{
             hydration: hydrationPayload(hydrationRows),
             chemoInstructions: postChemoInstructions,
             additionalNotes,
+            /* Only a date the doctor changed moves the day's schedule. */
+            plannedDate: editedDatesRef.current.has(
+              orderKey(getCycleNumber(cycleDayRef.current) ?? 1, displayedDayRef.current ?? 1)
+            )
+              ? toIsoDate(startDate)
+              : undefined,
           },
         }
       );
@@ -1351,9 +1405,7 @@ const ChemotherapyOrder: React.FC<{
         setPlanOrders(planOrdersRef.current);
         cacheOrder(plan.current_order);
 
-        if (!userTouched.current.startDate) {
-          setStartDate(formatDateDMY(plan.treatment_start_date));
-        }
+        scheduleRef.current = plan.chemotherapy_plan_schedule ?? [];
 
         /* Resume at the saved orders' cycle day (snapped to a medication
            day once the protocol is known). */
@@ -1366,6 +1418,7 @@ const ChemotherapyOrder: React.FC<{
           );
         }
         applyNextCycle(protocolRef.current, plan.treatment_start_date);
+        showDayDate();
 
         /* The protocol may have loaded first: show the plan's saved order
            for the displayed day now that it is known. */
@@ -2411,10 +2464,7 @@ const ChemotherapyOrder: React.FC<{
                     id="start-date"
                     type="text"
                     value={startDate}
-                    onChange={(e) => {
-                      userTouched.current.startDate = true;
-                      setStartDate(e.target.value);
-                    }}
+                    onChange={(e) => editStartDate(e.target.value)}
                     className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                   />
 
@@ -2429,13 +2479,25 @@ const ChemotherapyOrder: React.FC<{
                   selected={parsePickedDate(startDate)}
                   onSelect={(date) => {
                     if (date instanceof Date) {
-                      userTouched.current.startDate = true;
-                      setStartDate(formatPickedDate(date));
+                      editStartDate(formatPickedDate(date));
                     }
                   }}
                 />
               </PopoverContent>
             </Popover>
+            {cycleDay && (
+              <p className="text-xs text-gray-500">
+                Planned date of {cycleDay}
+                {editedDatesRef.current.has(dayKeyOf(cycleDay)) ||
+                scheduleRef.current.some(
+                  (row) =>
+                    row.edited &&
+                    orderKey(row.cycle_number, row.cycle_day) === dayKeyOf(cycleDay)
+                )
+                  ? " (changed)"
+                  : ""}
+              </p>
+            )}
           </div>
         </div>
 

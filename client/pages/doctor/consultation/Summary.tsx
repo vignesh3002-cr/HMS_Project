@@ -46,6 +46,7 @@ import {
   PAST_HISTORY_MARKER,
   protocolDayDilutions,
   resolveEffectiveStartDate,
+  fetchScheduledDate,
 } from "./helpers";
 
 /* ============================================================
@@ -63,6 +64,17 @@ import {
 const computeNextVisitDateForPatient = async (
   patientId: string
 ): Promise<string> => {
+  /* The next scheduled cycle/day's planned date in the plan, when it has
+     one; else the protocol interval from the stated start date. */
+  const scheduled = await fetchScheduledDate(
+    patientId,
+    localStorage.getItem(`hms_next_cycle_${patientId}`) ?? ""
+  );
+  if (scheduled) {
+    localStorage.setItem(`hms_next_cycle_date_${patientId}`, scheduled);
+    return scheduled;
+  }
+
   const protocolId =
     localStorage.getItem(`hms_selected_protocol_id_${patientId}`) ?? "";
   if (!protocolId) return "";
@@ -1147,6 +1159,9 @@ const Summary: React.FC<{
      appointment date, else the encounter's check-in). */
   const diagnosisDate = dateOnlyDMY(plan?.oncology_staging_detail?.diagnosis_date);
   const plannedDateFor = (order: ChemoPlanOrderHeader) => {
+    /* The day's planned date from the plan's schedule (edited or as
+       calculated when the plan was created). */
+    if (order.planned_date) return dateOnlyDMY(order.planned_date);
     const cycle = (plan?.chemotherapy_cycle ?? []).find(
       (row) => row.cycle_number === order.cycle_number
     );

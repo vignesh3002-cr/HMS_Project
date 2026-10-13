@@ -206,6 +206,8 @@ export interface ChemoPlan {
      with that day's drugs and hydration. */
   plan_orders?: ChemoPlanOrderHeader[] | null;
   current_order?: ChemoPlanOrder | null;
+  /* The planned date of every cycle day. */
+  chemotherapy_plan_schedule?: ChemoPlanScheduleRow[] | null;
 }
 
 /* A plan drug: a medicine from medicine_master, or (medicine_id null) a
@@ -299,6 +301,21 @@ export interface ChemoPlanOrderHeader {
   created_at?: string | null;
   updated_at?: string | null;
   chemotherapy_cycle?: { cycle_status: string | null } | null;
+  /* The cycle day's planned date, from the plan's schedule. */
+  planned_date?: string | null;
+}
+
+/* The planned date of one cycle day of a plan, calculated when the plan
+   is created (Cycle 1 / Day 1 = treatment start; +1 day per day, +1 more
+   for a day without medicine; next cycle = last day + interval + 1).
+   edited = the doctor moved this day's date. */
+export interface ChemoPlanScheduleRow {
+  chemotherapy_plan_id?: string;
+  cycle_number: number;
+  cycle_day: number;
+  planned_date: string;
+  medication_day: boolean;
+  edited: boolean;
 }
 
 /* GET /chemotherapy/pharmacy-slips?encounter_no=: a visit's pharmacy slips
@@ -365,6 +382,9 @@ export interface ChemoPlanOrderPayload {
   /* Left out = the saved text is kept; empty = cleared. */
   chemo_instructions?: string | null;
   additional_notes?: string | null;
+  /* The cycle day's planned date (YYYY-MM-DD); moves only this day.
+     Left out = unchanged. */
+  planned_date?: string | null;
 }
 
 /* Consultation submit: the visit's cycle day orders sent for administration

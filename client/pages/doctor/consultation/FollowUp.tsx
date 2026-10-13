@@ -23,6 +23,7 @@ import {
   dmyToIsoStrict,
   parsePickedDate,
   resolveEffectiveStartDate,
+  fetchScheduledDate,
 } from "./helpers";
 import {
   ArrowLeftIcon,
@@ -198,11 +199,31 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           );
           setNextVisitDate(protocolNextVisit);
         }
+        /* The plan's schedule wins: the next cycle/day's planned date. */
+        void applyScheduledVisitDate(normalizedCycle);
       })
       .catch((error) => {
         console.error("Failed to load follow-up protocol:", error);
       });
   }, [resolvedPatientId]);
+
+  /* The Next Visit Date of a cycle/day: its planned date in the plan's
+     schedule (kept for the Summary too). Nothing changes when the plan
+     has no schedule for it. */
+  const applyScheduledVisitDate = async (cycleLabel: string) => {
+    if (!resolvedPatientId || !cycleLabel) return;
+    const scheduled = await fetchScheduledDate(resolvedPatientId, cycleLabel);
+    if (scheduled) {
+      localStorage.setItem(`hms_next_cycle_date_${resolvedPatientId}`, scheduled);
+      setNextVisitDate(scheduled);
+    }
+  };
+
+  /* Picking another next cycle/day shows that day's planned date. */
+  useEffect(() => {
+    void applyScheduledVisitDate(displayedValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedValue, resolvedPatientId]);
 
   /* Keep the stored next cycle in sync with this selection so the Summary
      step (which reads localStorage on mount) shows the same value -
