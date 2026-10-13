@@ -232,6 +232,8 @@ const ChemotherapyOrder: React.FC<{
   gender?: string;
   age?: string | number | null;
   onNext?: () => void;
+  /* The consultation's encounter - the order is saved in it. */
+  encounterNo?: string;
 }> = ({
   embedded = false,
   patientId,
@@ -239,6 +241,7 @@ const ChemotherapyOrder: React.FC<{
   gender,
   age,
   onNext,
+  encounterNo,
 }) => {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
@@ -1253,6 +1256,7 @@ const ChemotherapyOrder: React.FC<{
         discussion,
         buildDosingSnapshot(dosingInputs),
         {
+          encounterNo,
           order: {
             cycle: getCycleNumber(cycleDayRef.current) ?? 1,
             day: displayedDayRef.current ?? 1,
@@ -1535,6 +1539,9 @@ const ChemotherapyOrder: React.FC<{
   /* The encounter this visit's orders are saved in (the consultation's
      submit completes them), looked up once. */
   const resolveEncounterNo = async () => {
+    if (encounterNo) {
+      encounterNoRef.current = encounterNo;
+    }
     if (encounterNoRef.current || !resolvedPatientId) {
       return encounterNoRef.current;
     }
@@ -2452,9 +2459,22 @@ const ChemotherapyOrder: React.FC<{
           <div className="space-y-2">
             <label
               htmlFor="start-date"
-              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+              className="inline- text-sm font-semibold uppercase tracking-wide text-gray-500"
             >
-              Start Date
+              Start Date  {cycleDay && (
+              <span className="text-[10px] text-gray-500">
+                (Planned date of {cycleDay}
+                {editedDatesRef.current.has(dayKeyOf(cycleDay)) ||
+                scheduleRef.current.some(
+                  (row) =>
+                    row.edited &&
+                    orderKey(row.cycle_number, row.cycle_day) === dayKeyOf(cycleDay)
+                )
+                  ? " (changed)"
+                  : ""})
+              </span>
+            )}
+                         
             </label>
 
             <Popover>
@@ -2485,19 +2505,7 @@ const ChemotherapyOrder: React.FC<{
                 />
               </PopoverContent>
             </Popover>
-            {cycleDay && (
-              <p className="text-xs text-gray-500">
-                Planned date of {cycleDay}
-                {editedDatesRef.current.has(dayKeyOf(cycleDay)) ||
-                scheduleRef.current.some(
-                  (row) =>
-                    row.edited &&
-                    orderKey(row.cycle_number, row.cycle_day) === dayKeyOf(cycleDay)
-                )
-                  ? " (changed)"
-                  : ""}
-              </p>
-            )}
+
           </div>
         </div>
 

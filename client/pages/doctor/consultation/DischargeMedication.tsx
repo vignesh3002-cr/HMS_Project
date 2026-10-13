@@ -985,7 +985,7 @@ const DischargeMedication: React.FC<{
         undefined,
         undefined,
         draft?.dosingInputs ? buildDosingSnapshot(draft.dosingInputs) : undefined,
-        { order: orderTarget }
+        { order: orderTarget, encounterNo: await resolveEncounterNo() }
       );
       if (error) {
         setMedsError(error);

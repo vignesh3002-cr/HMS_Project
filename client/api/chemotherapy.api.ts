@@ -316,6 +316,8 @@ export interface ChemoPlanScheduleRow {
   planned_date: string;
   medication_day: boolean;
   edited: boolean;
+  /* The day's date by the rule, before any edit. */
+  calculated_date?: string;
 }
 
 /* GET /chemotherapy/pharmacy-slips?encounter_no=: a visit's pharmacy slips

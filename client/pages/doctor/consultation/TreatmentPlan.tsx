@@ -380,7 +380,7 @@ const TreatmentPlan: React.FC<{
         undefined,
         undefined,
         undefined,
-        { allowNewCourse: true }
+        { allowNewCourse: true, encounterNo }
       );
 
       if (error) {

@@ -1128,6 +1128,8 @@ const Consultation: React.FC = () => {
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
                     measurements={measurements}
                     onNext={() => { selectStep("CHEMOTHERAPY ORDER", markStepCompleted("TREATMENT PLAN")); }}
                   />
@@ -1135,6 +1137,7 @@ const Consultation: React.FC = () => {
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
+                    encounterNo={encounter?.encounter_no}
                     measurements={measurements}
                     gender={patient?.patient_gender ?? ""}
                     age={patient?.patient_age ?? null}
@@ -1154,6 +1157,7 @@ const Consultation: React.FC = () => {
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
+                    encounterNo={encounter?.encounter_no}
                     measurements={measurements}
                     onNext={() => { selectStep("SUMMARY", markStepCompleted("FOLLOW UP")); }}
                   />

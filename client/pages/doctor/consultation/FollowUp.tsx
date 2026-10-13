@@ -51,11 +51,14 @@ const FollowUp: React.FC<{
   patientId?: string;
   measurements?: MeasurementValues;
   onNext?: () => void;
+  /* The consultation's encounter - the follow-up is saved in it. */
+  encounterNo?: string;
 }> = ({
   embedded = false,
   patientId,
   measurements,
   onNext,
+  encounterNo,
 }) => {
   const location = useLocation();
   const statePatientId = (
@@ -265,8 +268,9 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
     setSubmittingFollowUp(true);
 
     try {
-      const encounter = stateEncounterNo
-        ? (await encounterApi.getByNumber(stateEncounterNo)).data?.data
+      const visitEncounterNo = encounterNo || stateEncounterNo;
+      const encounter = visitEncounterNo
+        ? (await encounterApi.getByNumber(visitEncounterNo)).data?.data
         : (await findActiveEncounter(resolvedPatientId)).encounter;
 
       if (encounter?.encounter_no) {
