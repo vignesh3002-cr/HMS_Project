@@ -623,6 +623,8 @@ export type ChemoAdverseEventRecord = Partial<Record<ChemoAdverseSymptomFlag, bo
   resolution_date: string | null;
   remarks: string | null;
   created_at: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
 };
 
 export const chemotherapyApi = {
@@ -744,6 +746,22 @@ export const chemotherapyApi = {
     API.post<{ success: boolean; message: string; data: ChemoAdverseEventRecord }>(
       `/chemotherapy/cycles/${cycleId}/adverse-events`,
       payload
+    ),
+  /* Edits a recorded adverse event; only the fields sent change (the cycle
+     day it belongs to stays as recorded). */
+  updateAdverseEvent: (
+    adverseEventId: string,
+    payload: Partial<Omit<ChemoAdverseEventPayload, "plan_order_id" | "cycle_day">>
+  ) =>
+    API.put<{ success: boolean; message: string; data: ChemoAdverseEventRecord }>(
+      `/chemotherapy/adverse-events/${adverseEventId}`,
+      payload
+    ),
+  /* Removes an event entered in error (soft delete; reason is audited). */
+  removeAdverseEvent: (adverseEventId: string, reason: string) =>
+    API.delete<{ success: boolean; message: string; data: { adverse_event_id: string } }>(
+      `/chemotherapy/adverse-events/${adverseEventId}`,
+      { data: { reason } }
     ),
   changePlanStatus: (
     planId: string,

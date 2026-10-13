@@ -19,6 +19,7 @@ import type {
   SummaryPlan,
   StagingDetailRecord,
   ChemoCycleDetail,
+  ChemoAdverseEventEntry,
 } from "./types";
 import {
   loadLatestChemoPlan,
@@ -28,6 +29,7 @@ import {
 } from "./api";
 import { useLatestPatientVitals } from "./hooks";
 import { consultationNotesOf } from "../consultation/helpers";
+import { CTCAE_GRADES } from "./adminFormat";
 
 /* ============================================================
    HISTORY TAB
@@ -1011,8 +1013,15 @@ const HistoryTab: React.FC<{
   interface AdverseEventRow {
     id: string;
     date: string;
+    /* The raw event timestamp, for sorting. */
+    sortKey: string;
+    /* "Cycle 2 · Day 1" (just "Cycle 2" for events recorded before the
+       day was stored). */
+    cycleDay: string;
     event: string;
     grade: string;
+    /* The CTCAE grade (1-5) when recorded, for the coloured pill. */
+    gradeValue: string;
     action: string;
     outcome: string;
   }
@@ -1025,7 +1034,15 @@ const HistoryTab: React.FC<{
       adverseEventRows.push({
         id: event.adverse_event_id ?? `${cycle.chemotherapy_cycle_id}-${idx}`,
         date: fmtHistoryDate(event.event_date),
+        sortKey: event.event_date ?? "",
+        cycleDay: [
+          cycle.cycle_number != null ? `Cycle ${cycle.cycle_number}` : null,
+          event.cycle_day != null ? `Day ${event.cycle_day}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
         event: event.adverse_event_name || "—",
+        gradeValue: event.ctcae_grade != null ? String(event.ctcae_grade) : "",
         grade:
           String(
             event.ctcae_grade || event.reaction_grade || event.severity || "—"
@@ -1040,7 +1057,9 @@ const HistoryTab: React.FC<{
             : event.treatment_interrupted
             ? "Treatment interrupted"
             : "None recorded"),
-        outcome: event.treatment_stopped
+        outcome: event.resolved
+          ? "RESOLVED"
+          : event.treatment_stopped
           ? "STOPPED"
           : event.hospitalization_required
           ? "HOSPITALIZED"
@@ -1048,7 +1067,10 @@ const HistoryTab: React.FC<{
       });
     });
   });
-  adverseEventRows.sort((a, b) => b.date.localeCompare(a.date));
+  /* Newest first, by the real timestamp (the shown date is DD-MM-YYYY). */
+  adverseEventRows.sort(
+    (a, b) => (Date.parse(b.sortKey) || 0) - (Date.parse(a.sortKey) || 0)
+  );
 
   /* One bar per calendar day — group encounter weights by date, last recorded value per day wins. */
   const weightTrend = (() => {
@@ -1424,11 +1446,16 @@ const HistoryTab: React.FC<{
         }
 
         if (!description) {
-          const adverseEvents =
-            specificDetail?.chemotherapy_adverse_event ??
-            detail?.chemotherapy_adverse_event ??
-            existing?.chemotherapy_adverse_event ??
-            [];
+          /* A multi-day cycle's day card lists only that day's events
+             (events recorded before the day was stored stay on every day). */
+          const adverseEvents = (
+            (specificDetail?.chemotherapy_adverse_event ??
+              detail?.chemotherapy_adverse_event ??
+              existing?.chemotherapy_adverse_event ??
+              []) as ChemoAdverseEventEntry[]
+          ).filter(
+            (ae) => !hasManyDays || ae.cycle_day == null || ae.cycle_day === dNum
+          );
           if (adverseEvents.length > 0) {
             const names = adverseEvents
               .map((ae) => {
@@ -2465,6 +2492,10 @@ const HistoryTab: React.FC<{
                     Date
                   </th>
 
+                  <th className="px-6 py-3 font-semibold whitespace-nowrap">
+                    Cycle / Day
+                  </th>
+
                   <th className="px-6 py-3 font-semibold">
                     Event
                   </th>
@@ -2487,7 +2518,7 @@ const HistoryTab: React.FC<{
                 {adverseEventRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-6 py-6 text-center text-xs text-gray-400"
                     >
                       No adverse events recorded for this patient yet.
@@ -2496,8 +2527,12 @@ const HistoryTab: React.FC<{
                 ) : (
                   adverseEventRows.map((event) => (
                     <tr key={event.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-gray-500">
+                      <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
                         {event.date || "—"}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700 whitespace-nowrap">
+                        {event.cycleDay || "—"}
                       </td>
 
                       <td className="px-6 py-4 font-medium text-gray-900">
@@ -2505,7 +2540,21 @@ const HistoryTab: React.FC<{
                       </td>
 
                       <td className="px-6 py-4 text-gray-700">
-                        {event.grade}
+                        {(() => {
+                          const grade = CTCAE_GRADES.find(
+                            (g) => g.value === event.gradeValue
+                          );
+                          return grade ? (
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${grade.badge}`}
+                              title={`CTCAE Grade ${grade.value} - ${grade.severity}`}
+                            >
+                              G{grade.value}
+                            </span>
+                          ) : (
+                            event.grade
+                          );
+                        })()}
                       </td>
 
                       <td className="px-6 py-4 text-gray-700">
@@ -2515,7 +2564,9 @@ const HistoryTab: React.FC<{
                       <td className="px-6 py-4 text-right">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            event.outcome === "ONGOING"
+                            event.outcome === "RESOLVED"
+                              ? "bg-green-100 text-green-800"
+                              : event.outcome === "ONGOING"
                               ? "bg-yellow-100 text-yellow-800"
                               : "bg-red-100 text-red-800"
                           }`}

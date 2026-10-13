@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useRef, useState } from "react";
 import {
   chemotherapyApi,
   type ChemoAdministrationDay,
@@ -10,6 +9,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import VoiceToText from "@/components/ui/voicetotext";
 import { ComboInput } from "./ComboInput";
+import { CTCAE_GRADES } from "./adminFormat";
+import { ModalButton, ModalShell } from "./ModalShell";
 
 /* ---------- reference lists ---------- */
 
@@ -78,15 +79,6 @@ const SYMPTOMS: { key: ChemoAdverseSymptomFlag; label: string }[] = [
   { key: "infection",        label: "Infection" },
   { key: "bleeding",         label: "Bleeding" },
   { key: "pain",             label: "Pain" },
-];
-
-/* CTCAE v5 grades, the severity each one implies, and their colours. */
-export const CTCAE_GRADES: { value: string; severity: string; hint: string; active: string; badge: string }[] = [
-  { value: "1", severity: "Mild",             hint: "Mild; observation only",            active: "border-green-600 bg-green-600 text-white",   badge: "bg-green-50 text-green-700 border border-green-200" },
-  { value: "2", severity: "Moderate",         hint: "Moderate; minimal intervention",    active: "border-amber-500 bg-amber-500 text-white",   badge: "bg-amber-50 text-amber-700 border border-amber-200" },
-  { value: "3", severity: "Severe",           hint: "Severe; hospitalization indicated", active: "border-orange-600 bg-orange-600 text-white", badge: "bg-orange-50 text-orange-700 border border-orange-200" },
-  { value: "4", severity: "Life-threatening", hint: "Urgent intervention indicated",     active: "border-red-600 bg-red-600 text-white",       badge: "bg-red-50 text-red-600 border border-red-200" },
-  { value: "5", severity: "Fatal",            hint: "Death related to the event",        active: "border-red-800 bg-red-800 text-white",       badge: "bg-red-700 text-white border border-red-700" },
 ];
 
 const SEVERITIES = CTCAE_GRADES.map(grade => grade.severity);
@@ -235,36 +227,68 @@ const emptyForm = (): FormState => ({
   remarks: "",
 });
 
+/* A recorded event back in the form's shape (edit mode). */
+function formFromRecord(record: ChemoAdverseEventRecord): FormState {
+  return {
+    name: record.adverse_event_name ?? "",
+    category: record.adverse_event_category ?? "",
+    eventDate: record.event_date ? localDateTime(new Date(record.event_date)) : localDateTime(),
+    symptoms: SYMPTOMS.filter(symptom => !!record[symptom.key]).map(symptom => symptom.key),
+    grade: record.ctcae_grade ?? "",
+    severity: record.severity ?? "",
+    reactionGrade: record.reaction_grade ?? "",
+    description: record.reaction_description ?? "",
+    interventions: {
+      treatment_interrupted: !!record.treatment_interrupted,
+      treatment_stopped: !!record.treatment_stopped,
+      hospitalization_required: !!record.hospitalization_required,
+      icu_required: !!record.icu_required,
+      emergency_medication_given: !!record.emergency_medication_given,
+    },
+    medicationGiven: record.medication_given ?? "",
+    doseModified: !!record.dose_modified,
+    doseReduced: !!record.dose_reduced,
+    reductionPercentage: record.reduction_percentage == null ? "" : String(Number(record.reduction_percentage)),
+    doseDelayed: !!record.dose_delayed,
+    delayDays: record.delay_days == null ? "" : String(record.delay_days),
+    doctorAction: record.doctor_action ?? "",
+    nursingAction: record.nursing_action ?? "",
+    resolved: !!record.resolved,
+    resolutionDate: record.resolution_date ? record.resolution_date.slice(0, 10) : "",
+    remarks: record.remarks ?? "",
+  };
+}
+
 /* "Add Adverse" popup of the Administration tab: records an adverse event
-   in chemotherapy_adverse_event against the cycle day on screen.
-   Hand-rolled like ReasonModal so the portaled suggestion lists don't
-   count as outside clicks. */
+   in chemotherapy_adverse_event against the cycle day on screen, or - given
+   an `event` - edits that recorded event. */
 export default function AdverseEventModal({
   day,
+  event,
   dayLabel,
   onSaved,
   onClose,
 }: {
-  day: ChemoAdministrationDay;
+  /* The cycle day a new event is recorded against. */
+  day?: ChemoAdministrationDay | null;
+  /* The recorded event to edit (edit mode). */
+  event?: ChemoAdverseEventRecord | null;
   /* e.g. "Cycle 2 · Day 1 · 12-Oct-2026" */
   dayLabel: string;
   onSaved: (record: ChemoAdverseEventRecord) => void;
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const editing = !!event;
+  const [form, setForm] = useState<FormState>(() => (event ? formFromRecord(event) : emptyForm()));
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
-  /* Auto-filled from the event name / grade until the user edits them. */
-  const [categoryEdited, setCategoryEdited] = useState(false);
-  const [severityEdited, setSeverityEdited] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
+  /* Auto-filled from the event name / grade until the user edits them
+     (an edited event keeps what was recorded). */
+  const [categoryEdited, setCategoryEdited] = useState(editing);
+  const [severityEdited, setSeverityEdited] = useState(editing);
   const bodyRef = useRef<HTMLDivElement>(null);
   const pristine = useRef(JSON.stringify(form));
-
-  useEffect(() => {
-    panelRef.current?.querySelector<HTMLInputElement>("#adverse-event-name")?.focus();
-  }, []);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -335,7 +359,7 @@ export default function AdverseEventModal({
 
   const requestClose = () => {
     if (saving) return;
-    if (JSON.stringify(form) !== pristine.current && !window.confirm("Discard this adverse event? The details you entered will be lost.")) {
+    if (JSON.stringify(form) !== pristine.current && !window.confirm(editing ? "Discard your changes to this adverse event?" : "Discard this adverse event? The details you entered will be lost.")) {
       return;
     }
     onClose();
@@ -356,9 +380,7 @@ export default function AdverseEventModal({
     }
 
     const text = (value: string) => value.trim() || null;
-    const payload: ChemoAdverseEventPayload = {
-      plan_order_id: day.plan_order_id,
-      cycle_day: day.cycle_day,
+    const fields: Omit<ChemoAdverseEventPayload, "plan_order_id" | "cycle_day"> = {
       event_date: new Date(form.eventDate).toISOString(),
       adverse_event_name: form.name.trim(),
       adverse_event_category: text(form.category),
@@ -383,7 +405,16 @@ export default function AdverseEventModal({
 
     setSaving(true);
     try {
-      const response = await chemotherapyApi.recordAdverseEvent(day.chemotherapy_cycle_id, payload);
+      const response = event
+        ? await chemotherapyApi.updateAdverseEvent(event.adverse_event_id, fields)
+        : day
+          ? await chemotherapyApi.recordAdverseEvent(day.chemotherapy_cycle_id, {
+              ...fields,
+              plan_order_id: day.plan_order_id,
+              cycle_day: day.cycle_day,
+            })
+          : null;
+      if (!response) throw new Error("No cycle day to record the event against.");
       onSaved(response.data.data);
     } catch (error: any) {
       toast({
@@ -397,48 +428,41 @@ export default function AdverseEventModal({
 
   const selectedGrade = CTCAE_GRADES.find(grade => grade.value === form.grade);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm sm:p-4"
-      onMouseDown={e => { if (e.target === e.currentTarget) requestClose(); }}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="adverse-event-title"
-        onKeyDown={e => { if (e.key === "Escape") { e.stopPropagation(); requestClose(); } }}
-        className="flex max-h-[95vh] w-full max-w-2xl animate-[p360-pop_0.25s_ease-out] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[90vh]"
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
-              <i className="fa-solid fa-triangle-exclamation" />
-            </div>
-            <div className="min-w-0">
-              <h3 id="adverse-event-title" className="text-base font-bold text-slate-900">
-                Add Adverse Event
-              </h3>
-              <p className="truncate text-xs text-slate-500">
-                <span className="font-semibold text-blue-700">{dayLabel}</span>
-                <span className="hidden sm:inline"> · Recorded against this treatment day</span>
-              </p>
-            </div>
+  return (
+    <ModalShell
+      icon={editing ? "fa-pen-to-square" : "fa-triangle-exclamation"}
+      tone="red"
+      title={editing ? "Edit Adverse Event" : "Add Adverse Event"}
+      subtitle={
+        <>
+          <span className="font-semibold text-blue-700">{dayLabel}</span>
+          <span className="hidden sm:inline">
+            {editing ? " · Changes are kept in the audit log" : " · Recorded against this treatment day"}
+          </span>
+        </>
+      }
+      busy={saving}
+      onClose={requestClose}
+      bodyRef={bodyRef}
+      initialFocus="#adverse-event-name"
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="hidden text-[11px] text-slate-400 sm:block">
+            <i className="fa-solid fa-circle-info mr-1" />
+            {editing
+              ? "The cycle day and the linked physician stay as recorded."
+              : "You are recorded as the reporter; the treating physician is linked automatically."}
+          </p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <ModalButton onClick={requestClose} disabled={saving}>Cancel</ModalButton>
+            <ModalButton variant="danger" icon="fa-floppy-disk" busy={saving} disabled={saving} onClick={() => void submit()}>
+              {editing ? "Update Adverse Event" : "Save Adverse Event"}
+            </ModalButton>
           </div>
-          <button
-            type="button"
-            onClick={requestClose}
-            disabled={saving}
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40"
-            aria-label="Close"
-          >
-            <i className="fa-solid fa-xmark" />
-          </button>
         </div>
-
-        {/* Body */}
-        <div ref={bodyRef} className="flex-1 space-y-6 overflow-y-auto px-4 py-4 sm:px-5">
+      }
+    >
+      <div className="space-y-6">
 
           <Section icon="fa-notes-medical" title="Event Details">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -734,36 +758,7 @@ export default function AdverseEventModal({
               <p className="text-right text-[10px] text-slate-400">{form.remarks.length}/500</p>
             </div>
           </Section>
-        </div>
-
-        {/* Footer */}
-        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <p className="hidden text-[11px] text-slate-400 sm:block">
-            <i className="fa-solid fa-circle-info mr-1" />
-            You are recorded as the reporter; the treating physician is linked automatically.
-          </p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            <button
-              type="button"
-              onClick={requestClose}
-              disabled={saving}
-              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void submit()}
-              disabled={saving}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {saving ? <i className="fa-solid fa-spinner fa-spin text-xs" /> : <i className="fa-solid fa-floppy-disk text-xs" />}
-              Save Adverse Event
-            </button>
-          </div>
-        </div>
       </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 }

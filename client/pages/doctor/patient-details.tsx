@@ -406,6 +406,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 ) : activeTab === "Administration" ? (
 <AdministrationTab
   patientId={resolvedPatientId}
+  patient={patient}
   plan={savedPlan}
   onPlanChanged={() => setPlanVersion((version) => version + 1)}
 />
