@@ -7,10 +7,13 @@ import {
   type ChemoAdministrationItem,
   type ChemoAdministrationSheet,
   type ChemoAdministrationStatus,
+  type ChemoAdverseEventRecord,
 } from "@/api/chemotherapy.api";
-import { useCanAny } from "@/context/PermissionContext";
+import { useCan, useCanAny } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ComboInput } from "./ComboInput";
+import AdverseEventModal, { CTCAE_GRADES } from "./AdverseEventModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -131,109 +134,6 @@ function StatusBadge({ status }: { status: BadgeStatus }) {
   );
 }
 
-function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange: (v: string) => void; hasError: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      const wrapper = inputRef.current?.closest(".relative");
-      if (!menuRef.current?.contains(e.target as Node) && !wrapper?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const updatePos = () => {
-      if (inputRef.current && menuRef.current) {
-        const r = inputRef.current.getBoundingClientRect();
-        menuRef.current.style.top = `${r.bottom + 2}px`;
-        menuRef.current.style.left = `${r.left}px`;
-        menuRef.current.style.width = `${r.width}px`;
-      }
-    };
-    window.addEventListener("scroll", updatePos, true);
-    return () => window.removeEventListener("scroll", updatePos, true);
-  }, [open]);
-
-  const borderCls = hasError ? "border-red-300" : "border-slate-200";
-
-  function openDropdown() {
-    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
-    setOpen(true);
-  }
-
-  return (
-    <div className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        maxLength={500}
-        onChange={e => { onChange(e.target.value); if (e.target.value) openDropdown(); }}
-        onKeyDown={e => {
-          if (e.key === "Enter" && value) { e.preventDefault(); setOpen(false); }
-          /* Escape closes this list first, not the dialog around it. */
-          if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); }
-        }}
-        onFocus={openDropdown}
-        placeholder="Select or type a reason..."
-        className={`w-full rounded-lg border ${borderCls} bg-white py-2 pl-3 pr-8 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-200`}
-      />
-      <button
-        type="button"
-        onMouseDown={e => { e.preventDefault(); open ? setOpen(false) : openDropdown(); inputRef.current?.focus(); }}
-        className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-600"
-        tabIndex={-1}
-      >
-        <i className={`fa-solid fa-chevron-down text-[10px] transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && rect && createPortal(
-        <div
-          ref={menuRef}
-          style={{ position: "fixed", top: rect.bottom + 2, left: rect.left, width: rect.width, zIndex: 9999 }}
-          className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
-        >
-          {value && !SKIP_CANCEL_REASONS.includes(value) && (
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); onChange(value); setOpen(false); }}
-              className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-blue-600 hover:bg-blue-50"
-            >
-              <i className="fa-solid fa-plus mr-2 text-[10px]" />
-              "{value}"
-            </button>
-          )}
-          {SKIP_CANCEL_REASONS.map(r => (
-            <button
-              key={r}
-              type="button"
-              onMouseDown={e => {
-                e.preventDefault();
-                onChange(r === "Others" ? "" : r);
-                setOpen(false);
-                if (r === "Others") inputRef.current?.focus();
-              }}
-              className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ${value === r ? "font-semibold text-blue-600" : "text-slate-700"}`}
-            >
-              {r}
-              {value === r && <i className="fa-solid fa-check text-[10px] text-blue-500" />}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
-
 /* Reason popup for Skipped / Cancelled - a reason is mandatory. Hand-rolled
    (not a Radix dialog) so the portaled reason list doesn't count as an
    outside click and close it. */
@@ -328,7 +228,13 @@ function ReasonModal({
             <label className="mb-1 block text-xs font-semibold text-slate-700">
               Reason <span className="text-red-500">*</span>
             </label>
-            <ReasonDropdown value={reason} onChange={setReason} hasError={touched && missingReason} />
+            <ComboInput
+              value={reason}
+              onChange={setReason}
+              options={SKIP_CANCEL_REASONS}
+              placeholder="Select or type a reason..."
+              hasError={touched && missingReason}
+            />
             {touched && missingReason && (
               <p className="mt-1 text-[11px] font-medium text-red-500">
                 Reason is required to {isSkip ? "skip" : "cancel"} a medication
@@ -627,6 +533,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const planId = plan?.chemotherapy_plan_id ?? null;
   const { toast } = useToast();
   const canRecord = useCanAny(["chemo.administration.record", "chemo.cycle.manage"]);
+  const canRecordAdverse = useCan("chemo.adverse_event.record");
 
   const [sheet, setSheet] = useState<ChemoAdministrationSheet | null>(null);
   const [loading, setLoading] = useState(false);
@@ -640,6 +547,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const [pendingOnly, setPendingOnly] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ PREMEDICATION: true, SUPPORTIVE: true, POST: true });
   const [showAllCycles, setShowAllCycles] = useState(false);
+  /* Add Adverse: the popup, and the adverse events of the cycle on screen. */
+  const [adverseOpen, setAdverseOpen] = useState(false);
+  const [adverseEvents, setAdverseEvents] = useState<ChemoAdverseEventRecord[]>([]);
+  const [adverseLoading, setAdverseLoading] = useState(false);
+  const [showAllAdverse, setShowAllAdverse] = useState(false);
   const [localInstructions, setLocalInstructions] = useState<{
     medicineName: string; route: string; infusion: string; dose: string;
     frequency: string; timing: string; remarks: string; administrationDetail: string;
@@ -794,6 +706,33 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
     }
   };
 
+  /* The adverse events recorded for the cycle of the day on screen. */
+  const adverseCycleId = sheet?.day?.chemotherapy_cycle_id ?? null;
+  useEffect(() => {
+    setShowAllAdverse(false);
+    if (!adverseCycleId) { setAdverseEvents([]); return; }
+    let cancelled = false;
+    setAdverseLoading(true);
+    chemotherapyApi
+      .listAdverseEvents(adverseCycleId)
+      .then(response => { if (!cancelled) setAdverseEvents(response.data.data ?? []); })
+      .catch(error => {
+        console.error("Failed to load adverse events:", error);
+        if (!cancelled) setAdverseEvents([]);
+      })
+      .finally(() => { if (!cancelled) setAdverseLoading(false); });
+    return () => { cancelled = true; };
+  }, [adverseCycleId]);
+
+  const adverseSaved = (record: ChemoAdverseEventRecord) => {
+    setAdverseEvents(prev => [...prev, record]);
+    setAdverseOpen(false);
+    toast({
+      title: "Adverse event recorded",
+      description: `${record.adverse_event_name}${record.ctcae_grade ? ` (Grade ${record.ctcae_grade})` : ""} saved for Cycle ${sheet?.day?.cycle_number} · Day ${record.cycle_day ?? sheet?.day?.cycle_day}.`,
+    });
+  };
+
   /* ---------- states without a sheet ---------- */
 
   if (!planId) {
@@ -845,6 +784,15 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const dayOrders = new Map(sheet.cycle_days.map(order => [order.cycle_day, order]));
   const visibleCycles = showAllCycles ? sheet.previous_cycles : sheet.previous_cycles.slice(0, 3);
   const treatmentStatus = day?.treatment_status ? TREATMENT_STATUS[day.treatment_status] : null;
+  const adverseBlockedReason = !day
+    ? "No cycle day ordered yet"
+    : !canRecordAdverse
+      ? "You don't have permission to record adverse events."
+      : "";
+  const sortedAdverse = [...adverseEvents].sort(
+    (a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+  );
+  const visibleAdverse = showAllAdverse ? sortedAdverse : sortedAdverse.slice(0, 3);
 
   const matchesFilter = (item: ChemoAdministrationItem) => !pendingOnly || item.status === "PENDING";
   const itemsFor = (role: string) => items.filter(item => item.drug_role === role && matchesFilter(item));
@@ -882,7 +830,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
         </div>
       )}
 
-      <div className="flex gap-5">
+      <div className="flex flex-col gap-5 lg:flex-row">
         {/* ─── MAIN CONTENT ─── */}
         <div className={`min-w-0 flex-1 space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
 
@@ -1280,7 +1228,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
         </div>
 
         {/* ─── RIGHT SIDEBAR ─── */}
-        <div className="w-64 flex-shrink-0 space-y-4">
+        <div className="grid w-full flex-shrink-0 grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:flex lg:w-64 lg:flex-col lg:items-stretch">
 
           {/* Quick Actions */}
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1291,10 +1239,13 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
             <div className="space-y-2 p-3">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                onClick={() => setAdverseOpen(true)}
+                disabled={!!adverseBlockedReason}
+                title={adverseBlockedReason || "Record an adverse event for this cycle day"}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition-all hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
-                <i className="fa-solid fa-plus text-xs" />
-                Add Administration
+                <i className="fa-solid fa-triangle-exclamation text-xs" />
+                Add Adverse
               </button>
               {[
                 { icon: "fa-file-medical",     label: "View Protocol" },
@@ -1312,6 +1263,71 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Adverse Events of the cycle on screen */}
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-triangle-exclamation text-xs text-red-500" />
+                <h4 className="text-sm font-bold text-slate-800">Adverse Events</h4>
+                {adverseEvents.length > 0 && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">
+                    {adverseEvents.length}
+                  </span>
+                )}
+              </div>
+              {sortedAdverse.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAdverse(value => !value)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                >
+                  {showAllAdverse ? "Show Less" : "View All"}
+                </button>
+              )}
+            </div>
+            {adverseLoading && adverseEvents.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-slate-400">
+                <i className="fa-solid fa-spinner fa-spin mr-1.5" />
+                Loading adverse events...
+              </p>
+            ) : visibleAdverse.length > 0 ? (
+              <div className="divide-y divide-slate-50">
+                {visibleAdverse.map(event => {
+                  const grade = CTCAE_GRADES.find(g => g.value === String(event.ctcae_grade ?? ""));
+                  const onThisDay = !!day && !!event.plan_order_id && event.plan_order_id === day.plan_order_id;
+                  return (
+                    <div key={event.adverse_event_id} className={`px-4 py-3 transition-colors ${onThisDay ? "bg-red-50/40" : ""}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 truncate text-xs font-semibold text-slate-800" title={event.adverse_event_name}>
+                          {event.adverse_event_name}
+                        </p>
+                        {event.ctcae_grade && (
+                          <span
+                            className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${grade?.badge ?? "border border-slate-200 bg-slate-100 text-slate-600"}`}
+                            title={grade ? `CTCAE Grade ${grade.value} - ${grade.severity}` : undefined}
+                          >
+                            G{event.ctcae_grade}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-500">
+                          {event.cycle_day ? `Day ${event.cycle_day} · ` : ""}
+                          {fmtDate(event.event_date)} {fmtTime(event.event_date)}
+                        </p>
+                        <span className={`flex-shrink-0 text-[10px] font-semibold ${event.resolved ? "text-green-600" : "text-amber-600"}`}>
+                          {event.resolved ? "Resolved" : "Ongoing"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="px-4 py-4 text-xs text-slate-400">No adverse events recorded for this cycle.</p>
+            )}
           </div>
 
           {/* Current Cycle */}
@@ -1456,6 +1472,15 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
 
         </div>
       </div>
+
+      {adverseOpen && day && (
+        <AdverseEventModal
+          day={day}
+          dayLabel={`Cycle ${day.cycle_number} · Day ${day.cycle_day} · ${fmtDate(day.treatment_date)}`}
+          onSaved={adverseSaved}
+          onClose={() => setAdverseOpen(false)}
+        />
+      )}
 
       {reasonTarget && (
         <ReasonModal

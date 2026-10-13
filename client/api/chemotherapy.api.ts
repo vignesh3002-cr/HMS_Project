@@ -554,6 +554,77 @@ export interface LabReviewRecord {
   review_notes?: string | null;
 }
 
+/* The adverse-event symptom flags (boolean columns of
+   chemotherapy_adverse_event). */
+export type ChemoAdverseSymptomFlag =
+  | "nausea" | "vomiting" | "diarrhea" | "constipation" | "mucositis" | "fever"
+  | "fatigue" | "neuropathy" | "alopecia" | "skin_rash" | "anemia" | "neutropenia"
+  | "thrombocytopenia" | "infection" | "bleeding" | "pain";
+
+/* POST /chemotherapy/cycles/:cycleId/adverse-events. plan_order_id ties the
+   event to its cycle day (the backend takes cycle_day from that order). */
+export type ChemoAdverseEventPayload = Partial<Record<ChemoAdverseSymptomFlag, boolean>> & {
+  plan_order_id?: string | null;
+  cycle_day?: number | null;
+  event_date?: string | null;
+  adverse_event_name: string;
+  adverse_event_category?: string | null;
+  /* CTCAE grade "1"-"5". */
+  ctcae_grade?: string | null;
+  reaction_grade?: string | null;
+  severity?: string | null;
+  reaction_description?: string | null;
+  treatment_interrupted?: boolean;
+  treatment_stopped?: boolean;
+  hospitalization_required?: boolean;
+  icu_required?: boolean;
+  emergency_medication_given?: boolean;
+  medication_given?: string | null;
+  dose_modified?: boolean;
+  dose_reduced?: boolean;
+  reduction_percentage?: number | null;
+  dose_delayed?: boolean;
+  delay_days?: number | null;
+  doctor_action?: string | null;
+  nursing_action?: string | null;
+  resolved?: boolean;
+  resolution_date?: string | null;
+  remarks?: string | null;
+};
+
+export type ChemoAdverseEventRecord = Partial<Record<ChemoAdverseSymptomFlag, boolean | null>> & {
+  adverse_event_id: string;
+  chemotherapy_cycle_id: string;
+  plan_order_id: string | null;
+  cycle_day: number | null;
+  event_date: string;
+  adverse_event_name: string;
+  adverse_event_category: string | null;
+  ctcae_grade: string | null;
+  reaction_grade: string | null;
+  severity: string | null;
+  reaction_description: string | null;
+  treatment_interrupted: boolean | null;
+  treatment_stopped: boolean | null;
+  hospitalization_required: boolean | null;
+  icu_required: boolean | null;
+  emergency_medication_given: boolean | null;
+  medication_given: string | null;
+  dose_modified: boolean | null;
+  dose_reduced: boolean | null;
+  reduction_percentage: number | string | null;
+  dose_delayed: boolean | null;
+  delay_days: number | null;
+  doctor_action: string | null;
+  nursing_action: string | null;
+  physician_id: string | null;
+  reported_by: string | null;
+  resolved: boolean | null;
+  resolution_date: string | null;
+  remarks: string | null;
+  created_at: string | null;
+};
+
 export const chemotherapyApi = {
   listRegimenProtocols: (params?: {
     cancer_type_id?: string;
@@ -664,6 +735,15 @@ export const chemotherapyApi = {
   listLabReviews: (cycleId: string) =>
     API.get<{ success: boolean; message: string; data: LabReviewRecord[] }>(
       `/chemotherapy/cycles/${cycleId}/lab-review`
+    ),
+  listAdverseEvents: (cycleId: string) =>
+    API.get<{ success: boolean; message: string; data: ChemoAdverseEventRecord[] }>(
+      `/chemotherapy/cycles/${cycleId}/adverse-events`
+    ),
+  recordAdverseEvent: (cycleId: string, payload: ChemoAdverseEventPayload) =>
+    API.post<{ success: boolean; message: string; data: ChemoAdverseEventRecord }>(
+      `/chemotherapy/cycles/${cycleId}/adverse-events`,
+      payload
     ),
   changePlanStatus: (
     planId: string,
