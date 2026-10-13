@@ -278,15 +278,17 @@ export interface ChemoPlanHydration {
   display_order?: number | null;
 }
 
-/* One saved order per plan + cycle + day: ORDERED until the consultation
-   is submitted, then COMPLETED (read-only). */
+/* One saved order per plan + cycle + day: ORDERED while it is being
+   ordered, IN_ADMINISTRATION (read-only) once its consultation is
+   submitted, COMPLETED once every medicine is Given / Skipped / Cancelled
+   and the day is completed from the patient's Administration tab. */
 export interface ChemoPlanOrderHeader {
   plan_order_id: string;
   chemotherapy_plan_id: string;
   chemotherapy_cycle_id: string;
   cycle_number: number;
   cycle_day: number;
-  order_status: "ORDERED" | "COMPLETED" | string;
+  order_status: "ORDERED" | "IN_ADMINISTRATION" | "COMPLETED" | string;
   hydration_saved: boolean;
   copied_from_order_id?: string | null;
   encounter_no?: string | null;
@@ -365,11 +367,144 @@ export interface ChemoPlanOrderPayload {
   additional_notes?: string | null;
 }
 
+/* Consultation submit: the visit's cycle day orders sent for administration
+   (released_orders) - or completed outright when they had no medicine to
+   administer (completed_orders). */
 export interface ChemoPlanOrderCompletion {
+  released_orders?: {
+    plan_order_id: string;
+    cycle_number: number;
+    cycle_day: number;
+    medicine_count: number;
+  }[];
   completed_orders: { plan_order_id: string; cycle_number: number; cycle_day: number }[];
   completed_cycles: number[];
   plan_completed: boolean;
   treatment_status: string | null;
+}
+
+/* ---------------- Administration sheet (one cycle day) ---------------- */
+
+export type ChemoAdministrationStatus = "PENDING" | "GIVEN" | "SKIPPED" | "CANCELLED";
+
+export interface ChemoAdministrationItem {
+  /* Null on a day not sent for administration yet (or completed before
+     administration was tracked). */
+  administration_id: string | null;
+  chemotherapy_plan_item_id: string;
+  drug_role: string;
+  drug_sequence: number;
+  drug_name: string;
+  brand_name: string | null;
+  generic_name: string | null;
+  protocol_dose: number | null;
+  protocol_dose_unit: string | null;
+  calculated_dose: number | null;
+  calculated_dose_unit: string | null;
+  administration_route: string | null;
+  dilution_solution: string | null;
+  dilution_volume: string | null;
+  infusion_rate: string | null;
+  infusion_type: string | null;
+  infusion_duration_minutes: number | null;
+  frequency: string | null;
+  timing_relative_to_primary: string | null;
+  administration_detail: string | null;
+  item_remarks: string | null;
+  /* NOT_RECORDED: a day completed before administration was tracked. */
+  status: ChemoAdministrationStatus | "NOT_RECORDED";
+  status_reason: string | null;
+  remarks: string | null;
+  administered_by: string | null;
+  administered_by_name: string | null;
+  given_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ChemoAdministrationSummary {
+  total: number;
+  pending: number;
+  given: number;
+  skipped: number;
+  cancelled: number;
+}
+
+export interface ChemoAdministrationDay {
+  plan_order_id: string;
+  chemotherapy_cycle_id: string;
+  cycle_number: number;
+  cycle_day: number;
+  order_status: ChemoPlanOrderHeader["order_status"];
+  cycle_status: string | null;
+  physician_approved: boolean | null;
+  treatment_date: string | null;
+  completed_at: string | null;
+  chemo_instructions: string | null;
+  additional_notes: string | null;
+  is_last_day: boolean;
+  closes_cycle: boolean;
+  closes_course: boolean;
+  can_update: boolean;
+  can_complete: boolean;
+  treatment_status: "AWAITING_ORDER" | "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | null;
+  administered_by: string[];
+  summary: ChemoAdministrationSummary;
+  items: ChemoAdministrationItem[];
+}
+
+export interface ChemoAdministrationSheet {
+  /* Today in IST, YYYY-MM-DD. */
+  today: string;
+  plan: {
+    chemotherapy_plan_id: string;
+    regimen_name: string | null;
+    protocol_name: string | null;
+    treatment_status: string | null;
+    planned_cycles: number;
+    completed_cycles: number;
+    cycle_interval_days: number | null;
+    doctor_name: string | null;
+  };
+  medication_days: number[];
+  day: ChemoAdministrationDay | null;
+  pending_alert: { level: "TODAY" | "OVERDUE"; pending: number; treatment_date: string } | null;
+  cycle_days: { plan_order_id: string; cycle_number: number; cycle_day: number; order_status: string }[];
+  current_cycle: {
+    chemotherapy_cycle_id: string;
+    cycle_number: number;
+    cycle_status: string | null;
+    current_day: number;
+    completed_days: number;
+    total_days: number;
+    started: boolean;
+    next_cycle_number: number | null;
+    next_cycle_date: string | null;
+  } | null;
+  previous_cycles: {
+    chemotherapy_cycle_id: string;
+    cycle_number: number;
+    cycle_status: string | null;
+    completion_date: string | null;
+    protocol_name: string | null;
+  }[];
+  post_medications: {
+    chemotherapy_plan_item_id: string;
+    drug_name: string;
+    brand_name: string | null;
+    protocol_dose: number | null;
+    protocol_dose_unit: string | null;
+    administration_route: string | null;
+    frequency: string | null;
+    duration: string | null;
+    remarks: string | null;
+  }[];
+}
+
+export interface ChemoAdministrationDayCompletion {
+  day_completed: boolean;
+  cycle_completed: boolean;
+  plan_completed: boolean;
+  sheet: ChemoAdministrationSheet;
 }
 
 // Full single-plan fetch (GET /chemotherapy/plans/:planId) -- unlike ChemoPlan
@@ -505,6 +640,26 @@ export const chemotherapyApi = {
     API.post<{ success: boolean; message: string; data: ChemoPlanOrderCompletion }>(
       `/chemotherapy/plans/${planId}/orders/complete`,
       { encounter_no: encounterNo }
+    ),
+  getAdministrationSheet: (
+    planId: string,
+    day?: { cycle_number: number; cycle_day: number } | null
+  ) =>
+    API.get<{ success: boolean; message: string; data: ChemoAdministrationSheet }>(
+      `/chemotherapy/plans/${planId}/administration`,
+      { params: day ? { cycle_number: day.cycle_number, cycle_day: day.cycle_day } : undefined }
+    ),
+  updateAdministrationStatus: (
+    administrationId: string,
+    payload: { status: ChemoAdministrationStatus; reason?: string | null; remarks?: string | null }
+  ) =>
+    API.patch<{ success: boolean; message: string; data: ChemoAdministrationSheet }>(
+      `/chemotherapy/administration/${administrationId}/status`,
+      payload
+    ),
+  completeAdministrationDay: (planId: string, cycleNumber: number, cycleDay: number) =>
+    API.post<{ success: boolean; message: string; data: ChemoAdministrationDayCompletion }>(
+      `/chemotherapy/plans/${planId}/orders/${cycleNumber}/${cycleDay}/administration/complete`
     ),
   listLabReviews: (cycleId: string) =>
     API.get<{ success: boolean; message: string; data: LabReviewRecord[] }>(

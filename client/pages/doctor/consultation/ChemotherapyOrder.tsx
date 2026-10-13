@@ -192,6 +192,11 @@ const orderKey = (cycle: number, day: number) => `${cycle}/${day}`;
 const byCycleDay = (a: ChemoPlanOrderHeader, b: ChemoPlanOrderHeader) =>
   a.cycle_number - b.cycle_number || a.cycle_day - b.cycle_day;
 
+/* A cycle day whose consultation was submitted - sent for administration
+   or completed - is read-only. */
+const isSubmittedOrder = (order: ChemoPlanOrderHeader | null | undefined) =>
+  order?.order_status === "IN_ADMINISTRATION" || order?.order_status === "COMPLETED";
+
 /* A cycle closed by its last day (or cancelled) takes no more orders. */
 const isClosedCycleOrder = (order: ChemoPlanOrderHeader) =>
   ["COMPLETED", "CANCELLED"].includes(
@@ -514,18 +519,17 @@ const ChemotherapyOrder: React.FC<{
 
   /* The cycle / day a plan with saved orders resumes at: the first day
      still ORDERED (on an open cycle), else the medication day after the
-     latest COMPLETED one. Null without saved orders. */
+     latest submitted one (sent for administration or COMPLETED). Null
+     without saved orders. */
   const cycleDayFromOrders = (
     protocol: RegimenProtocolDetail | null
   ): { cycle: number; day: number } | null => {
     const orders = planOrdersRef.current;
     const pending = orders.find(
-      (order) => order.order_status !== "COMPLETED" && !isClosedCycleOrder(order)
+      (order) => !isSubmittedOrder(order) && !isClosedCycleOrder(order)
     );
     if (pending) return { cycle: pending.cycle_number, day: pending.cycle_day };
-    const last = [...orders]
-      .reverse()
-      .find((order) => order.order_status === "COMPLETED");
+    const last = [...orders].reverse().find(isSubmittedOrder);
     if (!last) return null;
     return getCycleAndDay(
       computeNextCycle(
@@ -1771,9 +1775,9 @@ const ChemotherapyOrder: React.FC<{
             order.cycle_day === displayedDay
         )
       : undefined;
-  /* A completed cycle day (its consultation was submitted) or a closed
-     course is read-only. */
-  const orderLocked = planClosed || displayedOrder?.order_status === "COMPLETED";
+  /* A submitted cycle day (sent for administration, or completed) or a
+     closed course is read-only. */
+  const orderLocked = planClosed || isSubmittedOrder(displayedOrder);
 
   /* Saved orders before the displayed cycle day, latest first. */
   const copySources = planIdRef.current
@@ -2450,6 +2454,14 @@ const ChemotherapyOrder: React.FC<{
                 {planClosed ? "." : " - pick another day to order, or reuse it there with its \"Copy as Cycle\" button."}
               </p>
             )}
+            {displayedOrder?.order_status === "IN_ADMINISTRATION" && (
+              <p>
+                Cycle {displayedOrder.cycle_number} / Day {displayedOrder.cycle_day} has been
+                sent for administration. Its order is read-only; it completes once every
+                medicine is marked Given, Skipped or Cancelled in Patient Details › Administration
+                {planClosed ? "." : " - pick another day to order, or reuse it there with its \"Copy as Cycle\" button."}
+              </p>
+            )}
           </div>
         )}
 
@@ -2555,7 +2567,9 @@ const ChemotherapyOrder: React.FC<{
                           <span className="text-xs text-gray-400">
                             {source.order_status === "COMPLETED"
                               ? `Completed ${formatDateDMY(source.completed_at)}`
-                              : "Ordered"}
+                              : source.order_status === "IN_ADMINISTRATION"
+                                ? "In administration"
+                                : "Ordered"}
                           </span>
                         </button>
                       ))}

@@ -216,6 +216,11 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [selectedImmunizations, setSelectedImmunizations] = useState<string[]>(
     []
   );
+  /* Per-immunization Date + Response, keyed by the selected value (master
+     name or typed "Others" text). Persisted to encounter_immunization. */
+  const [immunizationDetails, setImmunizationDetails] = useState<
+    Record<string, { date: string; response: string }>
+  >({});
   const [selectedDrugConsumptions, setSelectedDrugConsumptions] = useState<
     string[]
   >([]);
@@ -393,6 +398,38 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     };
   }, [encounter?.encounter_no]);
 
+  /* ============================================================
+     LOAD IMMUNIZATION DETAILS
+     Date + Response per selected immunization (encounter_immunization),
+     keyed by the immunization name so the fields line up with the
+     selections above.
+   ============================================================ */
+
+  useEffect(() => {
+    const encounterNo = encounter?.encounter_no;
+    if (!encounterNo) return;
+    let cancelled = false;
+    consultationApi
+      .getEncounterImmunizations(encounterNo)
+      .then((response) => {
+        if (cancelled) return;
+        const map: Record<string, { date: string; response: string }> = {};
+        (response.data.data ?? []).forEach((row) => {
+          map[row.immunization_name] = {
+            date: row.immunization_date ? row.immunization_date.slice(0, 10) : "",
+            response: row.response ?? "",
+          };
+        });
+        setImmunizationDetails(map);
+      })
+      .catch((error) =>
+        console.error("Failed to load immunization details:", error)
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [encounter?.encounter_no]);
+
   /* Master values are saved as {code, name}; a value that isn't in the
      master (an older free-text entry) keeps the "Others" item shape. */
   /* Show the visit's most recent saved molecular test, so a saved (or
@@ -445,6 +482,70 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       ),
       diet_type: dietType || null,
     });
+  };
+
+  /* The immunization multi-select reports the full selected list. Keep the
+     Date/Response entries in step: seed blanks for new selections and drop
+     deselected ones (they are removed from encounter_immunization on save). */
+  const handleImmunizationsChange = (names: string[]) => {
+    setSelectedImmunizations(names);
+    setImmunizationDetails((previous) => {
+      const next: Record<string, { date: string; response: string }> = {};
+      names.forEach((name) => {
+        next[name] = previous[name] ?? { date: "", response: "" };
+      });
+      return next;
+    });
+  };
+
+  /* "+ Add" on the immunization search: select the value and seed its row. */
+  const selectImmunization = (name: string) => {
+    setSelectedImmunizations((previous) =>
+      previous.some((value) => value.toLowerCase() === name.toLowerCase())
+        ? previous
+        : [...previous, name]
+    );
+    setImmunizationDetails((previous) =>
+      previous[name]
+        ? previous
+        : { ...previous, [name]: { date: "", response: "" } }
+    );
+  };
+
+  const updateImmunizationDetail = (
+    name: string,
+    patch: Partial<{ date: string; response: string }>
+  ) =>
+    setImmunizationDetails((previous) => ({
+      ...previous,
+      [name]: { ...(previous[name] ?? { date: "", response: "" }), ...patch },
+    }));
+
+  /* Persists Date + Response per selected immunization into
+     encounter_immunization (one bulk sync; deselected rows are removed). */
+  const persistImmunizationDetails = async (encounterNo: string) => {
+    try {
+      await consultationApi.saveEncounterImmunizations(
+        encounterNo,
+        selectedImmunizations.map((name) => {
+          const match = immunizationOptions.find(
+            (option) => option.name.toLowerCase() === name.toLowerCase()
+          );
+          const detail = immunizationDetails[name];
+          return {
+            immunization_name: name,
+            immunization_code: match?.code ?? null,
+            immunization_date: detail?.date || null,
+            response: detail?.response || null,
+          };
+        })
+      );
+    } catch (error: any) {
+      console.error(
+        "Failed to save immunization details:",
+        error?.response?.data?.message ?? error?.message
+      );
+    }
   };
 
   /* "+ Add" on a search with no match: the value is added to its master
@@ -1034,6 +1135,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       await persistConsultation(encounter);
       await persistReportsPrevious(encounter.encounter_no);
       await persistMolecularTest(encounter.encounter_no);
+      await persistImmunizationDetails(encounter.encounter_no);
       const adviceResult = await saveAdvice(encounter);
 
       const failedParts = [
@@ -1358,17 +1460,71 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
             selectedImmunizations
           )}
           value={selectedImmunizations}
-          onValueChange={setSelectedImmunizations}
+          onValueChange={handleImmunizationsChange}
           onCreateOption={(typed) =>
             addMasterOption(
               () => consultationApi.createCustomImmunization({ name: typed }),
               setImmunizationOptions,
-              addToSelection(setSelectedImmunizations),
+              selectImmunization,
               "immunization"
             )
           }
           placeholder="Select immunization(s)"
         />
+
+        {/* DATE + RESPONSE per selected immunization (encounter_immunization). */}
+
+        {selectedImmunizations.length > 0 && (
+          <div className="flex w-full flex-col gap-3 pt-1">
+
+            {selectedImmunizations.map((name) => (
+              <div
+                key={name}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+              >
+
+                <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                  {name}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Date
+                  </label>
+
+                  <input
+                    type="date"
+                    value={immunizationDetails[name]?.date ?? ""}
+                    onChange={(event) =>
+                      updateImmunizationDetail(name, { date: event.target.value })
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Response
+                  </label>
+
+                  <VoiceToText
+                    value={immunizationDetails[name]?.response ?? ""}
+                    onChange={(text) =>
+                      updateImmunizationDetail(name, { response: text })
+                    }
+                    placeholder="Type the response..."
+                  />
+
+                </div>
+
+              </div>
+            ))}
+
+          </div>
+        )}
 
       </div>
 
