@@ -1,16 +1,25 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SummaryPlan } from "./types";
+import type { PatientRecord } from "@/api/patient.api";
 import {
   chemotherapyApi,
   type ChemoAdministrationDay,
   type ChemoAdministrationItem,
   type ChemoAdministrationSheet,
   type ChemoAdministrationStatus,
+  type ChemoAdverseEventRecord,
 } from "@/api/chemotherapy.api";
-import { useCanAny } from "@/context/PermissionContext";
+import { useCan, useCanAny } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ComboInput } from "./ComboInput";
+import { CTCAE_GRADES, doseText, fmtDate, fmtTime, infusionText, plural } from "./adminFormat";
+import AdverseEventModal from "./AdverseEventModal";
+import { RemoveAdverseModal, ResolveAdverseModal } from "./AdverseEventActions";
+import ProtocolViewModal from "./ProtocolViewModal";
+import OrderViewModal from "./OrderViewModal";
+import { printAdministrationMar, type AdministrationPrintPatient } from "./marPrint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +34,8 @@ type ReasonStatus = Extract<ChemoAdministrationStatus, "SKIPPED" | "CANCELLED">;
 
 interface AdministrationTabProps {
   patientId: string | null;
+  /* The patient record, for the printed MAR / report header. */
+  patient?: PatientRecord | null;
   plan?: SummaryPlan | null;
   /* A cycle day was completed: the plan (cycles, course status) changed. */
   onPlanChanged?: () => void;
@@ -67,54 +78,6 @@ const SKIP_CANCEL_REASONS = [
   "Others",
 ];
 
-/* ---------- formatting ---------- */
-
-/* 09-Oct-2026. Date-only values (YYYY-MM-DD) are calendar dates; full
-   timestamps are shown in IST, the hospital's timezone. */
-function fmtDate(value?: string | null): string {
-  if (!value) return "—";
-  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const date = new Date(isDateOnly ? `${value}T00:00:00Z` : value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date
-    .toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      timeZone: isDateOnly ? "UTC" : "Asia/Kolkata",
-    })
-    .replace(/ /g, "-");
-}
-
-function fmtTime(value?: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
-}
-
-function doseText(value: number | null, unit: string | null): string {
-  if (value === null || value === undefined) return "";
-  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })} ${unit ?? ""}`.trim();
-}
-
-function infusionText(item: ChemoAdministrationItem): string {
-  if (item.infusion_rate) return item.infusion_rate;
-  const minutes = item.infusion_duration_minutes;
-  if (minutes) {
-    if (minutes >= 60 && minutes % 60 === 0) {
-      const hours = minutes / 60;
-      return `${hours} hr${hours > 1 ? "s" : ""}`;
-    }
-    return `${minutes} min`;
-  }
-  return item.infusion_type || "—";
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 function errorMessage(error: any, fallback: string): string {
   return error?.response?.data?.message || error?.message || fallback;
 }
@@ -128,109 +91,6 @@ function StatusBadge({ status }: { status: BadgeStatus }) {
       <i className={`fa-solid ${cfg.icon} text-xs`} />
       {cfg.label}
     </span>
-  );
-}
-
-function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange: (v: string) => void; hasError: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      const wrapper = inputRef.current?.closest(".relative");
-      if (!menuRef.current?.contains(e.target as Node) && !wrapper?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const updatePos = () => {
-      if (inputRef.current && menuRef.current) {
-        const r = inputRef.current.getBoundingClientRect();
-        menuRef.current.style.top = `${r.bottom + 2}px`;
-        menuRef.current.style.left = `${r.left}px`;
-        menuRef.current.style.width = `${r.width}px`;
-      }
-    };
-    window.addEventListener("scroll", updatePos, true);
-    return () => window.removeEventListener("scroll", updatePos, true);
-  }, [open]);
-
-  const borderCls = hasError ? "border-red-300" : "border-slate-200";
-
-  function openDropdown() {
-    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
-    setOpen(true);
-  }
-
-  return (
-    <div className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        maxLength={500}
-        onChange={e => { onChange(e.target.value); if (e.target.value) openDropdown(); }}
-        onKeyDown={e => {
-          if (e.key === "Enter" && value) { e.preventDefault(); setOpen(false); }
-          /* Escape closes this list first, not the dialog around it. */
-          if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); }
-        }}
-        onFocus={openDropdown}
-        placeholder="Select or type a reason..."
-        className={`w-full rounded-lg border ${borderCls} bg-white py-2 pl-3 pr-8 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-200`}
-      />
-      <button
-        type="button"
-        onMouseDown={e => { e.preventDefault(); open ? setOpen(false) : openDropdown(); inputRef.current?.focus(); }}
-        className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-600"
-        tabIndex={-1}
-      >
-        <i className={`fa-solid fa-chevron-down text-xs transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && rect && createPortal(
-        <div
-          ref={menuRef}
-          style={{ position: "fixed", top: rect.bottom + 2, left: rect.left, width: rect.width, zIndex: 9999 }}
-          className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
-        >
-          {value && !SKIP_CANCEL_REASONS.includes(value) && (
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); onChange(value); setOpen(false); }}
-              className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
-            >
-              <i className="fa-solid fa-plus mr-2 text-xs" />
-              "{value}"
-            </button>
-          )}
-          {SKIP_CANCEL_REASONS.map(r => (
-            <button
-              key={r}
-              type="button"
-              onMouseDown={e => {
-                e.preventDefault();
-                onChange(r === "Others" ? "" : r);
-                setOpen(false);
-                if (r === "Others") inputRef.current?.focus();
-              }}
-              className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 ${value === r ? "font-semibold text-blue-600" : "text-slate-700"}`}
-            >
-              {r}
-              {value === r && <i className="fa-solid fa-check text-xs text-blue-500" />}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </div>
   );
 }
 
@@ -328,7 +188,13 @@ function ReasonModal({
             <label className="mb-1 block text-xs font-bold text-slate-800">
               Reason <span className="text-red-500">*</span>
             </label>
-            <ReasonDropdown value={reason} onChange={setReason} hasError={touched && missingReason} />
+            <ComboInput
+              value={reason}
+              onChange={setReason}
+              options={SKIP_CANCEL_REASONS}
+              placeholder="Select or type a reason..."
+              hasError={touched && missingReason}
+            />
             {touched && missingReason && (
               <p className="mt-1 text-xs font-medium text-red-500">
                 Reason is required to {isSkip ? "skip" : "cancel"} a medication
@@ -482,6 +348,51 @@ function RowActions({
   );
 }
 
+/* Edit / Mark resolved / Remove menu of an Adverse Events card row. */
+function AdverseRowActions({
+  event,
+  onEdit,
+  onResolve,
+  onRemove,
+}: {
+  event: ChemoAdverseEventRecord;
+  onEdit: () => void;
+  onResolve: () => void;
+  onRemove: () => void;
+}) {
+  const itemCls = "flex cursor-pointer items-center gap-2.5 py-2 text-xs font-semibold";
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Actions for ${event.adverse_event_name}`}
+          className="mt-1.5 flex-shrink-0 rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-700"
+        >
+          <i className="fa-solid fa-ellipsis-vertical text-sm" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onSelect={onEdit} className={`${itemCls} text-slate-700`}>
+          <i className="fa-solid fa-pen-to-square w-3.5 text-slate-400" />
+          Edit
+        </DropdownMenuItem>
+        {!event.resolved && (
+          <DropdownMenuItem onSelect={onResolve} className={`${itemCls} text-slate-700`}>
+            <i className="fa-solid fa-circle-check w-3.5 text-green-500" />
+            Mark resolved
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onRemove} className={`${itemCls} text-red-600 focus:bg-red-50 focus:text-red-600`}>
+          <i className="fa-solid fa-trash-can w-3.5" />
+          Remove
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function MedicationRows({
   items,
   actionable,
@@ -623,10 +534,11 @@ function EmptyState({ icon, title, text }: { icon: string; title: string; text: 
 
 /* ---------- the tab ---------- */
 
-export default function AdministrationTab({ patientId, plan, onPlanChanged }: AdministrationTabProps) {
+export default function AdministrationTab({ patientId, patient, plan, onPlanChanged }: AdministrationTabProps) {
   const planId = plan?.chemotherapy_plan_id ?? null;
   const { toast } = useToast();
   const canRecord = useCanAny(["chemo.administration.record", "chemo.cycle.manage"]);
+  const canRecordAdverse = useCan("chemo.adverse_event.record");
 
   const [sheet, setSheet] = useState<ChemoAdministrationSheet | null>(null);
   const [loading, setLoading] = useState(false);
@@ -640,6 +552,17 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const [pendingOnly, setPendingOnly] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ PREMEDICATION: true, SUPPORTIVE: true, POST: true });
   const [showAllCycles, setShowAllCycles] = useState(false);
+  /* Add Adverse: the popup, and the adverse events of the cycle on screen. */
+  const [adverseOpen, setAdverseOpen] = useState(false);
+  const [adverseEvents, setAdverseEvents] = useState<ChemoAdverseEventRecord[]>([]);
+  const [adverseLoading, setAdverseLoading] = useState(false);
+  const [showAllAdverse, setShowAllAdverse] = useState(false);
+  const [editingAdverse, setEditingAdverse] = useState<ChemoAdverseEventRecord | null>(null);
+  /* Quick Actions: View Protocol / View Orders popups, report download. */
+  const [protocolOpen, setProtocolOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [adverseAction, setAdverseAction] = useState<{ type: "resolve" | "remove"; event: ChemoAdverseEventRecord } | null>(null);
   const [localInstructions, setLocalInstructions] = useState<{
     medicineName: string; route: string; infusion: string; dose: string;
     frequency: string; timing: string; remarks: string; administrationDetail: string;
@@ -794,6 +717,58 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
     }
   };
 
+  /* The adverse events recorded for the cycle of the day on screen. */
+  const adverseCycleId = sheet?.day?.chemotherapy_cycle_id ?? null;
+  useEffect(() => {
+    setShowAllAdverse(false);
+    if (!adverseCycleId) { setAdverseEvents([]); return; }
+    let cancelled = false;
+    setAdverseLoading(true);
+    chemotherapyApi
+      .listAdverseEvents(adverseCycleId)
+      .then(response => { if (!cancelled) setAdverseEvents(response.data.data ?? []); })
+      .catch(error => {
+        console.error("Failed to load adverse events:", error);
+        if (!cancelled) setAdverseEvents([]);
+      })
+      .finally(() => { if (!cancelled) setAdverseLoading(false); });
+    return () => { cancelled = true; };
+  }, [adverseCycleId]);
+
+  const adverseSaved = (record: ChemoAdverseEventRecord) => {
+    setAdverseEvents(prev => [...prev, record]);
+    setAdverseOpen(false);
+    toast({
+      title: "Adverse event recorded",
+      description: `${record.adverse_event_name}${record.ctcae_grade ? ` (Grade ${record.ctcae_grade})` : ""} saved for Cycle ${sheet?.day?.cycle_number} · Day ${record.cycle_day ?? sheet?.day?.cycle_day}.`,
+    });
+  };
+
+  /* An edited / resolved event replaces its row; a removed one drops out. */
+  const adverseUpdated = (record: ChemoAdverseEventRecord, title: string) => {
+    setAdverseEvents(prev => prev.map(event => (event.adverse_event_id === record.adverse_event_id ? record : event)));
+    setEditingAdverse(null);
+    setAdverseAction(null);
+    toast({ title, description: `${record.adverse_event_name}${record.ctcae_grade ? ` (Grade ${record.ctcae_grade})` : ""}` });
+  };
+
+  const adverseRemoved = (adverseEventId: string) => {
+    const removed = adverseEvents.find(event => event.adverse_event_id === adverseEventId);
+    setAdverseEvents(prev => prev.filter(event => event.adverse_event_id !== adverseEventId));
+    setAdverseAction(null);
+    toast({ title: "Adverse event removed", description: removed?.adverse_event_name });
+  };
+
+  /* "Cycle 2 · Day 1 · 12-Oct-2026" for an event of the cycle on screen. */
+  const adverseDayLabel = (event: ChemoAdverseEventRecord) =>
+    [
+      sheet?.day ? `Cycle ${sheet.day.cycle_number}` : null,
+      event.cycle_day ? `Day ${event.cycle_day}` : null,
+      fmtDate(event.event_date),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
   /* ---------- states without a sheet ---------- */
 
   if (!planId) {
@@ -845,6 +820,122 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const dayOrders = new Map(sheet.cycle_days.map(order => [order.cycle_day, order]));
   const visibleCycles = showAllCycles ? sheet.previous_cycles : sheet.previous_cycles.slice(0, 3);
   const treatmentStatus = day?.treatment_status ? TREATMENT_STATUS[day.treatment_status] : null;
+  const adverseBlockedReason = !day
+    ? "No cycle day ordered yet"
+    : !canRecordAdverse
+      ? "You don't have permission to record adverse events."
+      : "";
+  const sortedAdverse = [...adverseEvents].sort(
+    (a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+  );
+  const visibleAdverse = showAllAdverse ? sortedAdverse : sortedAdverse.slice(0, 3);
+
+  /* ---------- Quick Actions: printouts ---------- */
+
+  const hospitalName = patient?.branch?.branch_name ?? "";
+  const printPatient: AdministrationPrintPatient = {
+    name: patient
+      ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+      : "",
+    uhid: patient?.patient_id ?? patientId ?? "",
+    ageSex: patient
+      ? [patient.patient_age != null ? `${patient.patient_age}Y` : "", patient.patient_gender ?? ""].filter(Boolean).join(" / ")
+      : "",
+  };
+  const physician = sheet.plan.doctor_name ?? "";
+  const protocolId = plan?.source_protocol_id ?? null;
+  const noDayReason = "No cycle day ordered yet";
+
+  /* The day's adverse events: recorded against its order (events of older
+     records without one match on the day number). */
+  const dayAdverseEvents = (target: ChemoAdministrationDay) =>
+    adverseEvents.filter(event =>
+      event.plan_order_id ? event.plan_order_id === target.plan_order_id : event.cycle_day === target.cycle_day
+    );
+
+  const printMar = () => {
+    if (!day) return;
+    printAdministrationMar({
+      hospitalName,
+      patient: printPatient,
+      regimen: protocol,
+      physician,
+      day,
+      adverseEvents: dayAdverseEvents(day),
+    });
+  };
+
+  /* The whole cycle of the day on screen: each ordered day's sheet, then
+     the PDF (jsPDF is loaded only when a report is made). */
+  const downloadReport = async () => {
+    if (!day || !planId || reportBusy) return;
+    setReportBusy(true);
+    try {
+      const orders = [...sheet.cycle_days].sort((a, b) => a.cycle_day - b.cycle_day);
+      const [days, { downloadCycleAdministrationReport }] = await Promise.all([
+        Promise.all(
+          orders.map(order =>
+            order.plan_order_id === day.plan_order_id
+              ? Promise.resolve(day)
+              : chemotherapyApi
+                  .getAdministrationSheet(planId, { cycle_number: order.cycle_number, cycle_day: order.cycle_day })
+                  .then(response => response.data.data.day)
+          )
+        ),
+        import("./cycleReportPdf"),
+      ]);
+      downloadCycleAdministrationReport({
+        hospitalName,
+        patient: printPatient,
+        regimen: protocol,
+        physician,
+        cycleNumber: day.cycle_number,
+        days: days.filter((entry): entry is ChemoAdministrationDay => !!entry),
+        adverseEvents,
+      });
+      toast({ title: "Report downloaded", description: `Cycle ${day.cycle_number} administration report` });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't prepare the report",
+        description: errorMessage(error, "Please try again."),
+      });
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  const quickActions: { icon: string; label: string; onClick: () => void; disabled: boolean; title: string; busy?: boolean }[] = [
+    {
+      icon: "fa-file-medical",
+      label: "View Protocol",
+      onClick: () => setProtocolOpen(true),
+      disabled: !protocolId,
+      title: protocolId ? "View the protocol this plan was built from" : "This plan wasn't created from a protocol",
+    },
+    {
+      icon: "fa-clipboard-list",
+      label: "View Orders",
+      onClick: () => setOrdersOpen(true),
+      disabled: !day,
+      title: day ? `Chemotherapy Order of Cycle ${day.cycle_number} · Day ${day.cycle_day}` : noDayReason,
+    },
+    {
+      icon: "fa-print",
+      label: "Print MAR",
+      onClick: printMar,
+      disabled: !day,
+      title: day ? `Print the administration record of Cycle ${day.cycle_number} · Day ${day.cycle_day}` : noDayReason,
+    },
+    {
+      icon: "fa-download",
+      label: reportBusy ? "Preparing report..." : "Download Report",
+      onClick: () => void downloadReport(),
+      disabled: !day || reportBusy,
+      busy: reportBusy,
+      title: day ? `Download the Cycle ${day.cycle_number} administration report (PDF)` : noDayReason,
+    },
+  ];
 
   const matchesFilter = (item: ChemoAdministrationItem) => !pendingOnly || item.status === "PENDING";
   const itemsFor = (role: string) => items.filter(item => item.drug_role === role && matchesFilter(item));
@@ -882,7 +973,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
         </div>
       )}
 
-      <div className="flex gap-5">
+      <div className="flex flex-col gap-5 lg:flex-row">
         {/* ─── MAIN CONTENT ─── */}
         <div className={`min-w-0 flex-1 space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
 
@@ -1280,7 +1371,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
         </div>
 
         {/* ─── RIGHT SIDEBAR ─── */}
-        <div className="w-64 flex-shrink-0 space-y-4">
+        <div className="grid w-full flex-shrink-0 grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:flex lg:w-64 lg:flex-col lg:items-stretch">
 
           {/* Quick Actions */}
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1291,27 +1382,123 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
             <div className="space-y-2 p-3">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+                onClick={() => setAdverseOpen(true)}
+                disabled={!!adverseBlockedReason}
+                title={adverseBlockedReason || "Record an adverse event for this cycle day"}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white transition-all hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
-                <i className="fa-solid fa-plus text-xs" />
-                Add Administration
+                <i className="fa-solid fa-triangle-exclamation text-xs" />
+                Add Adverse
               </button>
-              {[
-                { icon: "fa-file-medical",     label: "View Protocol" },
-                { icon: "fa-clipboard-list",   label: "View Orders" },
-                { icon: "fa-print",            label: "Print MAR" },
-                { icon: "fa-download",         label: "Download Report" },
-              ].map(action => (
+              {quickActions.map(action => (
                 <button
-                  key={action.label}
+                  key={action.icon}
                   type="button"
-                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                  title={action.title}
+                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                 >
-                  <i className={`fa-solid ${action.icon} text-xs text-slate-400`} />
+                  <i className={`fa-solid ${action.busy ? "fa-spinner fa-spin" : action.icon} text-xs text-slate-400`} />
                   {action.label}
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Adverse Events of the cycle on screen */}
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-triangle-exclamation text-xs text-red-500" />
+                <h4 className="text-sm font-bold text-slate-800">Adverse Events</h4>
+                {adverseEvents.length > 0 && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">
+                    {adverseEvents.length}
+                  </span>
+                )}
+              </div>
+              {sortedAdverse.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAdverse(value => !value)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                >
+                  {showAllAdverse ? "Show Less" : "View All"}
+                </button>
+              )}
+            </div>
+            {adverseLoading && adverseEvents.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-slate-400">
+                <i className="fa-solid fa-spinner fa-spin mr-1.5" />
+                Loading adverse events...
+              </p>
+            ) : visibleAdverse.length > 0 ? (
+              <div className="divide-y divide-slate-50">
+                {visibleAdverse.map(event => {
+                  const grade = CTCAE_GRADES.find(g => g.value === String(event.ctcae_grade ?? ""));
+                  const onThisDay = !!day && !!event.plan_order_id && event.plan_order_id === day.plan_order_id;
+                  const edited =
+                    !!event.updated_at && !!event.created_at &&
+                    new Date(event.updated_at).getTime() - new Date(event.created_at).getTime() > 60_000;
+                  return (
+                    <div key={event.adverse_event_id} className={`flex items-start gap-0.5 px-2 py-1 transition-colors ${onThisDay ? "bg-red-50/40" : ""}`}>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAdverse(event)}
+                      disabled={!canRecordAdverse}
+                      title={canRecordAdverse ? "Open to edit this adverse event" : undefined}
+                      className="min-w-0 flex-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 disabled:cursor-default disabled:hover:bg-transparent"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 truncate text-xs font-semibold text-slate-800" title={event.adverse_event_name}>
+                          {event.adverse_event_name}
+                        </p>
+                        {event.ctcae_grade && (
+                          <span
+                            className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${grade?.badge ?? "border border-slate-200 bg-slate-100 text-slate-600"}`}
+                            title={grade ? `CTCAE Grade ${grade.value} - ${grade.severity}` : undefined}
+                          >
+                            G{event.ctcae_grade}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-500">
+                          {event.cycle_day ? `Day ${event.cycle_day} · ` : ""}
+                          {fmtDate(event.event_date)} {fmtTime(event.event_date)}
+                        </p>
+                        <span
+                          className={`flex-shrink-0 text-[10px] font-semibold ${event.resolved ? "text-green-600" : "text-amber-600"}`}
+                          title={event.resolved && event.resolution_date ? `Resolved on ${fmtDate(event.resolution_date.slice(0, 10))}` : undefined}
+                        >
+                          {event.resolved ? "Resolved" : "Ongoing"}
+                        </span>
+                      </div>
+                      {edited && (
+                        <p
+                          className="mt-0.5 text-[10px] italic text-slate-400"
+                          title={`Last edited ${fmtDate(event.updated_at)} ${fmtTime(event.updated_at)}`}
+                        >
+                          Edited
+                        </p>
+                      )}
+                    </button>
+                    {canRecordAdverse && (
+                      <AdverseRowActions
+                        event={event}
+                        onEdit={() => setEditingAdverse(event)}
+                        onResolve={() => setAdverseAction({ type: "resolve", event })}
+                        onRemove={() => setAdverseAction({ type: "remove", event })}
+                      />
+                    )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="px-4 py-4 text-xs text-slate-400">No adverse events recorded for this cycle.</p>
+            )}
           </div>
 
           {/* Current Cycle */}
@@ -1456,6 +1643,60 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
 
         </div>
       </div>
+
+      {protocolOpen && protocolId && (
+        <ProtocolViewModal
+          protocolId={protocolId}
+          cycleIntervalDays={sheet.plan.cycle_interval_days}
+          onClose={() => setProtocolOpen(false)}
+        />
+      )}
+
+      {ordersOpen && day && planId && (
+        <OrderViewModal
+          planId={planId}
+          cycleNumber={day.cycle_number}
+          cycleDay={day.cycle_day}
+          treatmentDate={day.treatment_date}
+          onClose={() => setOrdersOpen(false)}
+        />
+      )}
+
+      {editingAdverse && (
+        <AdverseEventModal
+          event={editingAdverse}
+          dayLabel={adverseDayLabel(editingAdverse)}
+          onSaved={record => adverseUpdated(record, "Adverse event updated")}
+          onClose={() => setEditingAdverse(null)}
+        />
+      )}
+
+      {adverseAction?.type === "resolve" && (
+        <ResolveAdverseModal
+          event={adverseAction.event}
+          dayLabel={adverseDayLabel(adverseAction.event)}
+          onSaved={record => adverseUpdated(record, "Adverse event resolved")}
+          onClose={() => setAdverseAction(null)}
+        />
+      )}
+
+      {adverseAction?.type === "remove" && (
+        <RemoveAdverseModal
+          event={adverseAction.event}
+          dayLabel={adverseDayLabel(adverseAction.event)}
+          onRemoved={adverseRemoved}
+          onClose={() => setAdverseAction(null)}
+        />
+      )}
+
+      {adverseOpen && day && (
+        <AdverseEventModal
+          day={day}
+          dayLabel={`Cycle ${day.cycle_number} · Day ${day.cycle_day} · ${fmtDate(day.treatment_date)}`}
+          onSaved={adverseSaved}
+          onClose={() => setAdverseOpen(false)}
+        />
+      )}
 
       {reasonTarget && (
         <ReasonModal

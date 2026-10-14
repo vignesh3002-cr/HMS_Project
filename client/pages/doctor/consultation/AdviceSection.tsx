@@ -10,6 +10,8 @@
 import API from "../../../api/axios";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import VoiceToText from "@/components/ui/voicetotext";
+import DateInputField from "./DateInputField";
+import { dateOnlyDMY, dmyToIsoStrict, targetDateError } from "./helpers";
 
 /* ============================================================
    ADVICE (OPD PRESCRIPTION)
@@ -931,6 +933,8 @@ export interface AdviceSectionHandle {
   getDraftRows: () => Omit<AdviceMedicineRow, "itemId" | "savedKey">[];
   /* Current Discussion text, for Save as Draft. */
   getDraftDiscussion: () => string;
+  /* Current Follow-up Date (DD-MM-YYYY), for Save as Draft and the print. */
+  getDraftFollowUpDate: () => string;
 }
 
 interface AdviceSectionProps {
@@ -977,6 +981,20 @@ const AdviceSection = forwardRef<
   const markDiscussionSaved = (value: string) => {
     savedDiscussionRef.current = value;
     setSavedDiscussion(value);
+  };
+
+  /* Follow-up Date (DD-MM-YYYY): when the patient should come back. Saved
+     on the encounter (encounter.follow_up_date) - the same value as the
+     Follow Up step's Next Visit Date. */
+  const [followUpDate, setFollowUpDate] = useState("");
+  const followUpDateRef = useRef("");
+  followUpDateRef.current = followUpDate;
+  const [savedFollowUpDate, setSavedFollowUpDate] = useState("");
+  const savedFollowUpDateRef = useRef("");
+
+  const markFollowUpDateSaved = (value: string) => {
+    savedFollowUpDateRef.current = value;
+    setSavedFollowUpDate(value);
   };
 
   /* ============================================================
@@ -1085,30 +1103,33 @@ const AdviceSection = forwardRef<
     setAdviceRows(merge);
   };
 
-  /* Seed the Discussion from the encounter. With nothing saved yet,
-     restore this patient's unsaved draft text. */
+  /* Seed the Discussion and the Follow-up Date from the encounter. With
+     nothing saved yet, restore this patient's unsaved draft values. */
   useEffect(() => {
     if (!encounter?.encounter_no) return;
     const saved = encounter.notes ?? "";
+    const savedFollowUp = dateOnlyDMY(encounter.follow_up_date);
     markDiscussionSaved(saved);
+    markFollowUpDateSaved(savedFollowUp);
     let initial = saved;
-    if (!saved) {
-      try {
-        const draft = JSON.parse(
-          localStorage.getItem("hms_consultation_draft") ?? "{}"
-        );
-        if (
-          draft.patientId &&
-          draft.patientId === patientId &&
-          typeof draft.adviceDiscussion === "string"
-        ) {
+    let initialFollowUp = savedFollowUp;
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem("hms_consultation_draft") ?? "{}"
+      );
+      if (draft.patientId && draft.patientId === patientId) {
+        if (!saved && typeof draft.adviceDiscussion === "string") {
           initial = draft.adviceDiscussion;
         }
-      } catch {
-        // Malformed draft - start from the saved value.
+        if (!savedFollowUp && typeof draft.adviceFollowUpDate === "string") {
+          initialFollowUp = draft.adviceFollowUpDate;
+        }
       }
+    } catch {
+      // Malformed draft - start from the saved values.
     }
     setDiscussion(initial);
+    setFollowUpDate(initialFollowUp);
   }, [encounter?.encounter_no]);
 
   /* ============================================================
@@ -1436,8 +1457,42 @@ const AdviceSection = forwardRef<
     }
   };
 
+  /* Saves the Follow-up Date on the encounter when it changed since the
+     last save/load (cleared -> null). An invalid or past date stops the
+     save with the reason, so nothing is lost. */
+  const saveFollowUpDate = async (
+    targetEncounter: EncounterRecord
+  ): Promise<"saved" | "unchanged" | "failed"> => {
+    const value = followUpDateRef.current.trim();
+    if (value === savedFollowUpDateRef.current.trim()) return "unchanged";
+    const invalid = targetDateError(value);
+    if (invalid) {
+      showToast(`Follow-up Date: ${invalid}`);
+      return "failed";
+    }
+    try {
+      await encounterApi.update(targetEncounter.encounter_no, {
+        follow_up_date: value ? dmyToIsoStrict(value) ?? null : null,
+      });
+      markFollowUpDateSaved(value);
+      /* The later steps (Follow Up, Summary) show the same date. */
+      if (patientId && value) {
+        localStorage.setItem(`hms_next_cycle_date_${patientId}`, value);
+      }
+      return "saved";
+    } catch (error: any) {
+      console.error("Failed to save the Follow-up Date:", error);
+      setAdviceError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save the Follow-up Date."
+      );
+      return "failed";
+    }
+  };
+
   /* Saves the whole section: the medicines as the encounter's
-     prescription, then the Discussion. Serialised so overlapping calls
+     prescription, then the Discussion and the Follow-up Date. Serialised so overlapping calls
      can never give one encounter two prescriptions. */
   const saveAdviceSection = async (
     targetEncounter: EncounterRecord
@@ -1450,11 +1505,16 @@ const AdviceSection = forwardRef<
       try {
         const medicines = await runAdviceSave(targetEncounter);
         const discussionResult = await saveDiscussion(targetEncounter);
-        if (medicines === "failed" || discussionResult === "failed") {
+        const followUpResult = await saveFollowUpDate(targetEncounter);
+        if (
+          medicines === "failed" ||
+          discussionResult === "failed" ||
+          followUpResult === "failed"
+        ) {
           return "failed";
         }
         if (
-          discussionResult === "saved" &&
+          (discussionResult === "saved" || followUpResult === "saved") &&
           (medicines === "empty" || medicines === "unchanged")
         ) {
           return "saved";
@@ -1477,6 +1537,9 @@ const AdviceSection = forwardRef<
     (adviceFilledRows.length > 0 || Boolean(advicePrescriptionId)) &&
     adviceSnapshot(adviceFilledRows) !== adviceSavedSnapshotRef.current;
   const discussionDirty = discussion.trim() !== savedDiscussion.trim();
+  const followUpDirty = followUpDate.trim() !== savedFollowUpDate.trim();
+  /* A saved date is shown as it is, even once it has passed. */
+  const followUpError = followUpDirty ? targetDateError(followUpDate) : "";
 
   /* Save feedback for the section; saving itself happens on Proceed to
      Next, so failures are explained here. */
@@ -1484,7 +1547,7 @@ const AdviceSection = forwardRef<
     <span className="text-red-600">{adviceError}</span>
   ) : adviceSaving ? (
     <span className="text-slate-500">Saving...</span>
-  ) : adviceDirty || discussionDirty ? (
+  ) : adviceDirty || discussionDirty || followUpDirty ? (
     <span className="text-slate-500">
       Unsaved changes, saved when you click Proceed to Next
     </span>
@@ -1530,6 +1593,7 @@ const AdviceSection = forwardRef<
         .filter((row) => !isAdviceRowEmpty(row))
         .map(({ itemId: _itemId, savedKey: _savedKey, ...row }) => row),
     getDraftDiscussion: () => discussionRef.current,
+    getDraftFollowUpDate: () => followUpDateRef.current,
   }));
 
   return (
@@ -1697,6 +1761,48 @@ const AdviceSection = forwardRef<
 
         </table>
       )}
+
+      {/* FOLLOW-UP DATE */}
+
+      <div className="flex w-full flex-col gap-2 sm:max-w-xs">
+
+        <div className="flex items-center justify-between gap-2">
+          <label
+            htmlFor="advice-follow-up-date"
+            className="text-xs font-bold leading-4 text-slate-500"
+          >
+            Follow-up Date
+          </label>
+          {followUpDate && (
+            <button
+              type="button"
+              onClick={() => setFollowUpDate("")}
+              className="text-[11px] font-medium text-slate-400 transition-colors hover:text-red-500"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <DateInputField
+          id="advice-follow-up-date"
+          value={followUpDate}
+          onChange={setFollowUpDate}
+          error={followUpError}
+          ariaLabel="Pick follow-up date"
+        />
+
+        {!followUpError && (
+          <span className="text-[10px] leading-[14px] text-slate-400">
+            {followUpDirty
+              ? "Unsaved change - saved when you click Proceed to Next"
+              : savedFollowUpDate
+                ? "Saved for this visit"
+                : "Type DD-MM-YYYY or pick from the calendar"}
+          </span>
+        )}
+
+      </div>
 
       {/* DISCUSSION */}
 

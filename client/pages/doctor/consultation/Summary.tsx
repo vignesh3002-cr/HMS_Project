@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { InpatientDischargeHistory } from "../patient-details/InpatientDischargeHistory";
 import { useLocation, useNavigate } from "react-router-dom";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -22,6 +23,7 @@ import {
   consultationApi,
   type PersonalHistoryItem,
   type EncounterReportRecord,
+  type EncounterPastTreatmentRecord,
 } from "../../../api/consultation.api";
 import {
   labTestMasterApi,
@@ -44,6 +46,7 @@ import {
   PAST_HISTORY_MARKER,
   protocolDayDilutions,
   resolveEffectiveStartDate,
+  fetchScheduledDate,
 } from "./helpers";
 
 /* ============================================================
@@ -61,6 +64,17 @@ import {
 const computeNextVisitDateForPatient = async (
   patientId: string
 ): Promise<string> => {
+  /* The next scheduled cycle/day's planned date in the plan, when it has
+     one; else the protocol interval from the stated start date. */
+  const scheduled = await fetchScheduledDate(
+    patientId,
+    localStorage.getItem(`hms_next_cycle_${patientId}`) ?? ""
+  );
+  if (scheduled) {
+    localStorage.setItem(`hms_next_cycle_date_${patientId}`, scheduled);
+    return scheduled;
+  }
+
   const protocolId =
     localStorage.getItem(`hms_selected_protocol_id_${patientId}`) ?? "";
   if (!protocolId) return "";
@@ -387,13 +401,9 @@ const Summary: React.FC<{
   const [summaryPerAbdomen, setSummaryPerAbdomen] = useState("");
   const [summaryRespiratory, setSummaryRespiratory] = useState("");
   const [summaryGenExam, setSummaryGenExam] = useState<string[]>([]);
-  const [summaryPastHistoryTreatment, setSummaryPastHistoryTreatment] =
-    useState<{
-      type: string;
-      date: string;
-      note: string;
-      response: string;
-    } | null>(null);
+  const [summaryPastTreatments, setSummaryPastTreatments] = useState<
+    EncounterPastTreatmentRecord[]
+  >([]);
   const [summaryPreviousReports, setSummaryPreviousReports] = useState("");
   const [summaryImmunization, setSummaryImmunization] = useState<
     PersonalHistoryItem[]
@@ -541,21 +551,6 @@ const Summary: React.FC<{
             ),
           ].filter(Boolean)
         );
-        setSummaryPastHistoryTreatment(
-          enc?.past_history_treatment_type ||
-            enc?.past_history_treatment_date ||
-            enc?.past_history_treatment_note ||
-            enc?.past_history_treatment_response
-            ? {
-                type: enc?.past_history_treatment_type ?? "",
-                date: enc?.past_history_treatment_date
-                  ? enc.past_history_treatment_date.slice(0, 10)
-                  : "",
-                note: enc?.past_history_treatment_note ?? "",
-                response: enc?.past_history_treatment_response ?? "",
-              }
-            : null
-        );
         setSummaryPreviousReports(enc?.previous_reports ?? "");
         setResolvedSummaryEncounterNo(enc?.encounter_no ?? "");
         setEncounterCheckIn(enc?.encounter_ts ?? enc?.created_at ?? "");
@@ -585,6 +580,15 @@ const Summary: React.FC<{
       })
       .catch((error) =>
         console.error("Failed to load summary personal history:", error)
+      );
+
+    consultationApi
+      .getEncounterPastTreatments(targetEncounterNo)
+      .then((response) => {
+        if (!cancelled) setSummaryPastTreatments(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load summary past treatments:", error)
       );
 
     setSummaryReportsLoading(true);
@@ -943,16 +947,31 @@ const Summary: React.FC<{
     };
   }, [dischargeProtocolId]);
 
-  /* This visit's drugs: the cycle day order(s) saved in this encounter,
-     else the plan's current order, else its baseline (a plan saved before
-     cycle day orders). A closed course orders nothing more. */
+  /* This visit's drugs: only the current cycle day - of the orders saved
+     in this encounter, the plan's current order, else the latest still
+     open day, else the latest day (completed days are left out) - else the
+     plan's current order, else its baseline (a plan saved before cycle day
+     orders). A closed course orders nothing more. */
   const planClosed = isChemoPlanClosed(plan);
-  const visitOrders: SummaryPlanOrder[] =
-    encounterOrders.length > 0
-      ? encounterOrders
-      : !planClosed && plan?.current_order
-        ? [plan.current_order]
-        : [];
+  const currentEncounterOrder: SummaryPlanOrder | undefined = (() => {
+    if (encounterOrders.length === 0) return undefined;
+    const current = encounterOrders.find(
+      (order) => order.plan_order_id === plan?.current_order?.plan_order_id
+    );
+    if (current) return current;
+    const latestFirst = [...encounterOrders].sort(
+      (a, b) => b.cycle_number - a.cycle_number || b.cycle_day - a.cycle_day
+    );
+    return (
+      latestFirst.find((order) => order.order_status !== "COMPLETED") ??
+      latestFirst[0]
+    );
+  })();
+  const visitOrders: SummaryPlanOrder[] = currentEncounterOrder
+    ? [currentEncounterOrder]
+    : !planClosed && plan?.current_order
+      ? [plan.current_order]
+      : [];
   const planItems: SummaryPlanItem[] =
     visitOrders.length > 0
       ? visitOrders.flatMap((order) => order.chemotherapy_plan_items ?? [])
@@ -1140,6 +1159,9 @@ const Summary: React.FC<{
      appointment date, else the encounter's check-in). */
   const diagnosisDate = dateOnlyDMY(plan?.oncology_staging_detail?.diagnosis_date);
   const plannedDateFor = (order: ChemoPlanOrderHeader) => {
+    /* The day's planned date from the plan's schedule (edited or as
+       calculated when the plan was created). */
+    if (order.planned_date) return dateOnlyDMY(order.planned_date);
     const cycle = (plan?.chemotherapy_cycle ?? []).find(
       (row) => row.cycle_number === order.cycle_number
     );
@@ -1166,9 +1188,19 @@ const Summary: React.FC<{
   const admissionDate =
     dateOnlyDMY(appointmentDate) || (encounterCheckIn ? formatDateDMY(encounterCheckIn) : "");
 
-  /* Pharmacy Slip: the visit's slip items, else (no slip yet) the cycle
-     day order's medicines with only their name and type. */
-  const slipItems = pharmacySlips.flatMap((slip) => slip.pharmacy_slip_item ?? []);
+  /* Pharmacy Slip: the current cycle day's slip items, else (no slip yet)
+     the cycle day order's medicines with only their name and type. */
+  const slipItems = pharmacySlips
+    .filter((slip) =>
+      visitOrders.length === 0 ||
+      visitOrders.some((order) =>
+        slip.plan_order_id
+          ? slip.plan_order_id === order.plan_order_id
+          : slip.cycle_number === order.cycle_number &&
+            slip.cycle_day === order.cycle_day
+      )
+    )
+    .flatMap((slip) => slip.pharmacy_slip_item ?? []);
   const pharmacySlipRows: PharmacySlipRow[] =
     slipItems.length > 0
       ? slipItems.map((item) => ({
@@ -2416,6 +2448,9 @@ const Summary: React.FC<{
             </div>
           </section>
 
+          {/* Inpatient stays: discharged + pending (renders nothing otherwise) */}
+          <InpatientDischargeHistory patientId={patientId ?? ""} />
+
           {/* =================================================
               GENERAL EXAMINATION
           ================================================== */}
@@ -2511,49 +2546,56 @@ const Summary: React.FC<{
           {/* =================================================
               PAST HISTORY TREATMENT + PREVIOUS REPORTS
           ================================================== */}
-          {(summaryPastHistoryTreatment || summaryPreviousReports) && (
+          {(summaryPastTreatments.length > 0 || summaryPreviousReports) && (
             <section>
-              {summaryPastHistoryTreatment && (
+              {summaryPastTreatments.length > 0 && (
                 <>
                   <h3 className="mb-4 text-xs font-medium text-indigo-900">
                     Past History Treatment
                   </h3>
 
-                  <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Treatment Type
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {summaryPastHistoryTreatment.type || "Not recorded"}
-                      </p>
-                    </div>
+                  {summaryPastTreatments.map((treatment) => (
+                    <div
+                      key={treatment.encounter_past_treatment_id}
+                      className="mb-6 grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3"
+                    >
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Treatment Type
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {treatment.treatment_type || "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">Date</p>
-                      <p className="text-xs text-slate-500">
-                        {summaryPastHistoryTreatment.date || "Not recorded"}
-                      </p>
-                    </div>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">Date</p>
+                        <p className="text-xs text-slate-500">
+                          {treatment.treatment_date
+                            ? treatment.treatment_date.slice(0, 10)
+                            : "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Brief Note
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {summaryPastHistoryTreatment.note || "Not recorded"}
-                      </p>
-                    </div>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Brief Note
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {treatment.note || "Not recorded"}
+                        </p>
+                      </div>
 
-                    <div>
-                      <p className="mb-2 font-medium text-slate-900">
-                        Treatment Response
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {summaryPastHistoryTreatment.response || "Not recorded"}
-                      </p>
+                      <div>
+                        <p className="mb-2 font-medium text-slate-900">
+                          Treatment Response
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {treatment.treatment_response || "Not recorded"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ))}
                 </>
               )}
 
