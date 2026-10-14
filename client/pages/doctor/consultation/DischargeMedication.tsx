@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { getUser } from "../../../utils/token";
@@ -74,7 +74,7 @@ type DischargeMedicationDraft = {
 const CUSTOM_DRUG_VALUE = "__custom_drug__";
 
 const DISCHARGE_EDIT_INPUT_CLASS =
-  "w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+  "w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 
 /* "1 tab 500 mg" -> number 500, unit "mg". A free-text dose with no leading
    number is kept whole in dosage and leaves the unit empty. */
@@ -954,7 +954,7 @@ const DischargeMedication: React.FC<{
               ? "Select or type a drug"
               : "Loading drugs..."
           }
-          className="h-10 rounded-md border-gray-300 text-base shadow-none"
+          className="h-10 rounded-md border-gray-300 text-xs shadow-none"
         />
         {!editDraft.medicineId && editDraft.drugName.trim() && (
           <p className="mt-1 text-xs text-gray-500">
@@ -993,7 +993,7 @@ const DischargeMedication: React.FC<{
       }
       placeholder="Instruction"
       rows={2}
-      className={`${DISCHARGE_EDIT_INPUT_CLASS} min-w-[180px] resize-y text-sm`}
+      className={`${DISCHARGE_EDIT_INPUT_CLASS} min-w-[180px] resize-y text-xs`}
     />
   );
 
@@ -1018,7 +1018,7 @@ const DischargeMedication: React.FC<{
             type="button"
             onClick={saveEdit}
             disabled={savingEdit}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {savingEdit ? "Saving" : "Save"}
           </button>
@@ -1027,7 +1027,7 @@ const DischargeMedication: React.FC<{
             type="button"
             onClick={cancelEdit}
             disabled={savingEdit}
-            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-xs font-bold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel
           </button>
@@ -1093,7 +1093,7 @@ const DischargeMedication: React.FC<{
         disabled={
           editingRowId !== null || savingEdit || medsLoading || Boolean(medsError)
         }
-        className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-xs font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <svg
           className="h-4 w-4"
@@ -1111,19 +1111,19 @@ const DischargeMedication: React.FC<{
       </button>
 
       {editError && (
-        <p className="text-sm font-medium text-red-600">{editError}</p>
+        <p className="text-xs font-medium text-red-600">{editError}</p>
       )}
     </div>
   );
 
   /* The whole table body, shared by the embedded and full-page layouts. */
   const renderTableBody = () => (
-    <tbody className="text-sm text-gray-500">
+    <tbody className="text-xs text-gray-500">
       {medsLoading && (
         <tr>
           <td
             colSpan={6}
-            className="px-8 py-8 text-center text-sm text-gray-500"
+            className="px-8 py-8 text-center text-xs text-gray-500"
           >
             Loading discharge medicines...
           </td>
@@ -1134,7 +1134,7 @@ const DischargeMedication: React.FC<{
         <tr>
           <td
             colSpan={6}
-            className="px-8 py-8 text-center text-sm text-gray-500"
+            className="px-8 py-8 text-center text-xs text-gray-500"
           >
             {medsProtocolId
               ? "No discharge medicines recorded on this patient's protocol yet."
@@ -1147,7 +1147,7 @@ const DischargeMedication: React.FC<{
         <tr>
           <td
             colSpan={6}
-            className="px-8 py-8 text-center text-sm text-red-500"
+            className="px-8 py-8 text-center text-xs text-red-500"
           >
             {medsError}
           </td>
@@ -1167,27 +1167,27 @@ const DischargeMedication: React.FC<{
   const DISCHARGE_HEADERS = (
     <thead>
       <tr className="border-b border-gray-200">
-        <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-1/4 px-8 py-5 text-xs font-bold uppercase tracking-wider text-gray-900">
           Drug Name
         </th>
 
-        <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-1/6 px-8 py-5 text-xs font-bold uppercase tracking-wider text-gray-900">
           Dosage
         </th>
 
-        <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-1/6 px-8 py-5 text-xs font-bold uppercase tracking-wider text-gray-900">
           Frequency
         </th>
 
-        <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-1/4 px-8 py-5 text-xs font-bold uppercase tracking-wider text-gray-900">
           Instruction
         </th>
 
-        <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-1/6 px-8 py-5 text-xs font-bold uppercase tracking-wider text-gray-900">
           Duration
         </th>
 
-        <th className="w-40 px-6 py-5 text-right text-[11px] font-bold uppercase tracking-wider text-gray-600">
+        <th className="w-40 px-6 py-5 text-right text-xs font-bold uppercase tracking-wider text-gray-900">
           Actions
         </th>
       </tr>
@@ -1215,7 +1215,7 @@ if (embedded) {
       {/* FOOTER ACTION */}
       <div className="mb-8 flex w-full flex-col items-end gap-2">
         {medsError && (
-          <div className="text-sm font-medium text-red-600">{medsError}</div>
+          <div className="text-xs font-medium text-red-600">{medsError}</div>
         )}
         <button
           type="button"
@@ -1245,19 +1245,19 @@ if (embedded) {
             />
           </div>
 
-          <h2 className="mb-2 text-[22px] font-bold text-gray-900">
+          <h2 className="mb-2 text-xs font-bold text-gray-900">
             {""}
           </h2>
 
-          <p className="mb-4 text-[15px] text-gray-500">
+          <p className="mb-4 text-xs text-gray-500">
             {""}
           </p>
 
-          <span className="mb-6 rounded-full bg-gray-100 px-4 py-1.5 text-xs font-semibold text-gray-600">
+          <span className="mb-6 rounded-full bg-gray-100 px-4 py-1.5 text-xs font-bold text-gray-900">
             {""}
           </span>
 
-          <p className="text-center text-sm font-bold tracking-wide text-blue-700">
+          <p className="text-center text-xs font-bold tracking-wide text-blue-700">
             {""}
           </p>
         </div>
@@ -1268,11 +1268,11 @@ if (embedded) {
             <PhoneIcon />
 
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 Phone
               </p>
 
-              <p className="text-[15px] font-medium text-gray-700">
+              <p className="text-xs font-medium text-gray-700">
                 {""}
               </p>
             </div>
@@ -1282,11 +1282,11 @@ if (embedded) {
             <MailIcon />
 
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 Email
               </p>
 
-              <p className="text-[15px] font-medium text-gray-700">
+              <p className="text-xs font-medium text-gray-700">
                 {""}
               </p>
             </div>
@@ -1297,41 +1297,41 @@ if (embedded) {
         <div className="flex-grow space-y-8 p-8">
           <div className="grid grid-cols-2 gap-x-4 gap-y-6">
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 Height
               </p>
 
-              <p className="text-[15px] font-bold text-gray-900">
+              <p className="text-xs font-bold text-gray-900">
                 {measurements.height}
               </p>
             </div>
 
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 Weight
               </p>
 
-              <p className="text-[15px] font-bold text-gray-900">
+              <p className="text-xs font-bold text-gray-900">
                 {measurements.weight}
               </p>
             </div>
 
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 BSA
               </p>
 
-              <p className="text-[15px] font-bold text-gray-900">
+              <p className="text-xs font-bold text-gray-900">
                 {measurements.bsa}
               </p>
             </div>
 
             <div>
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
                 BMI
               </p>
 
-              <p className="text-[15px] font-bold text-gray-900">
+              <p className="text-xs font-bold text-gray-900">
                 {measurements.bmi}
               </p>
             </div>
@@ -1340,7 +1340,7 @@ if (embedded) {
           <button
             type="button"
             onClick={handleViewProfile}
-            className="mt-8 w-full rounded-md border border-blue-600 px-4 py-2.5 font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="mt-8 w-full rounded-md border border-blue-600 px-4 py-2.5 text-xs font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             View Full Profile
           </button>
@@ -1361,7 +1361,7 @@ if (embedded) {
               <ArrowLeftIcon />
             </button>
 
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            <h1 className="text-xs font-bold tracking-tight text-gray-900">
               Patients
             </h1>
           </div>
@@ -1414,7 +1414,7 @@ if (embedded) {
             {/* FOOTER ACTION */}
             <div className="mx-auto mb-8 flex max-w-[1200px] flex-col items-end gap-2">
               {medsError && (
-                <div className="text-sm font-medium text-red-600">
+                <div className="text-xs font-medium text-red-600">
                   {medsError}
                 </div>
               )}

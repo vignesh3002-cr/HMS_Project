@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SummaryPlan } from "./types";
 import {
@@ -124,8 +124,8 @@ function errorMessage(error: any, fallback: string): string {
 function StatusBadge({ status }: { status: BadgeStatus }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.PENDING;
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cfg.className}`}>
-      <i className={`fa-solid ${cfg.icon} text-[9px]`} />
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg.className}`}>
+      <i className={`fa-solid ${cfg.icon} text-xs`} />
       {cfg.label}
     </span>
   );
@@ -185,7 +185,7 @@ function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange
         }}
         onFocus={openDropdown}
         placeholder="Select or type a reason..."
-        className={`w-full rounded-lg border ${borderCls} bg-white py-2 pl-3 pr-8 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-200`}
+        className={`w-full rounded-lg border ${borderCls} bg-white py-2 pl-3 pr-8 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-200`}
       />
       <button
         type="button"
@@ -193,7 +193,7 @@ function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange
         className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-600"
         tabIndex={-1}
       >
-        <i className={`fa-solid fa-chevron-down text-[10px] transition-transform ${open ? "rotate-180" : ""}`} />
+        <i className={`fa-solid fa-chevron-down text-xs transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && rect && createPortal(
         <div
@@ -205,9 +205,9 @@ function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange
             <button
               type="button"
               onMouseDown={e => { e.preventDefault(); onChange(value); setOpen(false); }}
-              className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-blue-600 hover:bg-blue-50"
+              className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50"
             >
-              <i className="fa-solid fa-plus mr-2 text-[10px]" />
+              <i className="fa-solid fa-plus mr-2 text-xs" />
               "{value}"
             </button>
           )}
@@ -221,10 +221,10 @@ function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange
                 setOpen(false);
                 if (r === "Others") inputRef.current?.focus();
               }}
-              className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ${value === r ? "font-semibold text-blue-600" : "text-slate-700"}`}
+              className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 ${value === r ? "font-semibold text-blue-600" : "text-slate-700"}`}
             >
               {r}
-              {value === r && <i className="fa-solid fa-check text-[10px] text-blue-500" />}
+              {value === r && <i className="fa-solid fa-check text-xs text-blue-500" />}
             </button>
           ))}
         </div>,
@@ -289,7 +289,7 @@ function ReasonModal({
               <i className={`fa-solid ${isSkip ? "fa-forward" : "fa-ban"}`} />
             </div>
             <div>
-              <h3 id="admin-reason-title" className="text-base font-bold text-slate-900">
+              <h3 id="admin-reason-title" className="text-xs font-bold text-slate-900">
                 {isSkip ? "Skip medication" : "Cancel medication"}
               </h3>
               <p className="text-xs text-slate-500">
@@ -314,30 +314,30 @@ function ReasonModal({
         <div className="space-y-4 px-5 py-4">
           <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-blue-700">{item.drug_name}</p>
-              <p className="truncate text-[11px] text-slate-500">
+              <p className="truncate text-xs font-semibold text-blue-700">{item.drug_name}</p>
+              <p className="truncate text-xs text-slate-500">
                 {[item.brand_name, item.administration_route, infusionText(item) !== "—" ? infusionText(item) : null]
                   .filter(Boolean)
                   .join(" · ") || "—"}
               </p>
             </div>
-            {dose && <span className="flex-shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm">{dose}</span>}
+            {dose && <span className="flex-shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-800 shadow-sm">{dose}</span>}
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
+            <label className="mb-1 block text-xs font-bold text-slate-800">
               Reason <span className="text-red-500">*</span>
             </label>
             <ReasonDropdown value={reason} onChange={setReason} hasError={touched && missingReason} />
             {touched && missingReason && (
-              <p className="mt-1 text-[11px] font-medium text-red-500">
+              <p className="mt-1 text-xs font-medium text-red-500">
                 Reason is required to {isSkip ? "skip" : "cancel"} a medication
               </p>
             )}
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
+            <label className="mb-1 block text-xs font-bold text-slate-800">
               Remarks <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <textarea
@@ -346,9 +346,9 @@ function ReasonModal({
               value={remarks}
               onChange={e => setRemarks(e.target.value)}
               placeholder="Add clinical notes, e.g. what the patient reported..."
-              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-200"
+              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-200"
             />
-            <p className="text-right text-[10px] text-slate-400">{remarks.length}/500</p>
+            <p className="text-right text-xs text-slate-400">{remarks.length}/500</p>
           </div>
         </div>
 
@@ -357,7 +357,7 @@ function ReasonModal({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
           >
             Back
           </button>
@@ -365,7 +365,7 @@ function ReasonModal({
             type="button"
             onClick={submit}
             disabled={saving || (touched && missingReason)}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${isSkip ? "bg-slate-700 hover:bg-slate-800" : "bg-red-600 hover:bg-red-700"}`}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${isSkip ? "bg-slate-700 hover:bg-slate-800" : "bg-red-600 hover:bg-red-700"}`}
           >
             {saving && <i className="fa-solid fa-spinner fa-spin text-xs" />}
             {isSkip ? "Skip Medication" : "Cancel Medication"}
@@ -396,16 +396,16 @@ function PendingMarquee({ sheet }: { sheet: ChemoAdministrationSheet }) {
 
   return (
     <div role="alert" className={`group relative flex h-10 items-center overflow-hidden rounded-xl border shadow-sm ${tone.box}`}>
-      <span className={`relative z-10 ml-2 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white ${tone.pill}`}>
+      <span className={`relative z-10 ml-2 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-white ${tone.pill}`}>
         <i className={`fa-solid ${overdue ? "fa-triangle-exclamation" : "fa-bell"} ${overdue ? "" : "fa-shake"}`} />
         {overdue ? "Overdue" : "Reminder"}
       </span>
       <div className="relative h-full flex-1 overflow-hidden">
-        <span className="absolute top-0 flex h-full items-center whitespace-nowrap text-sm font-medium animate-admin-marquee group-hover:[animation-play-state:paused] motion-reduce:hidden">
+        <span className="absolute top-0 flex h-full items-center whitespace-nowrap text-xs font-medium animate-admin-marquee group-hover:[animation-play-state:paused] motion-reduce:hidden">
           <i className="fa-solid fa-syringe mr-2 text-xs opacity-70" />
           {message}
         </span>
-        <span className="hidden h-full items-center truncate px-3 text-sm font-medium motion-reduce:flex" title={message}>
+        <span className="hidden h-full items-center truncate px-3 text-xs font-medium motion-reduce:flex" title={message}>
           {message}
         </span>
         <div className={`pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r ${tone.fade} to-transparent`} />
@@ -431,7 +431,7 @@ function RowActions({
   if (saving) {
     return (
       <span className="inline-flex h-7 w-7 items-center justify-center text-blue-500" aria-label="Saving">
-        <i className="fa-solid fa-spinner fa-spin text-sm" />
+        <i className="fa-solid fa-spinner fa-spin text-xs" />
       </span>
     );
   }
@@ -452,11 +452,11 @@ function RowActions({
           aria-label={`Update status of ${item.drug_name}`}
           className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-700"
         >
-          <i className="fa-solid fa-ellipsis-vertical text-sm" />
+          <i className="fa-solid fa-ellipsis-vertical text-xs" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        <DropdownMenuLabel className="text-xs font-bold uppercase tracking-wide text-slate-800">
           Update status
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -471,9 +471,9 @@ function RowActions({
               <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${STATUS_CONFIG[action.status].dot}`} />
               <span className="flex-1">
                 <span className={`block text-xs ${current ? "font-bold" : "font-semibold"} text-slate-800`}>{action.label}</span>
-                <span className="block text-[10px] text-slate-400">{action.hint}</span>
+                <span className="block text-xs text-slate-400">{action.hint}</span>
               </span>
-              {current && <i className="fa-solid fa-check mt-0.5 text-[10px] text-slate-500" />}
+              {current && <i className="fa-solid fa-check mt-0.5 text-xs text-slate-500" />}
             </DropdownMenuItem>
           );
         })}
@@ -508,31 +508,31 @@ function MedicationRows({
             key={item.administration_id ?? item.chemotherapy_plan_item_id}
             className={`border-b border-slate-50 transition-colors hover:bg-slate-50/50 ${item.status === "PENDING" && actionable ? "bg-amber-50/20" : ""}`}
           >
-            <td className="px-3 py-3 align-top text-sm text-slate-600">{index + 1}</td>
+            <td className="px-3 py-3 align-top text-xs text-slate-600">{index + 1}</td>
             <td className="px-3 py-3 align-top">
-              <p className="text-sm font-semibold text-blue-700">{item.drug_name}</p>
-              {item.brand_name && <p className="text-[11px] text-slate-400">({item.brand_name})</p>}
+              <p className="text-xs font-semibold text-blue-700">{item.drug_name}</p>
+              {item.brand_name && <p className="text-xs text-slate-400">({item.brand_name})</p>}
               {item.timing_relative_to_primary && (
-                <p className="mt-0.5 text-[10px] text-slate-400">
+                <p className="mt-0.5 text-xs text-slate-400">
                   <i className="fa-regular fa-clock mr-1" />
                   {item.timing_relative_to_primary}
                 </p>
               )}
             </td>
             <td className="px-3 py-3 align-top">
-              <p className="text-sm font-medium text-slate-800">{planned || calculated || "—"}</p>
+              <p className="text-xs font-medium text-slate-800">{planned || calculated || "—"}</p>
               {planned && calculated && planned !== calculated && (
-                <p className="text-[11px] text-slate-500">({calculated})</p>
+                <p className="text-xs text-slate-500">({calculated})</p>
               )}
             </td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{item.administration_route || "—"}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{dilution || "—"}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{infusionText(item)}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">
+            <td className="px-3 py-3 align-top text-xs text-slate-700">{item.administration_route || "—"}</td>
+            <td className="px-3 py-3 align-top text-xs text-slate-700">{dilution || "—"}</td>
+            <td className="px-3 py-3 align-top text-xs text-slate-700">{infusionText(item)}</td>
+            <td className="px-3 py-3 align-top text-xs text-slate-700">
               {item.status === "GIVEN" ? (
                 <>
                   <p>{item.administered_by_name || "—"}</p>
-                  {item.given_at && <p className="text-[10px] text-slate-400">{fmtTime(item.given_at)}</p>}
+                  {item.given_at && <p className="text-xs text-slate-400">{fmtTime(item.given_at)}</p>}
                 </>
               ) : (
                 "—"
@@ -541,12 +541,12 @@ function MedicationRows({
             <td className="max-w-[200px] px-3 py-3 align-top">
               <StatusBadge status={item.status} />
               {resolvedWithReason && item.status_reason && (
-                <p className="mt-1 truncate text-[10px] text-slate-500" title={[item.status_reason, item.remarks].filter(Boolean).join(" — ")}>
+                <p className="mt-1 truncate text-xs text-slate-500" title={[item.status_reason, item.remarks].filter(Boolean).join(" — ")}>
                   <span className="font-semibold">Reason:</span> {item.status_reason}
                 </p>
               )}
               {resolvedWithReason && item.remarks && (
-                <p className="truncate text-[10px] italic text-slate-400" title={item.remarks}>{item.remarks}</p>
+                <p className="truncate text-xs italic text-slate-400" title={item.remarks}>{item.remarks}</p>
               )}
             </td>
             <td className="px-3 py-3 align-top">
@@ -568,7 +568,7 @@ function MedicationRows({
 function MedicationTableHead() {
   return (
     <thead>
-      <tr className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <tr className="border-b border-slate-100 bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-800">
         <th className="px-3 py-3">#</th>
         <th className="px-3 py-3">Medication</th>
         <th className="px-3 py-3">Dose</th>
@@ -587,7 +587,7 @@ function PendingCount({ items }: { items: ChemoAdministrationItem[] }) {
   const pending = items.filter(item => item.status === "PENDING").length;
   if (pending === 0) return null;
   return (
-    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
       {pending} pending
     </span>
   );
@@ -615,8 +615,8 @@ function EmptyState({ icon, title, text }: { icon: string; title: string; text: 
       <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50">
         <i className={`fa-solid ${icon} text-blue-500`} />
       </div>
-      <h3 className="text-sm font-bold text-slate-800">{title}</h3>
-      <p className="mt-1 max-w-md text-sm text-slate-500">{text}</p>
+      <h3 className="text-xs font-bold text-slate-800">{title}</h3>
+      <p className="mt-1 max-w-md text-xs text-slate-500">{text}</p>
     </div>
   );
 }
@@ -809,7 +809,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   if (!sheet) {
     if (loadError) {
       return (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-xs text-red-700">
           <span><i className="fa-solid fa-circle-exclamation mr-2" />{loadError}</span>
           <button
             type="button"
@@ -876,7 +876,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
       <PendingMarquee sheet={sheet} />
 
       {loadError && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700">
           <span><i className="fa-solid fa-circle-exclamation mr-2" />{loadError}</span>
           <button type="button" onClick={() => void loadSheet(selectedDay)} className="text-xs font-semibold underline">Retry</button>
         </div>
@@ -904,8 +904,8 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       <i className="fa-solid fa-syringe text-blue-600" />
                     </div>
                     <div>
-                      <h2 className="text-base font-bold text-slate-900">Chemotherapy Administration</h2>
-                      <p className="text-sm text-slate-500">
+                      <h2 className="text-xs font-bold text-slate-900">Chemotherapy Administration</h2>
+                      <p className="text-xs text-slate-500">
                         Cycle {day.cycle_number}&nbsp;&nbsp;|&nbsp;&nbsp;{fmtDate(day.treatment_date)} (Day {day.cycle_day})
                       </p>
                       <p className="mt-0.5 text-xs text-slate-400">Protocol: {protocol}</p>
@@ -941,11 +941,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                             </div>
                             {isActive ? (
                               <div className="flex flex-col items-center text-center leading-tight">
-                                <span className="text-[10px] font-semibold text-blue-600">Cycle {day.cycle_number}</span>
-                                <span className="text-[10px] font-semibold text-blue-600">Day {dayNumber}</span>
+                                <span className="text-xs font-semibold text-blue-600">Cycle {day.cycle_number}</span>
+                                <span className="text-xs font-semibold text-blue-600">Day {dayNumber}</span>
                               </div>
                             ) : (
-                              <span className={`text-[10px] font-medium ${isDone ? "text-blue-600" : isGiving ? "text-amber-600" : "text-slate-400"} ${clickable ? "group-hover:underline" : ""}`}>
+                              <span className={`text-xs font-medium ${isDone ? "text-blue-600" : isGiving ? "text-amber-600" : "text-slate-400"} ${clickable ? "group-hover:underline" : ""}`}>
                                 Day {dayNumber}
                               </span>
                             )}
@@ -963,7 +963,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
                   <div className="flex items-center gap-2 text-xs">
                     {treatmentStatus && (
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${treatmentStatus.className}`}>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${treatmentStatus.className}`}>
                         {treatmentStatus.label}
                       </span>
                     )}
@@ -976,7 +976,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                         onClick={() => { setSelectedDay(null); void loadSheet(null); }}
                         className="ml-1 font-semibold text-blue-600 hover:text-blue-800"
                       >
-                        <i className="fa-solid fa-rotate-left mr-1 text-[10px]" />
+                        <i className="fa-solid fa-rotate-left mr-1 text-xs" />
                         Back to current day
                       </button>
                     )}
@@ -987,7 +987,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       disabled={!day.can_complete || completing}
                       onClick={() => setConfirmOpen(true)}
                       title={day.can_complete ? "" : "Mark every medicine as Given, Skipped or Cancelled first"}
-                      className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                      className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
                     >
                       <i className="fa-solid fa-circle-check text-xs" />
                       Complete Cycle {day.cycle_number} · Day {day.cycle_day}
@@ -1009,14 +1009,14 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                         <i className={`fa-solid ${stat.icon} text-xs`} />
                         <span className="text-xs font-medium">{stat.label}</span>
                       </div>
-                      <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                      <p className={`text-xs font-bold ${stat.color}`}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
               {day.order_status === "ORDERED" && (
-                <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
                   <i className="fa-solid fa-circle-info mt-0.5" />
                   <p>
                     Cycle {day.cycle_number} / Day {day.cycle_day} has been ordered but its consultation is not submitted yet.
@@ -1025,7 +1025,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 </div>
               )}
               {day.order_status === "COMPLETED" && items.some(item => item.status === "NOT_RECORDED") && (
-                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                   <i className="fa-solid fa-clock-rotate-left mt-0.5" />
                   <p>
                     This cycle day was completed{day.completed_at ? ` on ${fmtDate(day.completed_at)}` : ""} before administration
@@ -1046,8 +1046,8 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <div key={section.role} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <i className={`fa-solid ${section.icon} text-sm text-blue-500`} />
-                          <h3 className="text-sm font-bold text-slate-800">{section.title}</h3>
+                          <i className={`fa-solid ${section.icon} text-xs text-blue-500`} />
+                          <h3 className="text-xs font-bold text-slate-800">{section.title}</h3>
                           <PendingCount items={sectionAll} />
                         </div>
                         <div className="flex items-center gap-3">
@@ -1056,11 +1056,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                             onClick={() => setPendingOnly(value => !value)}
                             className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${pendingOnly ? "bg-amber-100 text-amber-700" : "text-blue-600 hover:text-blue-800"}`}
                           >
-                            <i className={`fa-solid ${pendingOnly ? "fa-filter-circle-xmark" : "fa-filter"} text-[10px]`} />
+                            <i className={`fa-solid ${pendingOnly ? "fa-filter-circle-xmark" : "fa-filter"} text-xs`} />
                             {pendingOnly ? "Pending only" : "Show All Drugs"}
                           </button>
                           <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                            <i className="fa-solid fa-magnifying-glass text-[10px] text-slate-400" />
+                            <i className="fa-solid fa-magnifying-glass text-xs text-slate-400" />
                             <input
                               type="text"
                               placeholder="Search drug name..."
@@ -1085,7 +1085,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                           </tbody>
                         </table>
                         {sectionItems.length === 0 && (
-                          <p className="px-5 py-6 text-center text-sm text-slate-400">
+                          <p className="px-5 py-6 text-center text-xs text-slate-400">
                             {sectionAll.length === 0 ? section.emptyText : "No drugs match the current filter."}
                           </p>
                         )}
@@ -1103,9 +1103,9 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       className="flex w-full items-center justify-between px-5 py-3"
                     >
                       <div className="flex items-center gap-2">
-                        <i className={`fa-solid ${section.icon} text-sm text-blue-500`} />
-                        <h3 className="text-sm font-bold text-slate-800">{section.title}</h3>
-                        <span className="text-[11px] font-medium text-slate-400">({sectionAll.length})</span>
+                        <i className={`fa-solid ${section.icon} text-xs text-blue-500`} />
+                        <h3 className="text-xs font-bold text-slate-800">{section.title}</h3>
+                        <span className="text-xs font-medium text-slate-400">({sectionAll.length})</span>
                         <PendingCount items={sectionAll} />
                       </div>
                       <i className={`fa-solid fa-chevron-${open ? "up" : "down"} text-xs text-slate-400`} />
@@ -1126,7 +1126,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                             </tbody>
                           </table>
                         ) : (
-                          <p className="px-5 py-5 text-center text-sm text-slate-400">
+                          <p className="px-5 py-5 text-center text-xs text-slate-400">
                             {sectionAll.length === 0 ? section.emptyText : "No drugs match the current filter."}
                           </p>
                         )}
@@ -1146,10 +1146,10 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               className="flex w-full items-center justify-between px-5 py-3"
             >
               <div className="flex items-center gap-2">
-                <i className="fa-solid fa-capsules text-sm text-blue-500" />
-                <h3 className="text-sm font-bold text-slate-800">Post Medications</h3>
-                <span className="text-[11px] font-medium text-slate-400">({sheet.post_medications.length})</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Take-home · reference</span>
+                <i className="fa-solid fa-capsules text-xs text-blue-500" />
+                <h3 className="text-xs font-bold text-slate-800">Post Medications</h3>
+                <span className="text-xs font-medium text-slate-400">({sheet.post_medications.length})</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-800">Take-home · reference</span>
               </div>
               <i className={`fa-solid fa-chevron-${openSections.POST !== false ? "up" : "down"} text-xs text-slate-400`} />
             </button>
@@ -1158,7 +1158,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 {sheet.post_medications.length > 0 ? (
                   <table className="w-full text-left">
                     <thead>
-                      <tr className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <tr className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-800">
                         <th className="px-5 py-2.5">#</th>
                         <th className="px-3 py-2.5">Medication</th>
                         <th className="px-3 py-2.5">Dose</th>
@@ -1170,21 +1170,21 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <tbody>
                       {sheet.post_medications.map((med, index) => (
                         <tr key={med.chemotherapy_plan_item_id} className="border-t border-slate-50">
-                          <td className="px-5 py-3 text-sm text-slate-600">{index + 1}</td>
+                          <td className="px-5 py-3 text-xs text-slate-600">{index + 1}</td>
                           <td className="px-3 py-3">
-                            <p className="text-sm font-semibold text-slate-800">{med.drug_name}</p>
-                            {med.brand_name && <p className="text-[11px] text-slate-400">({med.brand_name})</p>}
+                            <p className="text-xs font-semibold text-slate-800">{med.drug_name}</p>
+                            {med.brand_name && <p className="text-xs text-slate-400">({med.brand_name})</p>}
                           </td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{doseText(med.protocol_dose, med.protocol_dose_unit) || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.administration_route || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.frequency || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.duration || "—"}</td>
+                          <td className="px-3 py-3 text-xs text-slate-700">{doseText(med.protocol_dose, med.protocol_dose_unit) || "—"}</td>
+                          <td className="px-3 py-3 text-xs text-slate-700">{med.administration_route || "—"}</td>
+                          <td className="px-3 py-3 text-xs text-slate-700">{med.frequency || "—"}</td>
+                          <td className="px-3 py-3 text-xs text-slate-700">{med.duration || "—"}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 ) : (
-                  <p className="px-5 py-5 text-center text-sm text-slate-400">No post-treatment medicines on this plan.</p>
+                  <p className="px-5 py-5 text-center text-xs text-slate-400">No post-treatment medicines on this plan.</p>
                 )}
               </div>
             )}
@@ -1195,11 +1195,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
             <div className="flex-1">
               <div className="mb-4 flex items-center text-[#1d4ed8]">
                 <i className="fa-regular fa-file-lines mr-2" />
-                <h4 className="text-sm font-bold">Instructions</h4>
+                <h4 className="text-xs font-bold">Instructions</h4>
               </div>
-              <p className="mb-3 text-sm text-[#64748b]">Administration instructions for this cycle day:</p>
+              <p className="mb-3 text-xs text-[#64748b]">Administration instructions for this cycle day:</p>
               {instructionItems.length > 0 ? (
-                <ul className="space-y-3 text-sm text-[#1e293b]">
+                <ul className="space-y-3 text-xs text-[#1e293b]">
                   {instructionItems.map(item => (
                     <li key={item.chemotherapy_plan_item_id} className="rounded-[12px] border border-slate-100 p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -1226,7 +1226,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                   ))}
                 </ul>
               ) : localInstructions.length > 0 ? (
-                <ul className="space-y-3 text-sm text-[#1e293b]">
+                <ul className="space-y-3 text-xs text-[#1e293b]">
                   {localInstructions.map((instr, idx) => (
                     <li key={idx} className="rounded-[12px] border border-slate-100 p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -1251,7 +1251,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                   ))}
                 </ul>
               ) : (
-                <ul className="list-inside list-disc space-y-2 text-sm font-medium text-[#1e293b]">
+                <ul className="list-inside list-disc space-y-2 text-xs font-medium text-[#1e293b]">
                   <li>No instructions recorded.</li>
                 </ul>
               )}
@@ -1267,10 +1267,10 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               )}
             </div>
             <div className="ml-6 flex w-[160px] flex-shrink-0 flex-col items-center justify-center rounded-[12px] border border-slate-200 bg-slate-50 p-5">
-              <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#1d4ed8]">
+              <div className="mb-2 text-xs font-bold uppercase tracking-wider text-[#1d4ed8]">
                 {currentCycle?.next_cycle_number ? `NEXT · CYCLE ${currentCycle.next_cycle_number}` : "NEXT CYCLE"}
               </div>
-              <div className="flex items-center text-sm font-bold text-[#1d4ed8]">
+              <div className="flex items-center text-xs font-bold text-[#1d4ed8]">
                 <i className="fa-regular fa-calendar mr-2" />
                 {fmtDate(currentCycle?.next_cycle_date)}
               </div>
@@ -1286,12 +1286,12 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
               <i className="fa-solid fa-bolt text-xs text-yellow-500" />
-              <h4 className="text-sm font-bold text-slate-800">Quick Actions</h4>
+              <h4 className="text-xs font-bold text-slate-800">Quick Actions</h4>
             </div>
             <div className="space-y-2 p-3">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 <i className="fa-solid fa-plus text-xs" />
                 Add Administration
@@ -1305,7 +1305,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 <button
                   key={action.label}
                   type="button"
-                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   <i className={`fa-solid ${action.icon} text-xs text-slate-400`} />
                   {action.label}
@@ -1318,11 +1318,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
               <i className="fa-solid fa-rotate text-xs text-blue-500" />
-              <h4 className="text-sm font-bold text-slate-800">Current Cycle</h4>
+              <h4 className="text-xs font-bold text-slate-800">Current Cycle</h4>
             </div>
             <div className="space-y-4 p-4">
               {courseCompleted || !currentCycle ? (
-                <div className="rounded-lg bg-green-50 px-3 py-2.5 text-sm font-semibold text-green-700">
+                <div className="rounded-lg bg-green-50 px-3 py-2.5 text-xs font-semibold text-green-700">
                   <i className="fa-solid fa-flag-checkered mr-2" />
                   {courseCompleted ? "Course completed" : "No open cycle"}
                   <p className="mt-0.5 text-xs font-normal text-green-600">
@@ -1332,17 +1332,17 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               ) : (
                 <>
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-sm font-bold text-slate-900">
+                    <p className="text-xs font-bold text-slate-900">
                       Cycle {currentCycle.cycle_number} - Day {currentCycle.current_day}
                     </p>
-                    <span className="text-[11px] text-slate-400">of {sheet.plan.planned_cycles}</span>
+                    <span className="text-xs text-slate-400">of {sheet.plan.planned_cycles}</span>
                   </div>
                   {!currentCycle.started && (
-                    <p className="-mt-2 text-[11px] font-medium text-blue-600">Upcoming cycle</p>
+                    <p className="-mt-2 text-xs font-medium text-blue-600">Upcoming cycle</p>
                   )}
                   <div>
                     <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-500">Days completed</span>
+                      <span className="text-xs text-slate-500">Days completed</span>
                       <span className="text-xs font-semibold text-blue-600">
                         {currentCycle.completed_days} / {currentCycle.total_days} Days
                       </span>
@@ -1358,13 +1358,13 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <p className="mb-0.5 text-xs text-slate-500">
                       {currentCycle.started ? "Next Cycle Date" : `Cycle ${currentCycle.cycle_number} Due`}
                     </p>
-                    <p className="text-sm font-semibold text-slate-800">{fmtDate(currentCycle.next_cycle_date)}</p>
+                    <p className="text-xs font-semibold text-slate-800">{fmtDate(currentCycle.next_cycle_date)}</p>
                   </div>
                 </>
               )}
               <div>
                 <p className="mb-0.5 text-xs text-slate-500">Regimen</p>
-                <p className="text-sm font-semibold text-slate-800">{protocol}</p>
+                <p className="text-xs font-semibold text-slate-800">{protocol}</p>
               </div>
             </div>
           </div>
@@ -1373,7 +1373,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
               <i className="fa-solid fa-clipboard-list text-xs text-blue-500" />
-              <h4 className="text-sm font-bold text-slate-800">Administration Details</h4>
+              <h4 className="text-xs font-bold text-slate-800">Administration Details</h4>
             </div>
             <div className="space-y-3 p-4">
               {[
@@ -1384,7 +1384,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 <div key={item.label} className="flex items-start gap-2.5">
                   <i className={`fa-solid ${item.icon} mt-0.5 text-xs text-slate-400`} />
                   <div>
-                    <p className="text-[11px] text-slate-500">{item.label}</p>
+                    <p className="text-xs text-slate-500">{item.label}</p>
                     <p className="text-xs font-semibold text-slate-800">{item.value}</p>
                   </div>
                 </div>
@@ -1392,7 +1392,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               <div className="flex items-start gap-2.5">
                 <i className="fa-solid fa-shield-halved mt-0.5 text-xs text-slate-400" />
                 <div>
-                  <p className="text-[11px] text-slate-500">Verification Status</p>
+                  <p className="text-xs text-slate-500">Verification Status</p>
                   <p className={`text-xs font-semibold ${day?.physician_approved ? "text-green-700" : "text-amber-600"}`}>
                     {day?.physician_approved ? "Physician approved" : "Awaiting physician approval"}
                   </p>
@@ -1401,9 +1401,9 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               <div className="flex items-start gap-2.5">
                 <i className="fa-solid fa-spinner mt-0.5 text-xs text-slate-400" />
                 <div>
-                  <p className="text-[11px] text-slate-500">Treatment Status</p>
+                  <p className="text-xs text-slate-500">Treatment Status</p>
                   {treatmentStatus ? (
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${treatmentStatus.className}`}>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${treatmentStatus.className}`}>
                       {treatmentStatus.label}
                     </span>
                   ) : (
@@ -1419,13 +1419,13 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div className="flex items-center gap-2">
                 <i className="fa-solid fa-clock-rotate-left text-xs text-blue-500" />
-                <h4 className="text-sm font-bold text-slate-800">Previous Cycles</h4>
+                <h4 className="text-xs font-bold text-slate-800">Previous Cycles</h4>
               </div>
               {sheet.previous_cycles.length > 3 && (
                 <button
                   type="button"
                   onClick={() => setShowAllCycles(value => !value)}
-                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800"
                 >
                   {showAllCycles ? "Show Less" : "View All"}
                 </button>
@@ -1439,10 +1439,10 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <div key={row.chemotherapy_cycle_id} className="flex items-start justify-between gap-2 px-4 py-3">
                       <div>
                         <p className="text-xs font-semibold text-slate-800">Cycle {row.cycle_number}</p>
-                        <p className="text-[11px] text-slate-500">{fmtDate(row.completion_date)}</p>
-                        <p className="mt-0.5 text-[11px] leading-tight text-slate-400">{row.protocol_name || protocol}</p>
+                        <p className="text-xs text-slate-500">{fmtDate(row.completion_date)}</p>
+                        <p className="mt-0.5 text-xs leading-tight text-slate-400">{row.protocol_name || protocol}</p>
                       </div>
-                      <span className={`mt-0.5 flex-shrink-0 text-[11px] font-semibold ${completed ? "text-green-600" : "text-red-500"}`}>
+                      <span className={`mt-0.5 flex-shrink-0 text-xs font-semibold ${completed ? "text-green-600" : "text-red-500"}`}>
                         {completed ? "Completed" : "Cancelled"}
                       </span>
                     </div>
@@ -1473,7 +1473,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           type="success"
           title={`Complete Cycle ${day.cycle_number} · Day ${day.cycle_day}?`}
           description={
-            <div className="space-y-2 text-sm">
+            <div className="space-y-2 text-xs">
               <p>
                 All {plural(summary.total, "medicine")} are resolved — <b>{summary.given}</b> given,{" "}
                 <b>{summary.skipped}</b> skipped, <b>{summary.cancelled}</b> cancelled. The day's administration

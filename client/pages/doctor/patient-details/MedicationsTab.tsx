@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { chemoPlanCurrentItems, chemoPlanItemName } from "../../../api/chemotherapy.api";
 import type { SummaryPlanItem, SummaryPlan } from "./types";
 import { useDischargeMedicines } from "./hooks";
@@ -87,8 +87,8 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                   ].map(([label, value, icon, cls]) => (
                     <div key={label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                       <div>
-                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-                        <p className="text-2xl font-bold text-slate-800">{value}</p>
+                        <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-800">{label}</p>
+                        <p className="text-xs font-bold text-slate-800">{value}</p>
                       </div>
                       <div className={`flex h-10 w-10 items-center justify-center rounded-full ${cls}`}>
                         <i className={icon} />
@@ -103,15 +103,15 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                       <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge={`${medPremedications.length} Prescribed`} />
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[700px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+                        <table className="w-full min-w-[700px] text-left text-xs">
+                          <thead className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
                             <tr>
-                              <th className="w-12 px-6 py-4 text-center font-semibold">#</th>
-                              <th className="px-6 py-4 font-semibold">MEDICATION</th>
-                              <th className="px-6 py-4 font-semibold">DOSE</th>
-                              <th className="px-6 py-4 font-semibold">ROUTE</th>
-                              <th className="px-6 py-4 font-semibold">TIMING</th>
-                              <th className="px-6 py-4 text-center font-semibold">STATUS</th>
+                              <th className="w-12 px-6 py-4 text-center font-bold text-gray-900">#</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">MEDICATION</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">DOSE</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">ROUTE</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">TIMING</th>
+                              <th className="px-6 py-4 text-center font-bold text-gray-900">STATUS</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -143,8 +143,8 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                       <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge={`${medChemoDrugs.length} Prescribed`} badgeClass="border border-red-100 bg-red-50 text-red-600" />
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[850px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+                        <table className="w-full min-w-[850px] text-left text-xs">
+                          <thead className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
                             <tr>
                               <th className="w-12 px-6 py-4 text-center">#</th>
                               <th className="px-6 py-4">DRUG NAME</th>
@@ -182,15 +182,15 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                     <section className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                       <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge={`${portalDischargeMeds.length} Prescribed`} />
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[750px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+                        <table className="w-full min-w-[750px] text-left text-xs">
+                          <thead className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
                             <tr>
-                              <th className="w-12 px-6 py-4 text-center font-semibold">#</th>
-                              <th className="px-6 py-4 font-semibold">MEDICATION</th>
-                              <th className="px-6 py-4 font-semibold">DOSE</th>
-                              <th className="px-6 py-4 font-semibold">FREQUENCY</th>
-                              <th className="px-6 py-4 font-semibold">INSTRUCTION</th>
-                              <th className="px-6 py-4 font-semibold">DURATION</th>
+                              <th className="w-12 px-6 py-4 text-center font-bold text-gray-900">#</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">MEDICATION</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">DOSE</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">FREQUENCY</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">INSTRUCTION</th>
+                              <th className="px-6 py-4 font-bold text-gray-900">DURATION</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -227,18 +227,18 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                   {/* Right sidebar */}
                   <aside className="w-full shrink-0 space-y-6 lg:w-80">
                     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                      <h3 className="mb-6 text-base font-bold text-slate-800">Next Appointment</h3>
+                      <h3 className="mb-6 text-xs font-bold text-slate-800">Next Appointment</h3>
                       <div className="mb-6 flex items-start">
                         <div className="mr-4 flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#0052cc]">
-                          <i className="fa-regular fa-calendar text-xl" />
+                          <i className="fa-regular fa-calendar text-xs" />
                         </div>
                         <div>
-                          <p className="text-lg font-bold text-slate-800">{medCurrentCycleInfo?.date || "—"}</p>
-                          <p className="mb-1 text-sm text-slate-500">—</p>
-                          <p className="text-sm font-medium text-[#0052cc]">{medCurrentCycleInfo ? `Cycle ${medCurrentCycleInfo.cycle}` : "—"}</p>
+                          <p className="text-xs font-bold text-slate-800">{medCurrentCycleInfo?.date || "—"}</p>
+                          <p className="mb-1 text-xs text-slate-500">—</p>
+                          <p className="text-xs font-medium text-[#0052cc]">{medCurrentCycleInfo ? `Cycle ${medCurrentCycleInfo.cycle}` : "—"}</p>
                         </div>
                       </div>
-                      <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
+                      <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-800 shadow-sm transition-colors hover:bg-slate-50">
                         Reschedule
                       </button>
                     </section>
@@ -246,13 +246,13 @@ const MedicationsTab: React.FC<MedicationsTabProps> = ({
                     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="mb-6 flex items-center">
                         <i className="fa-regular fa-clock mr-2 text-[#0052cc]" />
-                        <h3 className="text-base font-bold text-slate-800">Medication Timeline</h3>
+                        <h3 className="text-xs font-bold text-slate-800">Medication Timeline</h3>
                       </div>
                       <div className="relative space-y-8 pl-4 before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-slate-200">
                         <div className="relative">
                           <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-slate-300 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">—</p>
-                          <p className="text-sm text-slate-600">No medication administration records found for this patient yet.</p>
+                          <p className="mb-0.5 text-xs font-bold text-slate-800">—</p>
+                          <p className="text-xs text-slate-600">No medication administration records found for this patient yet.</p>
                         </div>
                       </div>
                     </section>

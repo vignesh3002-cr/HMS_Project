@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -1538,7 +1538,7 @@ const AdviceSection = forwardRef<
       <div className="flex w-full items-center justify-between gap-4">
 
         <div className="flex flex-col">
-          <div className="text-lg font-bold leading-7 text-slate-800">
+          <div className="text-xs font-bold leading-4 text-slate-800">
             Advice
           </div>
           <div className="text-xs leading-4 text-slate-500">
@@ -1604,7 +1604,7 @@ const AdviceSection = forwardRef<
               ].map((heading) => (
                 <th
                   key={heading}
-                  className="border-y border-slate-200 bg-slate-50 px-2 py-2 text-xs font-bold leading-4 text-slate-500 first:rounded-tl-md first:border-l"
+                  className="border-y border-slate-200 bg-slate-50 px-2 py-2 text-xs font-bold leading-4 text-slate-800 first:rounded-tl-md first:border-l"
                 >
                   {heading}
                 </th>
@@ -1702,7 +1702,7 @@ const AdviceSection = forwardRef<
 
       <div className="flex w-full flex-col gap-2">
 
-        <label className="text-xs font-bold leading-4 text-slate-500">
+        <label className="text-xs font-bold leading-4 text-slate-800">
           Discussion
         </label>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -2198,30 +2198,23 @@ const Summary: React.FC<{
           SUMMARY CARD
       ==================================================== */}
       <div className="mb-6 flex flex-1 flex-col rounded-b-xl border border-slate-200 bg-white shadow-sm">
-        {/* Summary Heading */}
-        <div className="flex justify-center border-b border-slate-100 p-4">
-          <h2 className="text-xl font-semibold text-blue-700">
-            Summary
-          </h2>
-        </div>
-
         <div className="flex flex-1 flex-col gap-10 p-8">
           {/* =================================================
               PATIENT INFORMATION
           ================================================== */}
           <section>
             {planLoading && (
-              <div className="mb-4 text-sm text-slate-500">
+              <div className="mb-4 text-xs text-slate-500">
                 Loading chemotherapy plan...
               </div>
             )}
             {planError && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                 {planError}
               </div>
             )}
             {!planLoading && !planError && !plan && (
-              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                 No chemotherapy plan found for this patient yet.
               </div>
             )}
@@ -2232,7 +2225,7 @@ const Summary: React.FC<{
                     <p className="mb-2 font-medium text-slate-900">
                       Cancer Type
                     </p>
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {cancerType}
                     </p>
                   </div>
@@ -2242,7 +2235,7 @@ const Summary: React.FC<{
                       Stage
                     </p>
 
-                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                    <p className="flex items-center gap-2 text-xs text-slate-500">
                       {stage}
                       <span className="text-slate-400"></span>
                     </p>
@@ -2253,7 +2246,7 @@ const Summary: React.FC<{
                       Context
                     </p>
 
-                    <p className="text-sm text-slate-500">{context}</p>
+                    <p className="text-xs text-slate-500">{context}</p>
                   </div>
                 </div>
 
@@ -2263,7 +2256,7 @@ const Summary: React.FC<{
                       Protocol
                     </p>
 
-                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                    <p className="flex items-center gap-2 text-xs text-slate-500">
                       {protocol}
                       <span className="text-slate-400"></span>
                     </p>
@@ -2274,7 +2267,7 @@ const Summary: React.FC<{
                       Duration
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {duration}
                     </p>
                   </div>
@@ -2284,7 +2277,7 @@ const Summary: React.FC<{
                       Current
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {current}
                     </p>
                   </div>
@@ -2296,7 +2289,7 @@ const Summary: React.FC<{
                       Diagnosis Date
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {diagnosisDate || "Not recorded"}
                     </p>
                   </div>
@@ -2306,7 +2299,7 @@ const Summary: React.FC<{
                       Planned Date (Cycle / Day)
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {plannedCycleDayLabel || "Not planned"}
                     </p>
                   </div>
@@ -2316,7 +2309,7 @@ const Summary: React.FC<{
                       Date of Admission
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {admissionDate || "Not recorded"}
                     </p>
                   </div>
@@ -2328,7 +2321,7 @@ const Summary: React.FC<{
                       Allergies
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summaryAllergies.length > 0
                         ? summaryAllergies.join(", ")
                         : "No allergies recorded"}
@@ -2340,7 +2333,7 @@ const Summary: React.FC<{
                       Symptoms
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summarySymptoms.length > 0
                         ? summarySymptoms.join(", ")
                         : "No symptoms recorded"}
@@ -2352,7 +2345,7 @@ const Summary: React.FC<{
                       Reason for Visit
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summaryReasonForVisit || "No reason recorded"}
                     </p>
                   </div>
@@ -2364,7 +2357,7 @@ const Summary: React.FC<{
                       Discussion
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summaryDiscussion || "No discussion recorded"}
                     </p>
                   </div>
@@ -2374,7 +2367,7 @@ const Summary: React.FC<{
                       HOPI
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summaryHopi || "No HOPI recorded"}
                     </p>
                   </div>
@@ -2384,7 +2377,7 @@ const Summary: React.FC<{
                       Clinical findings
                     </p>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="text-xs text-slate-500">
                       {summaryClinicalFindings || "No clinical findings recorded"}
                     </p>
                   </div>
@@ -2393,7 +2386,7 @@ const Summary: React.FC<{
 
               {/* Vitals box - same vitals as shown in the patient header */}
               <aside className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-5 lg:w-72">
-                <p className="mb-3 text-sm font-semibold text-slate-900">
+                <p className="mb-3 text-xs font-semibold text-slate-900">
                   Vitals
                 </p>
 
@@ -2410,10 +2403,10 @@ const Summary: React.FC<{
                     { label: "PAIN", value: measurements.painScore },
                   ].map((item) => (
                     <div key={item.label} className="flex flex-col">
-                      <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                      <div className="text-xs font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                         {item.label}
                       </div>
-                      <div className="truncate text-sm font-bold leading-5 text-slate-800">
+                      <div className="truncate text-xs font-bold leading-5 text-slate-800">
                         {item.value || "—"}
                       </div>
                     </div>
@@ -2427,35 +2420,35 @@ const Summary: React.FC<{
               GENERAL EXAMINATION
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               General Examination
             </h3>
 
             <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
               <div>
                 <p className="mb-2 font-medium text-slate-900">CNS</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryCns || "Not recorded"}
                 </p>
               </div>
 
               <div>
                 <p className="mb-2 font-medium text-slate-900">CVS</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryCvs || "Not recorded"}
                 </p>
               </div>
 
               <div>
                 <p className="mb-2 font-medium text-slate-900">Respiratory</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryRespiratory || "Not recorded"}
                 </p>
               </div>
 
               <div>
                 <p className="mb-2 font-medium text-slate-900">Per Abdomen</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryPerAbdomen || "Not recorded"}
                 </p>
               </div>
@@ -2464,7 +2457,7 @@ const Summary: React.FC<{
                 <p className="mb-2 font-medium text-slate-900">
                   General Examination Findings
                 </p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryGenExam.length > 0
                     ? summaryGenExam.join(", ")
                     : "No positive findings"}
@@ -2477,14 +2470,14 @@ const Summary: React.FC<{
               PERSONAL HISTORY
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Personal History
             </h3>
 
             <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
               <div>
                 <p className="mb-2 font-medium text-slate-900">Immunization</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryImmunization.length > 0
                     ? summaryImmunization
                         .map((item) => item.others || item.name)
@@ -2497,7 +2490,7 @@ const Summary: React.FC<{
                 <p className="mb-2 font-medium text-slate-900">
                   Drug Consumption
                 </p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryDrugConsumption.length > 0
                     ? summaryDrugConsumption
                         .map((item) => item.others || item.name)
@@ -2508,7 +2501,7 @@ const Summary: React.FC<{
 
               <div>
                 <p className="mb-2 font-medium text-slate-900">Diet Type</p>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-500">
                   {summaryDietType || "Not recorded"}
                 </p>
               </div>
@@ -2522,7 +2515,7 @@ const Summary: React.FC<{
             <section>
               {summaryPastHistoryTreatment && (
                 <>
-                  <h3 className="mb-4 text-lg font-medium text-indigo-900">
+                  <h3 className="mb-4 text-xs font-medium text-indigo-900">
                     Past History Treatment
                   </h3>
 
@@ -2531,14 +2524,14 @@ const Summary: React.FC<{
                       <p className="mb-2 font-medium text-slate-900">
                         Treatment Type
                       </p>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-xs text-slate-500">
                         {summaryPastHistoryTreatment.type || "Not recorded"}
                       </p>
                     </div>
 
                     <div>
                       <p className="mb-2 font-medium text-slate-900">Date</p>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-xs text-slate-500">
                         {summaryPastHistoryTreatment.date || "Not recorded"}
                       </p>
                     </div>
@@ -2547,7 +2540,7 @@ const Summary: React.FC<{
                       <p className="mb-2 font-medium text-slate-900">
                         Brief Note
                       </p>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-xs text-slate-500">
                         {summaryPastHistoryTreatment.note || "Not recorded"}
                       </p>
                     </div>
@@ -2556,7 +2549,7 @@ const Summary: React.FC<{
                       <p className="mb-2 font-medium text-slate-900">
                         Treatment Response
                       </p>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-xs text-slate-500">
                         {summaryPastHistoryTreatment.response || "Not recorded"}
                       </p>
                     </div>
@@ -2566,10 +2559,10 @@ const Summary: React.FC<{
 
               {summaryPreviousReports && (
                 <>
-                  <h3 className="mb-4 text-lg font-medium text-indigo-900">
+                  <h3 className="mb-4 text-xs font-medium text-indigo-900">
                     Previous Reports
                   </h3>
-                  <p className="text-sm text-slate-500">
+                  <p className="text-xs text-slate-500">
                     {summaryPreviousReports}
                   </p>
                 </>
@@ -2581,12 +2574,12 @@ const Summary: React.FC<{
               REPORTS
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Reports
             </h3>
 
             {summaryReportsLoading && (
-              <div className="mb-4 text-sm text-slate-500">
+              <div className="mb-4 text-xs text-slate-500">
                 Loading reports...
               </div>
             )}
@@ -2594,7 +2587,7 @@ const Summary: React.FC<{
 
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[650px] text-left text-sm">
+              <table className="w-full min-w-[650px] text-left text-xs">
                 <thead>
                   <tr>
                     <th className="w-1/4 pb-3 font-medium text-slate-900">
@@ -2645,12 +2638,12 @@ const Summary: React.FC<{
               CHEMOTHERAPY ORDERS
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Chemotherapy Orders
             </h3>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[650px] text-left text-sm">
+              <table className="w-full min-w-[650px] text-left text-xs">
                 <thead>
                   <tr>
                     <th className="w-1/4 pb-3 font-medium text-slate-900">
@@ -2699,7 +2692,7 @@ const Summary: React.FC<{
           ================================================== */}
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-lg font-medium text-indigo-900">Dilution</h3>
+              <h3 className="text-xs font-medium text-indigo-900">Dilution</h3>
               {visitCycleDay && (
                 <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
                   {visitCycleDay}
@@ -2708,12 +2701,12 @@ const Summary: React.FC<{
             </div>
 
             {dilutionRows.length === 0 ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                 No dilution ordered for this visit.
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+                <table className="w-full min-w-[760px] text-left text-xs">
                   <thead>
                     <tr>
                       <th className="w-1/5 pb-3 font-medium text-slate-900">Drug Name</th>
@@ -2751,12 +2744,12 @@ const Summary: React.FC<{
               PREMEDICATION
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Pre-medication
             </h3>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[600px] text-left text-sm">
+              <table className="w-full min-w-[600px] text-left text-xs">
                 <thead>
                   <tr>
                     <th className="w-1/4 pb-3 font-medium text-slate-900">
@@ -2796,7 +2789,7 @@ const Summary: React.FC<{
           ================================================== */}
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-lg font-medium text-indigo-900">Hydration</h3>
+              <h3 className="text-xs font-medium text-indigo-900">Hydration</h3>
               {visitCycleDay && (
                 <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
                   {visitCycleDay}
@@ -2805,12 +2798,12 @@ const Summary: React.FC<{
             </div>
 
             {hydrationRows.length === 0 ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                 No hydration ordered for this visit.
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px] text-left text-sm">
+                <table className="w-full min-w-[700px] text-left text-xs">
                   <thead>
                     <tr>
                       <th className="w-24 pb-3 font-medium text-slate-900">Stage</th>
@@ -2857,7 +2850,7 @@ const Summary: React.FC<{
           ================================================== */}
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-lg font-medium text-indigo-900">
+              <h3 className="text-xs font-medium text-indigo-900">
                 Administration Instructions
               </h3>
               {visitCycleDay && (
@@ -2868,12 +2861,12 @@ const Summary: React.FC<{
             </div>
 
             {adminInstructionRows.length === 0 ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                 No administration instructions for this visit.
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[960px] text-left text-sm">
+                <table className="w-full min-w-[960px] text-left text-xs">
                   <thead>
                     <tr>
                       <th className="w-1/6 pb-3 font-medium text-slate-900">Drug Name</th>
@@ -2896,7 +2889,7 @@ const Summary: React.FC<{
                           <p className="font-medium text-slate-900">{row.drug || "—"}</p>
                           {row.category && (
                             <span
-                              className={`mt-1 inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${
+                              className={`mt-1 inline-flex rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ring-1 ring-inset ${
                                 CATEGORY_BADGE[row.category] ??
                                 "bg-slate-50 text-slate-600 ring-slate-200"
                               }`}
@@ -2923,7 +2916,7 @@ const Summary: React.FC<{
               CHEMO INSTRUCTIONS
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Chemo Instructions
             </h3>
 
@@ -2932,7 +2925,7 @@ const Summary: React.FC<{
                 <p className="mb-2 font-medium text-slate-900">
                   Post Chemo Instructions
                 </p>
-                <p className="whitespace-pre-line text-sm text-slate-500">
+                <p className="whitespace-pre-line text-xs text-slate-500">
                   {chemoInstructions || "None recorded"}
                 </p>
               </div>
@@ -2941,7 +2934,7 @@ const Summary: React.FC<{
                 <p className="mb-2 font-medium text-slate-900">
                   Additional Notes
                 </p>
-                <p className="whitespace-pre-line text-sm text-slate-500">
+                <p className="whitespace-pre-line text-xs text-slate-500">
                   {additionalNotes || "None recorded"}
                 </p>
               </div>
@@ -2952,22 +2945,22 @@ const Summary: React.FC<{
               DISCHARGE MEDICATION
           ================================================== */}
           <section>
-            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+            <h3 className="mb-4 text-xs font-medium text-indigo-900">
               Discharge Medication
             </h3>
 
             {dischargeLoading && (
-              <div className="mb-4 text-sm text-slate-500">
+              <div className="mb-4 text-xs text-slate-500">
                 Loading discharge medicines...
               </div>
             )}
             {dischargeError && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                 {dischargeError}
               </div>
             )}
             {!dischargeLoading && !dischargeError && dischargeMedications.length === 0 && (
-              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                 {dischargeProtocolId
                   ? "No discharge medicines recorded on this patient's protocol yet."
                   : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
@@ -2975,7 +2968,7 @@ const Summary: React.FC<{
             )}
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-left text-sm">
+              <table className="w-full min-w-[700px] text-left text-xs">
                 <thead>
                   <tr>
                     <th className="w-1/5 pb-3 font-medium text-slate-900">
@@ -3048,7 +3041,7 @@ const Summary: React.FC<{
         <div
           className={`mb-4 flex justify-end ${
             summarySubmitted ? "text-green-600" : "text-red-600"
-          } text-sm font-medium`}
+          } text-xs font-medium`}
         >
           {summarySubmitMessage}
         </div>
@@ -3100,17 +3093,17 @@ const Summary: React.FC<{
             className="mb-4 h-24 w-24 rounded-full border-2 border-white object-cover shadow-sm"
           />
 
-          <h2 className="mb-1 text-xl font-bold text-slate-900">
+          <h2 className="mb-1 text-xs font-bold text-slate-900">
             {""}
           </h2>
 
-          <p className="mb-4 text-sm text-slate-500">{""}</p>
+          <p className="mb-4 text-xs text-slate-500">{""}</p>
 
           <span className="mb-6 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
             {""}
           </span>
 
-          <p className="text-center text-sm font-semibold tracking-wide text-blue-600">
+          <p className="text-center text-xs font-semibold tracking-wide text-blue-600">
             {""}
           </p>
         </div>
@@ -3120,7 +3113,7 @@ const Summary: React.FC<{
           {/* Phone */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm"></span>
+              <span className="text-xs"></span>
             </div>
 
             <div>
@@ -3128,7 +3121,7 @@ const Summary: React.FC<{
                 Phone
               </p>
 
-              <p className="text-sm font-medium text-slate-800">
+              <p className="text-xs font-medium text-slate-800">
                 {""}
               </p>
             </div>
@@ -3137,7 +3130,7 @@ const Summary: React.FC<{
           {/* Email */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm"></span>
+              <span className="text-xs"></span>
             </div>
 
             <div>
@@ -3145,7 +3138,7 @@ const Summary: React.FC<{
                 Email
               </p>
 
-              <p className="text-sm font-medium text-slate-700">
+              <p className="text-xs font-medium text-slate-700">
                 {""}
               </p>
             </div>
@@ -3158,28 +3151,28 @@ const Summary: React.FC<{
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Height
             </p>
-            <p className="font-semibold text-slate-800">{measurements.height}</p>
+            <p className="text-xs font-semibold text-slate-800">{measurements.height}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Weight
             </p>
-            <p className="font-semibold text-slate-800">{measurements.weight}</p>
+            <p className="text-xs font-semibold text-slate-800">{measurements.weight}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BSA
             </p>
-            <p className="font-semibold text-slate-800">{measurements.bsa}</p>
+            <p className="text-xs font-semibold text-slate-800">{measurements.bsa}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BMI
             </p>
-            <p className="font-semibold text-slate-800">{measurements.bmi}</p>
+            <p className="text-xs font-semibold text-slate-800">{measurements.bmi}</p>
           </div>
         </div>
 
@@ -3193,7 +3186,7 @@ const Summary: React.FC<{
                 state: { patientId: resolvedPatientId },
               });
             }}
-            className="w-full rounded-md border border-blue-600 px-4 py-2.5 font-medium text-blue-600 transition-colors hover:bg-blue-50"
+            className="w-full rounded-md border border-blue-600 px-4 py-2.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
           >
             View Full Profile
           </button>
@@ -3214,10 +3207,10 @@ const Summary: React.FC<{
               className="text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Back"
             >
-              <span className="text-lg"></span>
+              <span className="text-xs"></span>
             </button>
 
-            <h1 className="text-xl font-semibold text-slate-800">
+            <h1 className="text-xs font-semibold text-slate-800">
               Patients
             </h1>
           </div>
@@ -3229,7 +3222,7 @@ const Summary: React.FC<{
               className="relative text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Notifications"
             >
-              <span className="text-xl"></span>
+              <span className="text-xs"></span>
 
               <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
             </button>
