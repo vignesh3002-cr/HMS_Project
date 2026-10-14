@@ -97,7 +97,6 @@ export const dateOnlyDMY = (value?: string | null) => {
   return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : "";
 };
 
-/* A DATE column value moved by whole days, as YYYY-MM-DD. */
 /* Whole days since the epoch of a "YYYY-MM-DD..." value (UTC-safe). */
 const isoDayNumber = (value?: string | null) => {
   const iso = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -152,6 +151,7 @@ export const fetchScheduledDate = async (
   }
 };
 
+/* A DATE column value moved by whole days, as YYYY-MM-DD. */
 export const addDaysToIsoDate = (value: string, days: number) => {
   const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!iso) return "";

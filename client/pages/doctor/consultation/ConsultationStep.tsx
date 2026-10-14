@@ -1032,6 +1032,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         })
       ),
       adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
+      adviceFollowUpDate: adviceSectionRef.current?.getDraftFollowUpDate() ?? "",
     });
   };
 
@@ -1047,6 +1048,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       pastHistory,
       adviceRows: adviceSectionRef.current?.getDraftRows() ?? [],
       adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
+      adviceFollowUpDate: adviceSectionRef.current?.getDraftFollowUpDate() ?? "",
       investigations: selectedInvestigations,
     };
 

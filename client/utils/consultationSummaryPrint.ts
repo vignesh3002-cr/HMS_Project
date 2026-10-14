@@ -75,6 +75,8 @@ export interface ConsultationSummaryPrintData {
     instruction: string;
   }[];
   adviceDiscussion?: string;
+  /* The Advice's Follow-up Date (DD-MM-YYYY). */
+  adviceFollowUpDate?: string;
 }
 
 export const buildConsultationSummaryHtml = (data: ConsultationSummaryPrintData) => {
@@ -229,7 +231,11 @@ export const buildConsultationSummaryHtml = (data: ConsultationSummaryPrintData)
         { header: "Frequency", cell: (row) => row.frequency },
         { header: "Duration", cell: (row) => row.duration },
         { header: "Instruction", cell: (row) => row.instruction },
-      ]) + (has(data.adviceDiscussion) ? subsection("Discussion", text(data.adviceDiscussion)) : "")
+      ]) +
+        (has(data.adviceFollowUpDate)
+          ? fields([{ label: "Follow-up Date", value: data.adviceFollowUpDate }])
+          : "") +
+        (has(data.adviceDiscussion) ? subsection("Discussion", text(data.adviceDiscussion)) : "")
     ),
   ].join("");
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { getUser } from "../../../utils/token";
@@ -24,6 +24,7 @@ import {
   parsePickedDate,
   resolveEffectiveStartDate,
   fetchScheduledDate,
+  dateOnlyDMY,
 } from "./helpers";
 import {
   ArrowLeftIcon,
@@ -72,6 +73,31 @@ const FollowUp: React.FC<{
 
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
+  /* The follow-up date already saved on this visit's encounter (from the
+     Consultation's Advice or an earlier Follow Up save). It is the one
+     Next Visit Date: the protocol / schedule calculation never replaces it. */
+  const savedFollowUpRef = useRef("");
+
+  useEffect(() => {
+    const visitEncounterNo = encounterNo || stateEncounterNo;
+    if (!visitEncounterNo) return;
+    let cancelled = false;
+    encounterApi
+      .getByNumber(visitEncounterNo)
+      .then((response) => {
+        const saved = dateOnlyDMY(response.data?.data?.follow_up_date);
+        if (cancelled || !saved) return;
+        savedFollowUpRef.current = saved;
+        setNextVisitDate(saved);
+        if (resolvedPatientId) {
+          localStorage.setItem(`hms_next_cycle_date_${resolvedPatientId}`, saved);
+        }
+      })
+      .catch((error) => console.error("Failed to load the saved follow-up date:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [encounterNo, stateEncounterNo, resolvedPatientId]);
   const [nextCycle, setNextCycle] = useState("");
   const [cycleOptions, setCycleOptions] = useState<string[]>([]);
   const [plan, setPlan] = useState("");
@@ -195,7 +221,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           statedStartDate,
           protocol.cycle_interval_days
         );
-        if (protocolNextVisit) {
+        if (protocolNextVisit && !savedFollowUpRef.current) {
           localStorage.setItem(
             `hms_next_cycle_date_${resolvedPatientId}`,
             protocolNextVisit
@@ -216,7 +242,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
   const applyScheduledVisitDate = async (cycleLabel: string) => {
     if (!resolvedPatientId || !cycleLabel) return;
     const scheduled = await fetchScheduledDate(resolvedPatientId, cycleLabel);
-    if (scheduled) {
+    if (scheduled && !savedFollowUpRef.current) {
       localStorage.setItem(`hms_next_cycle_date_${resolvedPatientId}`, scheduled);
       setNextVisitDate(scheduled);
     }
