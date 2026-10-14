@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { getUser } from "../../../utils/token";
@@ -517,7 +517,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             <div>
               <label
                 htmlFor="nextVisitDate"
-                className="mb-2 block text-xs font-semibold text-gray-800"
+                className="mb-2 block text-[10px] font-semibold text-gray-800"
               >
                 Next Visit Date
               </label>
@@ -532,7 +532,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                       onChange={(event) =>
                         setNextVisitDate(event.target.value)
                       }
-                      className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-xs text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     />
 
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
@@ -558,7 +558,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             <div>
               <label
                 htmlFor="nextCycle"
-                className="mb-2 block text-xs font-semibold text-gray-800"
+                className="mb-2 block text-[10px] font-semibold text-gray-800"
               >
                 Next Cycle
               </label>
@@ -570,7 +570,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             onChange={(event) =>
               setNextCycle(event.target.value)
             }
-            className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-xs text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           >
             {displayedOptions.length === 0 ? (
               <option value="">Select Next Cycle</option>
@@ -593,7 +593,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             <div className="w-full md:pr-4">
               <label
                 htmlFor="plan"
-                className="mb-2 block text-xs font-semibold text-gray-800"
+                className="mb-2 block text-[10px] font-semibold text-gray-800"
               >
                 Plan
               </label>
@@ -605,7 +605,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                   onChange={(event) =>
                     setPlan(event.target.value)
                   }
-                  className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-xs text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option>Continue Treatment</option>
                   <option>Complete Treatment</option>
@@ -623,7 +623,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
               <div className="w-full md:pl-4">
                 <label
                   htmlFor="newVisit"
-                  className="mb-2 block text-xs font-semibold text-gray-800"
+                  className="mb-2 block text-[10px] font-semibold text-gray-800"
                 >
                   New Visit
                 </label>
@@ -634,7 +634,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                     onChange={(event) =>
                       setNewVisit(event.target.value)
                     }
-                    className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-xs text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                   >
                     <option value="">Select Visit Type</option>
                     <option>New visit</option>
@@ -656,7 +656,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           <div>
             <label
               htmlFor="notes"
-              className="mb-2 block text-xs font-semibold text-gray-800"
+              className="mb-2 block text-[10px] font-semibold text-gray-800"
             >
               Notes
             </label>
@@ -673,7 +673,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
       {/* FORM ACTION */}
       <div className="flex flex-col items-end gap-2">
         {followUpError && (
-          <div className="text-xs font-medium text-red-600">
+          <div className="text-[10px] font-medium text-red-600">
             {followUpError}
           </div>
         )}
@@ -681,7 +681,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           type="button"
           onClick={handleSubmit}
           disabled={submittingFollowUp}
-          className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
           {submittingFollowUp ? "Submitting" : "Submit"}
@@ -712,19 +712,19 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             className="mb-4 h-[110px] w-[110px] rounded-full object-cover shadow-sm"
           />
 
-          <h2 className="mb-1 text-xs font-bold text-gray-900">
+          <h2 className="mb-1 text-[10px] font-bold text-gray-900">
             {""}
           </h2>
 
-          <p className="mb-3 text-xs text-gray-500">
+          <p className="mb-3 text-[10px] text-gray-500">
             {""}
           </p>
 
-          <span className="mb-4 rounded-md bg-gray-100 px-3 py-1 text-xs font-bold text-gray-900">
+          <span className="mb-4 rounded-md bg-gray-100 px-3 py-1 text-[10px] font-bold text-gray-900">
             {""}
           </span>
 
-          <h3 className="text-center text-xs font-bold uppercase tracking-wide text-blue-600">
+          <h3 className="text-center text-[10px] font-bold uppercase tracking-wide text-blue-600">
             {""}
           </h3>
         </div>
@@ -736,11 +736,11 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             <PhoneIcon />
 
             <div className="ml-4">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                 Phone
               </p>
 
-              <p className="text-xs font-medium text-gray-800">
+              <p className="text-[10px] font-medium text-gray-800">
                 {""}
               </p>
             </div>
@@ -750,11 +750,11 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             <EmailIcon />
 
             <div className="ml-4">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                 Email
               </p>
 
-              <p className="text-xs font-medium text-gray-800">
+              <p className="text-[10px] font-medium text-gray-800">
                 {""}
               </p>
             </div>
@@ -766,37 +766,37 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
         <div className="grid grid-cols-2 gap-y-6 border-b border-gray-100 p-6">
 
           <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
               Height
             </p>
-            <p className="text-xs font-bold text-gray-900">
+            <p className="text-[10px] font-bold text-gray-900">
               {measurements.height}
             </p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
               Weight
             </p>
-            <p className="text-xs font-bold text-gray-900">
+            <p className="text-[10px] font-bold text-gray-900">
               {measurements.weight}
             </p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
               BSA
             </p>
-            <p className="text-xs font-bold text-gray-900">
+            <p className="text-[10px] font-bold text-gray-900">
               {measurements.bsa}
             </p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-900">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-900">
               BMI
             </p>
-            <p className="text-xs font-bold text-gray-900">
+            <p className="text-[10px] font-bold text-gray-900">
               {measurements.bmi}
             </p>
           </div>
@@ -808,7 +808,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           <button
             type="button"
             onClick={handleViewProfile}
-            className="w-full rounded-lg border border-blue-500 px-4 py-2.5 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="w-full rounded-lg border border-blue-500 px-4 py-2.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             View Full Profile
           </button>
@@ -839,7 +839,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
               <ArrowLeftIcon />
             </button>
 
-            <h1 className="text-xs font-bold text-gray-900">
+            <h1 className="text-[10px] font-bold text-gray-900">
               Patients
             </h1>
 
@@ -904,7 +904,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                     <CheckIcon />
                   </div>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-800">
                     Discharge Medication
                   </span>
                 </button>
@@ -936,7 +936,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                     <CheckIcon />
                   </div>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-800">
                     Follow Up
                   </span>
                 </button>
@@ -966,7 +966,7 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
                     <CheckIcon />
                   </div>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-800">
                     Summary
                   </span>
                 </button>

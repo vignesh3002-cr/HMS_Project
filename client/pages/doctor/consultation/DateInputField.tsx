@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { Calendar } from "../../../components/ui/calendar";
 import {
   Popover,
@@ -35,7 +35,7 @@ const DateInputField: React.FC<{
             onChange={(event) => onChange(maskDmyInput(event.target.value, value))}
             placeholder="DD-MM-YYYY"
             aria-invalid={Boolean(error)}
-            className={`h-[38px] w-full rounded-md border bg-white pl-3 pr-9 text-sm leading-5 text-slate-700 outline-none placeholder:text-slate-400 ${
+            className={`h-[38px] w-full rounded-md border bg-white pl-3 pr-9 text-[10px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 ${
               error
                 ? "border-red-300 focus:border-red-400"
                 : "border-slate-200 focus:border-slate-400"

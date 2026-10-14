@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+﻿import React, { useRef, useState } from "react";
 import {
   chemotherapyApi,
   type ChemoAdministrationDay,
@@ -128,7 +128,7 @@ function Section({ icon, title, hint, children }: { icon: string; title: string;
 
 function Label({ htmlFor, required, optional, children }: { htmlFor?: string; required?: boolean; optional?: boolean; children: React.ReactNode }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1 block text-xs font-semibold text-slate-700">
+    <label htmlFor={htmlFor} className="mb-1 block text-[10px] font-semibold text-slate-700">
       {children}
       {required && <span className="text-red-500"> *</span>}
       {optional && <span className="font-normal text-slate-400"> (optional)</span>}
@@ -518,7 +518,7 @@ export default function AdverseEventModal({
                     type="button"
                     aria-pressed={on}
                     onClick={() => toggleSymptom(symptom.key)}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-medium transition-colors ${
                       on
                         ? "border-blue-300 bg-blue-50 text-blue-700"
                         : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -563,7 +563,7 @@ export default function AdverseEventModal({
             </div>
 
             {Number(form.grade) >= 3 && (
-              <div className={`flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 ${reveal}`}>
+              <div className={`flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] text-red-700 ${reveal}`}>
                 <i className="fa-solid fa-circle-exclamation mt-0.5" />
                 <span>
                   Grade {form.grade} event — inform the treating physician and review whether this day's treatment
@@ -667,7 +667,7 @@ export default function AdverseEventModal({
                         placeholder="e.g. 20"
                         className={`${inputCls(!!shown("reductionPercentage"))} pr-8`}
                       />
-                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">%</span>
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-slate-400">%</span>
                     </div>
                     <FieldError message={shown("reductionPercentage")} />
                   </div>

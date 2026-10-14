@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -267,11 +267,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     <>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
-      <div className="font-[Inter,sans-serif] text-[#1e293b] antialiased min-h-screen bg-[#f8fafc]">
-
+      <div className="font-[Inter,sans-serif] text-[#1e293b] antialiased min-h-screen w-full bg-[#f8fafc]">
+      <div className="mx-auto w-full bg-[#f8fafc]">
+      <div className="relative flex w-full bg-[#f8fafc]">
 
 {/* BEGIN: Main Content */}
-<main className="flex flex-col min-h-screen bg-[#f8fafc] relative">
+<main className="relative flex min-w-0 flex-1 flex-col bg-[#f8fafc]">
 <div className="sticky top-0 z-30 bg-white">
 {/* BEGIN: Top Header */}
 <header className="h-[72px] bg-white border-b border-[#e2e8f0] flex items-center justify-between px-6 shrink-0">
@@ -307,7 +308,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <img alt={patientName} className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src={patientPhoto}/>
 <div className="ml-6">
 <div className="flex items-center space-x-3 mb-1">
-<h2 className="text-xs font-bold text-[#1e293b]">{patientName}</h2>
+<h2 className="text-[10px] font-bold text-[#1e293b]">{patientName}</h2>
 <span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-[10px] font-semibold">{patientDisplayId}</span>
 </div>
 <div className="text-[10px] text-[#64748b] flex items-center space-x-3">
@@ -319,7 +320,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 </div>
 </div>
-<div className="flex items-center gap-8">
+<div className="flex items-center gap-8 overflow-x-auto hide-scrollbar min-w-0">
 {(() => {
   const v = latestVitals.vitals;
   const TONE: Record<string, string> = {
@@ -410,7 +411,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="border-b border-[#e2e8f0] bg-white px-6">
 <nav className="flex space-x-8">
 {PATIENT_DETAIL_TABS.map((tab) => (
-<button key={tab} type="button" onClick={() => setActiveTab(tab)} className={`px-1 py-3 border-b-2 text-xs font-medium transition-colors ${activeTab === tab ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => setActiveTab(tab)} className={`px-1 py-3 border-b-2 text-[10px] font-medium transition-colors ${activeTab === tab ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 ))}
@@ -419,7 +420,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* END: Tabs */}
 </div>
 {/* END: Sticky header */}
-<div className="p-6 max-w-[1400px] mx-auto pb-32 w-full">
+<div className="p-6 max-w-[1400px] mx-auto pb-32 w-full overflow-x-hidden">
 {/* BEGIN: Branch scope hint */}
 {scopeHint && (
 <div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -464,8 +465,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* BEGIN: Footer */}
 <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#e2e8f0] px-8 py-4 flex items-center justify-between z-20">
 <div>
-<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.created_at) || "—"}</div>
-<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.updated_at) || "—"}</div>
+<div className="text-[10px] text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.created_at) || "—"}</div>
+<div className="text-[10px] text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.updated_at) || "—"}</div>
 </div>
 <div className="flex items-center space-x-4">
 <button type="button" onClick={handlePrint} className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
@@ -485,6 +486,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* END: Footer */}
 </main>
 {/* END: Main Content */}
+      </div>
+      </div>
 
       </div>
     </>
@@ -509,7 +512,7 @@ function InlineBranchPicker() {
       value={hasSelection ? selectedBranchId : ""}
       disabled={loading}
       onChange={(event) => selectBranch(event.target.value)}
-      className="ml-2 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-[#1e293b] focus:outline-none"
+      className="ml-2 rounded-md border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-[#1e293b] focus:outline-none"
     >
       {!hasSelection && <option value="">Select branch…</option>}
       {branches.map((branch) => (
