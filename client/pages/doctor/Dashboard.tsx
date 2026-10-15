@@ -265,6 +265,8 @@ export default function DoctorDashboard() {
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
   const [totalPatientsToday, setTotalPatientsToday] = useState(0);
+  /* Today's appointments by status, for the KPI footers. */
+  const [statusBreakdown, setStatusBreakdown] = useState({ pending: 0, inConsultation: 0, completed: 0, noShow: 0 });
   const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [branchLoading, setBranchLoading] = useState(false);
@@ -329,6 +331,7 @@ export default function DoctorDashboard() {
         setTotalAppointments(0);
         setCancelledAppointments(0);
         setTotalPatientsToday(0);
+        setStatusBreakdown({ pending: 0, inConsultation: 0, completed: 0, noShow: 0 });
       }
       setDashboardError("");
 
@@ -342,7 +345,10 @@ export default function DoctorDashboard() {
 
       setDoctorEmployeeId(employeeId);
 
-      const today = new Date().toISOString().slice(0, 10);
+      // Today's local (IST) date - toISOString() gives the UTC date, which
+      // is still yesterday before 05:30 IST.
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const employeeResponse = await doctorDashboardApi.getDoctor(employeeId);
       const employeeData = employeeResponse.data.data;
 
@@ -383,7 +389,7 @@ export default function DoctorDashboard() {
           branchId,
           date: today,
           page: 1,
-          limit: 10,
+          limit: 100,
         }),
         doctorDashboardApi.getAppointments({
           employeeId,
@@ -402,6 +408,15 @@ export default function DoctorDashboard() {
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
       setTotalPatientsToday(checkedInResponse.data.data.totalPatients);
+      const todayStatuses = appointmentsResponse.data.data.appointments.map((item) =>
+        String(item.status ?? "").toUpperCase()
+      );
+      setStatusBreakdown({
+        pending: todayStatuses.filter((status) => ["SCHEDULED", "RESCHEDULED", "CHECKED_IN"].includes(status)).length,
+        inConsultation: todayStatuses.filter((status) => status === "IN_CONSULTATION").length,
+        completed: todayStatuses.filter((status) => status === "COMPLETED").length,
+        noShow: todayStatuses.filter((status) => status === "NO_SHOW").length,
+      });
 
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
@@ -752,20 +767,10 @@ export default function DoctorDashboard() {
                   </div>
                 </div>
 
-                <div className="pt-4">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-[5px] flex-1 items-end gap-0.5 overflow-hidden rounded-full">
-                      <span className="h-1 flex-1 rounded-[1px] bg-[#003d9b]" />
-                      <span className="h-[5px] flex-1 rounded-[1px] bg-[#003d9b]" />
-                      <span className="h-[6px] flex-1 rounded-[1px] bg-[#003d9b]" />
-                      <span className="h-[7px] flex-1 rounded-[1px] bg-[#003d9b]" />
-                      <span className="h-[6px] flex-1 rounded-[1px] bg-[#003d9b]" />
-                    </div>
-
-                    <span className="whitespace-nowrap text-xs font-bold text-[#003d9b]">
-                      +12%
-                    </span>
-                  </div>
+                <div className="pt-4 text-xs font-medium leading-4 text-[#434654]">
+                  {loading
+                    ? "—"
+                    : `${statusBreakdown.pending} waiting · ${statusBreakdown.inConsultation} in consultation · ${statusBreakdown.completed} done${statusBreakdown.noShow ? ` · ${statusBreakdown.noShow} no-show` : ""}`}
                 </div>
               </article>
 
@@ -784,6 +789,12 @@ export default function DoctorDashboard() {
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-500/10 text-green-600">
                     <Icon name="users" />
                   </div>
+                </div>
+
+                <div className="pt-4 text-xs font-medium leading-4 text-[#434654]">
+                  {loading
+                    ? "—"
+                    : `of ${Math.max(totalAppointments - cancelledAppointments, 0)} active appointments today`}
                 </div>
               </article>
 
@@ -805,7 +816,11 @@ export default function DoctorDashboard() {
                 </div>
 
                 <div className="pt-4 text-xs font-medium leading-4 text-[#434654]">
-                  12 slots remaining today
+                  {loading
+                    ? "—"
+                    : cancelledAppointments > 0 && totalAppointments > 0
+                      ? `${Math.round((cancelledAppointments / totalAppointments) * 100)}% of today's appointments`
+                      : "No cancellations today"}
                 </div>
               </article>
             </div>

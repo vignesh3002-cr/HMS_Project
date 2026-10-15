@@ -150,6 +150,10 @@ const doctorRoutes = [
     element: <AddAppointment />,
   },
   {
+    path: "/doctor/appointments/edit/:id",
+    element: <AddAppointment />,
+  },
+  {
     path: "/doctor/schedule",
     element: <DoctorSchedule />,
   },
