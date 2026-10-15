@@ -1134,13 +1134,16 @@ const ChemotherapyOrder: React.FC<{
   })();
 
   /* Set the cycle while preserving the currently selected day (clamped to
-     the protocol's available days). Updates the Cycle / Day field and
-     refetches that cycle's medications. */
+     the protocol's available days, and moved off a completed day).
+     Updates the Cycle / Day field and refetches that cycle's medications. */
   const selectCycle = (cycle: number) => {
     const currentDay = getCycleDayNumber(cycleDay) ?? availableDays[0] ?? 1;
-    const day = availableDays.includes(currentDay)
-      ? currentDay
-      : (availableDays[0] ?? 1);
+    const openDays = availableDays.filter((d) => isDaySelectable(cycle, d));
+    const medicationDays = getAvailableDays(protocolRef.current);
+    const day =
+      availableDays.includes(currentDay) && isDaySelectable(cycle, currentDay)
+        ? currentDay
+        : (openDays.find((d) => medicationDays.includes(d)) ?? openDays[0] ?? availableDays[0] ?? 1);
     const value = `Cycle ${cycle} / Day ${day}`;
     updateCycleDay(value);
     showDayDate(value);
@@ -1206,6 +1209,11 @@ const ChemotherapyOrder: React.FC<{
       setPlanError(
         "Patient is not selected. Open this page from a patient consultation to continue."
       );
+      return;
+    }
+
+    if (startDateError) {
+      setPlanError(startDateError);
       return;
     }
 
@@ -1839,6 +1847,76 @@ const ChemotherapyOrder: React.FC<{
      closed course is read-only. */
   const orderLocked = planClosed || isSubmittedOrder(displayedOrder);
 
+  /* ---------------- Completed cycles / days ----------------
+     A completed cycle day can't be ordered again, and a cycle whose
+     medication days are all completed (or that is closed) can't be picked
+     at all - only the open cycles and days are selectable. */
+  const orderOfDay = (cycle: number, day: number) =>
+    planOrders.find((order) => order.cycle_number === cycle && order.cycle_day === day);
+  const isDayCompleted = (cycle: number, day: number) =>
+    orderOfDay(cycle, day)?.order_status === "COMPLETED";
+  const isCycleCompleted = (cycle: number) => {
+    const cycleOrders = planOrders.filter((order) => order.cycle_number === cycle);
+    if (cycleOrders.some(isClosedCycleOrder)) return true;
+    const medicationDays = getAvailableDays(protocolRef.current);
+    const days = medicationDays.length > 0 ? medicationDays : availableDays;
+    return days.length > 0 && days.every((day) => isDayCompleted(cycle, day));
+  };
+  const isDaySelectable = (cycle: number, day: number) =>
+    !isCycleCompleted(cycle) && !isDayCompleted(cycle, day);
+
+  /* ---------------- Start Date limits ----------------
+     A cycle day's date can't be in the past, before the previous cycle
+     day's date, or on a date another (completed or planned) cycle day
+     already has. */
+  const isoOfDate = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const localTodayIso = isoOfDate(new Date());
+  const startDateLimits = (() => {
+    const cycle = getCycleNumber(cycleDay) ?? 1;
+    const day = getCycleDayNumber(cycleDay) ?? 1;
+    const currentKey = orderKey(cycle, day);
+    /* Every other cycle day's date (its picked date, else its scheduled one). */
+    const taken = new Map<string, string>();
+    const rows = [...scheduleRef.current].sort(
+      (a, b) => a.cycle_number - b.cycle_number || a.cycle_day - b.cycle_day
+    );
+    let previousIso = "";
+    rows.forEach((row) => {
+      const key = orderKey(row.cycle_number, row.cycle_day);
+      if (key === currentKey) return;
+      const iso = toIsoDate(editedDatesRef.current.get(key)) || toIsoDate(row.planned_date);
+      if (!iso) return;
+      if (row.medication_day !== false || orderOfDay(row.cycle_number, row.cycle_day)) {
+        taken.set(iso, `Cycle ${row.cycle_number} / Day ${row.cycle_day}`);
+      }
+      const before =
+        row.cycle_number < cycle || (row.cycle_number === cycle && row.cycle_day < day);
+      if (before && iso > previousIso) previousIso = iso;
+    });
+    const afterPrevious = previousIso ? addDaysToIsoDate(previousIso, 1) : "";
+    const minIso = afterPrevious && afterPrevious > localTodayIso ? afterPrevious : localTodayIso;
+    return { minIso, taken, previousIso };
+  })();
+
+  /* The picked / typed Start Date breaks a limit. Only a date the doctor
+     changed is checked - an untouched overdue day keeps its date. */
+  const startDateError = (() => {
+    if (orderLocked || !cycleDay || !editedDatesRef.current.has(dayKeyOf(cycleDay))) return "";
+    const picked = parsePickedDate(startDate.trim());
+    const iso = toIsoDate(startDate);
+    if (!iso || !picked || formatPickedDate(picked) !== startDate.trim()) {
+      return "Enter the Start Date as DD-MM-YYYY.";
+    }
+    if (iso < localTodayIso) return "The Start Date can't be in the past.";
+    if (iso < startDateLimits.minIso) {
+      return `The Start Date must be after the previous cycle day (${dateOnlyDMY(startDateLimits.previousIso)}).`;
+    }
+    const takenBy = startDateLimits.taken.get(iso);
+    if (takenBy) return `${dateOnlyDMY(iso)} is already the date of ${takenBy}.`;
+    return "";
+  })();
+
   /* Saved orders before the displayed cycle day, latest first. */
   const copySources = planIdRef.current
     ? planOrders
@@ -2399,22 +2477,30 @@ const ChemotherapyOrder: React.FC<{
                     <div className="max-h-40 space-y-1 overflow-y-auto">
                       {availableCycles.map((cycle) => {
                         const isChecked = getCycleNumber(cycleDay) === cycle;
+                        const completed = isCycleCompleted(cycle);
                         return (
                           <label
                             key={cycle}
-                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                            title={completed ? `Cycle ${cycle} is completed` : undefined}
+                            className={`flex items-center gap-2 text-sm ${completed ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-700"}`}
                           >
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={completed}
                               onChange={() => {
                                 userTouched.current.cycleDay = true;
                                 setCycleDayOpen(false);
                                 selectCycle(cycle);
                               }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <span>Cycle {cycle}</span>
+                            {completed && (
+                              <span className="ml-auto rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                Completed
+                              </span>
+                            )}
                           </label>
                         );
                       })}
@@ -2429,22 +2515,39 @@ const ChemotherapyOrder: React.FC<{
                     <div className="max-h-40 space-y-1 overflow-y-auto">
                       {availableDays.map((day) => {
                         const isChecked = getCycleDayNumber(cycleDay) === day;
+                        const cycle = getCycleNumber(cycleDay) ?? 1;
+                        const selectable = isDaySelectable(cycle, day);
+                        const status = orderOfDay(cycle, day)?.order_status;
+                        const tag = !selectable
+                          ? { label: "Completed", cls: "bg-emerald-50 text-emerald-700" }
+                          : status === "IN_ADMINISTRATION"
+                            ? { label: "In administration", cls: "bg-amber-50 text-amber-700" }
+                            : status === "ORDERED"
+                              ? { label: "Ordered", cls: "bg-blue-50 text-blue-700" }
+                              : null;
                         return (
                           <label
                             key={day}
-                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                            title={!selectable ? `Cycle ${cycle} / Day ${day} is completed` : undefined}
+                            className={`flex items-center gap-2 text-sm ${selectable ? "cursor-pointer text-gray-700" : "cursor-not-allowed text-gray-400"}`}
                           >
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={!selectable}
                               onChange={() => {
                                 userTouched.current.cycleDay = true;
                                 setCycleDayOpen(false);
                                 selectDay(day);
                               }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <span>Day {day}</span>
+                            {tag && (
+                              <span className={`ml-auto whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold ${tag.cls}`}>
+                                {tag.label}
+                              </span>
+                            )}
                           </label>
                         );
                       })}
@@ -2497,6 +2600,11 @@ const ChemotherapyOrder: React.FC<{
                 <Calendar
                   mode="single"
                   selected={parsePickedDate(startDate)}
+                  defaultMonth={parsePickedDate(startDate)}
+                  disabled={(date: Date) => {
+                    const iso = isoOfDate(date);
+                    return iso < startDateLimits.minIso || startDateLimits.taken.has(iso);
+                  }}
                   onSelect={(date) => {
                     if (date instanceof Date) {
                       editStartDate(formatPickedDate(date));
@@ -2505,6 +2613,9 @@ const ChemotherapyOrder: React.FC<{
                 />
               </PopoverContent>
             </Popover>
+            {startDateError && (
+              <p className="text-xs font-medium text-red-600">{startDateError}</p>
+            )}
 
           </div>
         </div>

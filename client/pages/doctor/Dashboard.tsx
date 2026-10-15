@@ -11,6 +11,7 @@ import {
 import { activeBranches } from "../../lib/utils";
 import { encounterApi } from "../../api/encounter.api";
 import { ipdApi } from "../../api/ipd.api";
+import { chemotherapyApi } from "../../api/chemotherapy.api";
 import { getUser } from "../../utils/token";
 import { useToast } from "@/hooks/use-toast";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
@@ -314,6 +315,46 @@ export default function DoctorDashboard() {
     } catch (error: any) {
       toast({ title: "Check-out failed", description: error.response?.data?.message || "Failed to check out patient", variant: "destructive" });
     }
+  };
+
+  /* Proceed: opens the consultation - straight on the Chemotherapy Order
+     step when the patient has a chemo plan in progress (PLANNED / ACTIVE);
+     the other steps stay reachable from there. */
+  const [proceedingKey, setProceedingKey] = useState<string | null>(null);
+  const handleProceed = async (appointment: Appointment) => {
+    const key = appointment.appointmentId || appointment.encounterNo || "";
+    if (proceedingKey) return;
+    setProceedingKey(key);
+    let initialStep: string | undefined;
+    try {
+      const response = await chemotherapyApi.getLatestPlanForPatient(appointment.patientId);
+      const status = String(response.data?.data?.treatment_status ?? "").toUpperCase();
+      if (status === "PLANNED" || status === "ACTIVE") initialStep = "CHEMOTHERAPY ORDER";
+    } catch {
+      // No plan (or not reachable): open the consultation as usual.
+    } finally {
+      setProceedingKey(null);
+    }
+    navigate("/doctor/patient-consultation", {
+      state: {
+        patientId: appointment.patientId,
+        appointmentId: appointment.appointmentId,
+        branchId:
+          selectedBranchId ||
+          getActiveBranchId() ||
+          doctor?.branches?.find((b) => b.status === undefined || b.status === 1)?.branch_id ||
+          undefined,
+        appointmentDate: appointment.appointmentDate,
+        appointmentTime: appointment.appointmentTime,
+        consultedBy: doctorName,
+        visit_type: appointment.visit_type,
+        ...(initialStep ? { initialStep } : {}),
+        // Inpatient row: open on the admission's encounter.
+        ...(appointment.encounterNo
+          ? { appointmentId: undefined, encounterNo: appointment.encounterNo }
+          : {}),
+      },
+    });
   };
 
   const periodRef = useRef<HTMLDivElement>(null);
@@ -872,23 +913,7 @@ export default function DoctorDashboard() {
                     return (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
-                      onClick={(appointment.originalStatus === "IN_CONSULTATION")?(                  () =>
-                        navigate("/doctor/patient-consultation", {
-                          state: {
-                            patientId: appointment.patientId,
-                            appointmentId: appointment.appointmentId,
-                            branchId:
-                              selectedBranchId ||
-                              getActiveBranchId() ||
-                              doctor?.branches?.find(
-                                (b) => b.status === undefined || b.status === 1
-                              )?.branch_id ||
-                              undefined,
-                            appointmentDate: appointment.appointmentDate,
-                            appointmentTime: appointment.appointmentTime,
-                            consultedBy: doctorName,
-                          },
-                        })):undefined}
+                      onClick={appointment.originalStatus === "IN_CONSULTATION" ? () => void handleProceed(appointment) : undefined}
                       className={`relative cursor-pointer transition hover:bg-slate-50`}
                     >
                       <td className="h-[50px] border-b border-slate-100 px-5 py-2 text-xs text-slate-600 relative">
@@ -974,32 +999,14 @@ export default function DoctorDashboard() {
                         {((appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") || appointment.hasEncounter) && (
                           <button
                             type="button"
-                            className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
-                                                 onClick={() =>
-                        navigate("/doctor/patient-consultation", {
-                          state: {
-                            patientId: appointment.patientId,
-                            appointmentId: appointment.appointmentId,
-                            branchId:
-                              selectedBranchId ||
-                              getActiveBranchId() ||
-                              doctor?.branches?.find(
-                                (b) => b.status === undefined || b.status === 1
-                              )?.branch_id ||
-                              undefined,
-                            appointmentDate: appointment.appointmentDate,
-                            appointmentTime: appointment.appointmentTime,
-                            consultedBy: doctorName,
-                            visit_type:appointment.visit_type,
-                            // Inpatient row: open on the admission's encounter.
-                            ...(appointment.encounterNo
-                              ? { appointmentId: undefined, encounterNo: appointment.encounterNo }
-                              : {}),
-                          },
-                        })
-                      }
+                            disabled={proceedingKey === (appointment.appointmentId || appointment.encounterNo)}
+                            className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-wait"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleProceed(appointment);
+                            }}
                           >
-                            Proceed
+                            {proceedingKey === (appointment.appointmentId || appointment.encounterNo) ? "Opening..." : "Proceed"}
                           </button>
                         )}
                       </td>

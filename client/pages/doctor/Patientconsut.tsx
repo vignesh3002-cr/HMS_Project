@@ -292,8 +292,16 @@ const Consultation: React.FC = () => {
     "DIAGNOSIS",
   ];
 
+  /* Opening straight on the Chemotherapy Order (a chemo plan in progress):
+     its Diagnosis and Treatment Plan already exist, so every step stays
+     reachable from there. */
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(
-    () => new Set(["CONSULTATION", "LAB REPORT REVIEW"])
+    () =>
+      new Set(
+        entryState?.initialStep === "CHEMOTHERAPY ORDER"
+          ? ["CONSULTATION", "LAB REPORT REVIEW", "DIAGNOSIS", "TREATMENT PLAN"]
+          : ["CONSULTATION", "LAB REPORT REVIEW"]
+      )
   );
 
   const markStepCompleted = (stepName: string): Set<string> => {
