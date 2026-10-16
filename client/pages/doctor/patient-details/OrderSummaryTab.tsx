@@ -146,8 +146,8 @@ function Badge({ status }: { status: string }) {
 function InfoTile({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] font-semibold uppercase text-[#64748b]">{label}</div>
-      <div className="break-words text-sm font-bold text-[#1e293b]">{value || "—"}</div>
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-800">{label}</div>
+      <div className="break-words text-[10px] font-bold text-slate-800">{value || "—"}</div>
     </div>
   );
 }
@@ -169,35 +169,35 @@ function MedicineTable({
     <div className="overflow-hidden rounded-[16px] border border-[#e2e8f0] bg-white shadow-sm">
       <div className={`flex items-center border-b border-[#e2e8f0] px-5 py-4 ${tone}`}>
         <i className={`${icon} mr-2`} />
-        <h4 className="text-sm font-bold">{title}</h4>
+        <h4 className="text-[10px] font-bold text-slate-800">{title}</h4>
         <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{rows.length}</span>
       </div>
       <div className="overflow-x-auto p-5">
-        <table className="w-full text-left text-sm">
+        <table className="w-full text-left text-[10px]">
           <thead>
-            <tr className="border-b border-slate-100 text-[10px] uppercase text-[#64748b]">
-              <th className="w-8 pb-2 font-semibold">#</th>
-              <th className="pb-2 font-semibold">DRUG</th>
-              <th className="pb-2 font-semibold">DOSE</th>
-              <th className="pb-2 font-semibold">PATIENT DOSE</th>
-              <th className="pb-2 font-semibold">ROUTE</th>
-              <th className="pb-2 font-semibold">DILUENT / VOLUME</th>
-              <th className="pb-2 font-semibold">INFUSION / TIMING</th>
-              <th className="pb-2 text-right font-semibold">STATUS</th>
+            <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+              <th className="w-8 pb-2 font-bold">#</th>
+              <th className="pb-2 font-bold">DRUG</th>
+              <th className="pb-2 font-bold">DOSE</th>
+              <th className="pb-2 font-bold">PATIENT DOSE</th>
+              <th className="pb-2 font-bold">ROUTE</th>
+              <th className="pb-2 font-bold">DILUENT / VOLUME</th>
+              <th className="pb-2 font-bold">INFUSION / TIMING</th>
+              <th className="pb-2 text-right font-bold">STATUS</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-xs text-[#64748b]">{empty}</td>
+                <td colSpan={8} className="py-6 text-center text-[10px] text-slate-400">{empty}</td>
               </tr>
             ) : (
               rows.map((row, index) => (
                 <tr key={row.id} className="border-b border-slate-50 align-top last:border-0">
                   <td className="py-2">{index + 1}</td>
-                  <td className="py-2 font-medium text-[#1e293b]">
+                  <td className="py-2 font-bold text-slate-800">
                     {row.name || "—"}
-                    {row.detail && <div className="mt-0.5 text-[11px] font-normal text-[#64748b]">{row.detail}</div>}
+                    {row.detail && <div className="mt-0.5 text-[10px] text-slate-500">{row.detail}</div>}
                   </td>
                   <td className="whitespace-nowrap py-2">{row.dose || "—"}</td>
                   <td className="whitespace-nowrap py-2">{row.patientDose || "—"}</td>
@@ -206,7 +206,7 @@ function MedicineTable({
                   <td className="py-2">{joinParts(row.infusion, row.timing) || "—"}</td>
                   <td className="py-2 text-right">
                     <Badge status={row.status} />
-                    {row.statusNote && <div className="mt-1 text-[10px] text-[#64748b]">{row.statusNote}</div>}
+                    {row.statusNote && <div className="mt-1 text-[10px] text-slate-500">{row.statusNote}</div>}
                   </td>
                 </tr>
               ))
@@ -617,7 +617,7 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
   const rescheduleNextVisit = () => {
     if (!bookedNext) return;
     const doctorId = bookedNext.employee_id || placement.doctorId;
-    navigate(`/doctor/appointments/edit/${bookedNext.appointment_id}`, {
+    navigate(`/doctor/appointments/edi</${bookedNext.appointment_id}`, {
       state: doctorId
         ? {
             doctorBooking: {
@@ -786,7 +786,7 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
     if (resultRows.some((row) => row.status === "Critical" || row.status === "Abnormal"))
       return { label: "Review required", cls: "text-amber-600", note: "Abnormal lab results" };
     if (resultRows.length > 0) return { label: "Cleared", cls: "text-emerald-600", note: "Lab results normal" };
-    return { label: "Pending", cls: "text-[#64748b]", note: fitness === "PENDING" ? "Chemo fitness pending" : "No results yet" };
+    return { label: "Pending", cls: "text-slate-500", note: fitness === "PENDING" ? "Chemo fitness pending" : "No results yet" };
   })();
 
   /* ---------------- instructions ---------------- */
@@ -831,9 +831,9 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
 {/* BEGIN: Treatment Timeline */}
 <div className="rounded-[16px] border border-[#e2e8f0] bg-white p-6 shadow-sm">
 <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1">
-<h3 className="text-lg font-bold text-[#1e293b]">Cycle {selected?.cycle ?? "—"}{plannedCycles ? <span className="text-sm font-medium text-[#64748b]"> / {plannedCycles}</span> : null}</h3>
-<span className="text-sm text-[#64748b]">{savedPlan?.treatment_intent || savedPlan?.treatment_status || "—"}</span>
-{initialLoading && <span className="text-xs text-[#64748b]"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading…</span>}
+<h3 className="text-lg font-bold text-slate-800">Cycle {selected?.cycle ?? "—"}{plannedCycles ? <span className="text-[10px] font-medium text-slate-500"> / {plannedCycles}</span> : null}</h3>
+<span className="text-[10px] text-slate-500">{savedPlan?.treatment_intent || savedPlan?.treatment_status || "—"}</span>
+{initialLoading && <span className="text-[10px] text-slate-500"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading…</span>}
 </div>
 {timelineCycles.length > 0 ? (
 <div className="hide-scrollbar relative overflow-x-auto">
@@ -856,15 +856,15 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
       days[days.length - 1];
     if (preferred) setPicked({ cycle: preferred.cycle, day: preferred.day });
   }}
-  className="flex flex-col items-center outline-none"
+  className="flex flex-col items-center ou<line-none"
   title={`Cycle ${cycle.cycle} · starts ${fmtDate(cycle.date)}${cycle.done ? " · completed" : cycle.inProgress ? " · in progress" : ""}`}
 >
 <div className={`flex h-10 w-10 items-center justify-center rounded-full font-bold ring-[6px] ${isSelected ? "ring-[#1d4ed8]/25" : "ring-white"} ${cycle.done ? "bg-emerald-500 text-white" : cycle.inProgress || isCurrent ? "bg-[#1d4ed8] text-white" : "bg-slate-100 text-slate-400"}`}>
-{cycle.done ? <i className="fa-solid fa-check text-sm" /> : cycle.cycle}
+{cycle.done ? <i className="fa-solid fa-check text-[10px]" /> : cycle.cycle}
 </div>
 <div className="mt-3 text-center">
-<div className={`text-sm ${isSelected ? "font-bold text-[#1d4ed8]" : cycle.inProgress || isCurrent ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>Cycle {cycle.cycle}</div>
-<div className="mt-1 text-[11px] text-slate-400">{fmtDate(cycle.date)}</div>
+<div className={`text-[10px] ${isSelected ? "font-bold text-[#1d4ed8]" : cycle.inProgress || isCurrent ? "font-bold text-slate-800" : "font-medium text-slate-600"}`}>Cycle {cycle.cycle}</div>
+<div className="mt-1 text-[10px] text-slate-400">{fmtDate(cycle.date)}</div>
 </div>
 </button>
   );
@@ -872,34 +872,34 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
 <div className="flex flex-col items-center">
 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 font-bold text-slate-400 ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
 <div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Follow-up</div>
-<div className="mt-1 text-[11px] text-slate-400">{fmtDate(savedPlan?.expected_end_date || lastDate)}</div>
+<div className="text-[10px] font-medium text-slate-600">Follow-up</div>
+<div className="mt-1 text-[10px] text-slate-400">{fmtDate(savedPlan?.expected_end_date || lastDate)}</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 ) : (
-<p className="py-6 text-center text-xs text-[#64748b]">No cycle schedule available for this patient yet.</p>
+<p className="py-6 text-center text-[10px] text-slate-400">No cycle schedule available for this patient yet.</p>
 )}
 </div>
 {/* END: Treatment Timeline */}
 {/* BEGIN: Day Selector */}
 {selected && (
 <div className="flex items-center">
-<span className="mr-4 shrink-0 text-sm font-semibold text-[#1e293b]">Select Day</span>
+<span className="mr-4 shrink-0 text-[10px] font-bold text-slate-800">Select Day</span>
 <div className="hide-scrollbar flex max-w-full overflow-x-auto rounded-[12px] border border-[#e2e8f0] bg-white p-1 shadow-sm">
 {medicationRows.filter((row) => row.cycle === selected.cycle).map((row) => {
   const status = statusOf(row.cycle, row.day);
   const active = selected.day === row.day;
   const isCurrentDay = current?.cycle === row.cycle && current?.day === row.day;
   return (
-<button key={row.day} type="button" onClick={() => setPicked({ cycle: row.cycle, day: row.day })} className={`min-w-[96px] rounded-[8px] px-4 py-1.5 text-center transition-colors ${active ? "bg-[#1d4ed8] text-white shadow-sm" : "text-[#1e293b] hover:bg-slate-50"}`}>
-<div className="flex items-center justify-center gap-1.5 whitespace-nowrap text-sm font-semibold">
-{status === "COMPLETED" ? <i className={`fa-solid fa-circle-check text-[11px] ${active ? "text-white" : "text-emerald-500"}`} /> : status === "IN_ADMINISTRATION" ? <i className={`fa-solid fa-circle text-[8px] ${active ? "text-amber-200" : "text-amber-500"}`} /> : status === "ORDERED" ? <i className={`fa-regular fa-circle text-[9px] ${active ? "text-white" : "text-blue-500"}`} /> : null}
+<button key={row.day} type="button" onClick={() => setPicked({ cycle: row.cycle, day: row.day })} className={`min-w-[96px] rounded-[8px] px-4 py-1.5 text-center transition-colors ${active ? "bg-[#1d4ed8] text-white shadow-sm" : "text-slate-800 hover:bg-slate-50"}`}>
+<div className="flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-bold">
+{status === "COMPLETED" ? <i className={`fa-solid fa-circle-check text-[10px] ${active ? "text-white" : "text-emerald-500"}`} /> : status === "IN_ADMINISTRATION" ? <i className={`fa-solid fa-circle text-[8px] ${active ? "text-amber-200" : "text-amber-500"}`} /> : status === "ORDERED" ? <i className={`fa-regular fa-circle text-[9px] ${active ? "text-white" : "text-blue-500"}`} /> : null}
 Day {row.day}
 </div>
-<div className={`text-[10px] ${active ? "text-blue-100" : "text-[#64748b]"}`}>{fmtDate(row.date)}{isCurrentDay ? " · Current" : ""}</div>
+<div className={`text-[10px] ${active ? "text-blue-100" : "text-slate-500"}`}>{fmtDate(row.date)}{isCurrentDay ? " · Current" : ""}</div>
 </button>
   );
 })}
@@ -912,7 +912,7 @@ Day {row.day}
 <div className="grid grid-cols-1 gap-6 mt-2 md:grid-cols-2 xl:grid-cols-6">
 {/* BEGIN: Cycle & Schedule */}
 <div className="flex h-full min-h-[200px] flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
-<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Cycle &amp; Schedule</h4>
+<h4 className="mb-4 text-[10px] font-bold text-slate-800">Cycle &amp; Schedule</h4>
 <div className="grid grid-cols-2 gap-4">
 <InfoTile label="Cycle" value={current ? `${current.cycle}${plannedCycles ? ` / ${plannedCycles}` : ""}` : ""} />
 <InfoTile label="Day" value={current ? `${current.day}${daysInCycle(current.cycle) ? ` / ${daysInCycle(current.cycle)}` : ""}` : ""} />
@@ -928,39 +928,39 @@ Day {row.day}
 {/* BEGIN: Next Appointment */}
 <div className="flex h-full min-h-[200px] flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
 <div>
-<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Next Appointment</h4>
+<h4 className="mb-4 text-[10px] font-bold text-slate-800">Next Appointment</h4>
 {planClosed ? (
 <div className="flex items-start">
 <div className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-emerald-50 text-emerald-600"><i className="fa-solid fa-flag-checkered text-lg"></i></div>
 <div>
-<div className="text-sm font-bold text-[#1e293b]">Treatment completed</div>
-{followUpDate && <div className="mt-1 text-xs text-[#64748b]">Follow-up {fmtDate(followUpDate)}</div>}
+<div className="text-[10px] font-bold text-slate-800">Treatment completed</div>
+{followUpDate && <div className="mt-1 text-[10px] text-slate-500">Follow-up {fmtDate(followUpDate)}</div>}
 </div>
 </div>
 ) : (
 <div className="flex items-start">
 <div className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-blue-50 text-[#1d4ed8]"><i className="fa-regular fa-calendar text-lg"></i></div>
 <div className="min-w-0">
-<div className="text-sm font-bold text-[#1e293b]">{nextVisit ? fmtDate(nextVisit.date) : "—"}</div>
-{!nextVisit && <div className="mt-1 text-xs text-[#64748b]">{timelineCycles.length > 0 ? "No further cycle day to book" : "No schedule yet"}</div>}
-<div className="mt-1 text-xs text-[#64748b]">{nextVisit ? `Cycle ${nextVisit.cycle} / Day ${nextVisit.day}` : "—"}{nextVisit?.date ? ` · ${relativeDay(nextVisit.date)}` : ""}</div>
+<div className="text-[10px] font-bold text-slate-800">{nextVisit ? fmtDate(nextVisit.date) : "—"}</div>
+{!nextVisit && <div className="mt-1 text-[10px] text-slate-500">{timelineCycles.length > 0 ? "No further cycle day to book" : "No schedule yet"}</div>}
+<div className="mt-1 text-[10px] text-slate-500">{nextVisit ? `Cycle ${nextVisit.cycle} / Day ${nextVisit.day}` : "—"}{nextVisit?.date ? ` · ${relativeDay(nextVisit.date)}` : ""}</div>
 {!nextVisit ? null : bookedNext ? (
-<div className="mt-1 text-xs font-semibold text-emerald-600">Booked{bookedNext.appointment_time ? ` · ${String(bookedNext.appointment_time).slice(0, 5)}` : ""}{bookedNext.doctor_name ? ` · ${bookedNext.doctor_name}` : ""}</div>
+<div className="mt-1 text-[10px] font-bold text-emerald-600">Booked{bookedNext.appointment_time ? ` · ${String(bookedNext.appointment_time).slice(0, 5)}` : ""}{bookedNext.doctor_name ? ` · ${bookedNext.doctor_name}` : ""}</div>
 ) : (
-<div className="mt-1 text-xs text-amber-600">Not booked yet</div>
+<div className="mt-1 text-[10px] text-amber-600">Not booked yet</div>
 )}
-{followUpDate && <div className="mt-1 text-xs text-[#64748b]">Follow-up {fmtDate(followUpDate)}</div>}
+{followUpDate && <div className="mt-1 text-[10px] text-slate-500">Follow-up {fmtDate(followUpDate)}</div>}
 </div>
 </div>
 )}
 </div>
 {!planClosed && nextVisit && (
 bookedNext ? (
-<button type="button" onClick={rescheduleNextVisit} className="mt-4 w-full rounded-[8px] border border-[#e2e8f0] py-2 text-sm font-semibold text-[#1e293b] transition-colors hover:bg-slate-50">
+<button type="button" onClick={rescheduleNextVisit} className="mt-4 w-full rounded-[8px] border border-[#e2e8f0] py-2 text-[10px] font-bold text-slate-800 transition-colors hover:bg-slate-50">
 <i className="fa-solid fa-calendar-days mr-1.5" />Reschedule
 </button>
 ) : (
-<button type="button" onClick={bookNextVisit} className="mt-4 w-full rounded-[8px] bg-[#1d4ed8] py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1e40af]">
+<button type="button" onClick={bookNextVisit} className="mt-4 w-full rounded-[8px] bg-[#1d4ed8] py-2 text-[10px] font-bold text-white transition-colors hover:bg-[#1e40af]">
 <i className="fa-solid fa-calendar-plus mr-1.5" />Book Appointment
 </button>
 )
@@ -969,29 +969,29 @@ bookedNext ? (
 {/* END: Next Appointment */}
 {/* BEGIN: Treatment Progress */}
 <div className="flex h-full min-h-[200px] flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
-<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Treatment Progress</h4>
+<h4 className="mb-4 text-[10px] font-bold text-slate-800">Treatment Progress</h4>
 <div className="flex items-center justify-between gap-3">
 <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)]" style={progressPercent != null ? { backgroundImage: `conic-gradient(#10b981 ${progressPercent}%, #e2e8f0 ${progressPercent}% 100%)` } : undefined}>
 <div className="absolute inset-[6px] rounded-full bg-white"></div>
-<span className="relative z-10 text-[10px] font-bold text-[#1e293b]">{progressPercent != null ? `${progressPercent}%` : "—"}</span>
+<span className="relative z-10 text-[10px] font-bold text-slate-800">{progressPercent != null ? `${progressPercent}%` : "—"}</span>
 </div>
 <div className="text-right">
-<div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#64748b]">Completed</div>
-<div className="mb-2 text-sm font-bold text-[#1e293b]">{plannedCycles ? `${completedCycles} / ${plannedCycles}` : "—"} <span className="text-xs font-medium text-[#64748b]">cycles</span></div>
-<div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#64748b]">Remaining</div>
-<div className="text-sm font-bold text-[#1e293b]">{remainingCycles ?? "—"} <span className="text-xs font-medium text-[#64748b]">cycles</span></div>
+<div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-800">Completed</div>
+<div className="mb-2 text-[10px] font-bold text-slate-800">{plannedCycles ? `${completedCycles} / ${plannedCycles}` : "—"} <span className="text-[10px] font-medium text-slate-500">cycles</span></div>
+<div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-800">Remaining</div>
+<div className="text-[10px] font-bold text-slate-800">{remainingCycles ?? "—"} <span className="text-[10px] font-medium text-slate-500">cycles</span></div>
 </div>
 </div>
-<div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs">
-<div className="flex items-center justify-between"><span className="font-medium text-[#64748b]">Days given</span><span className="font-bold text-[#1e293b]">{completedDays}</span></div>
-<div className="flex items-center justify-between"><span className="font-medium text-[#64748b]">Current</span><span className="font-bold text-[#1e293b]">{current && !planClosed ? `Cycle ${current.cycle} / Day ${current.day}` : planClosed ? "Completed" : "—"}</span></div>
-<div className="flex items-center justify-between"><span className="font-medium text-[#64748b]">Next Visit</span><span className="font-bold text-[#1e293b]">{nextVisit ? fmtDate(nextVisit.date) : "—"}</span></div>
+<div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-[10px]">
+<div className="flex items-center justify-between"><span className="font-medium text-slate-500">Days given</span><span className="font-bold text-slate-800">{completedDays}</span></div>
+<div className="flex items-center justify-between"><span className="font-medium text-slate-500">Current</span><span className="font-bold text-slate-800">{current && !planClosed ? `Cycle ${current.cycle} / Day ${current.day}` : planClosed ? "Completed" : "—"}</span></div>
+<div className="flex items-center justify-between"><span className="font-medium text-slate-500">Next Visit</span><span className="font-bold text-slate-800">{nextVisit ? fmtDate(nextVisit.date) : "—"}</span></div>
 </div>
 </div>
 {/* END: Treatment Progress */}
 {/* BEGIN: Clinical Info */}
 <div className="flex h-full flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
-<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Clinical Info</h4>
+<h4 className="mb-4 text-[10px] font-bold text-slate-800">Clinical Info</h4>
 <div className="grid grid-cols-2 gap-4">
 <div className="col-span-2"><InfoTile label="Type" value={cancerType} /></div>
 <InfoTile label="Stage" value={osd?.clinical_stage || savedPlan?.cancer_stage || ""} />
@@ -1006,36 +1006,36 @@ bookedNext ? (
 {/* BEGIN: Lab Validation */}
 <div className="flex h-full flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm md:col-span-2 xl:col-span-4">
 <div className="mb-4 flex items-center">
-<h4 className="mr-3 text-sm font-bold text-[#1e293b]">Lab Validation</h4>
-<span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase text-[#64748b]">{labLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
+<h4 className="mr-3 text-[10px] font-bold text-slate-800">Lab Validation</h4>
+<span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500">{labLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
 </div>
 {labError && (
-  <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">{labError}</div>
+  <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-[10px] text-red-700">{labError}</div>
 )}
 {labLoading ? (
-  <div className="py-6 text-center text-xs text-[#64748b]"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…</div>
+  <div className="py-6 text-center text-[10px] text-slate-400"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…</div>
 ) : (
   <div className="max-h-[260px] overflow-auto">
-  <table className="mb-4 w-full text-left text-sm">
+  <table className="mb-4 w-full text-left text-[10px]">
     <thead className="sticky top-0 bg-white">
-      <tr className="border-b border-slate-100 text-[10px] uppercase text-[#64748b]">
-        <th className="pb-2 font-semibold">PARAMETER</th>
-        <th className="pb-2 font-semibold">RESULT</th>
-        <th className="pb-2 font-semibold">RANGE</th>
-        <th className="pb-2 font-semibold">DATE</th>
-        <th className="pb-2 font-semibold">STATUS</th>
+      <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+        <th className="pb-2 font-bold">PARAMETER</th>
+        <th className="pb-2 font-bold">RESULT</th>
+        <th className="pb-2 font-bold">RANGE</th>
+        <th className="pb-2 font-bold">DATE</th>
+        <th className="pb-2 font-bold">STATUS</th>
       </tr>
     </thead>
     <tbody>
       {labRows.length === 0 ? (
-        <tr><td colSpan={5} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td></tr>
+        <tr><td colSpan={5} className="py-6 text-center text-[10px] text-slate-400">No lab validation records found.</td></tr>
       ) : (
         labRows.map((row) => (
           <tr key={row.key} className="border-b border-slate-50">
-            <td className="py-2 text-sm font-bold">{row.name}</td>
-            <td className={`py-2 text-sm ${row.status === "Critical" ? "font-bold text-red-600" : row.status === "Abnormal" ? "font-semibold text-amber-600" : ""}`}>{row.result ? `${row.result} ${row.unit}`.trim() : "—"}</td>
-            <td className="py-2 text-sm">{row.range || "—"}</td>
-            <td className="whitespace-nowrap py-2 text-sm">{fmtDate(row.date)}</td>
+            <td className="py-2 text-[10px] font-bold">{row.name}</td>
+            <td className={`py-2 ${row.status === "Critical" ? "font-bold text-red-600" : row.status === "Abnormal" ? "font-bold text-amber-600" : ""}`}>{row.result ? `${row.result} ${row.unit}`.trim() : "—"}</td>
+            <td className="py-2 text-[10px]">{row.range || "—"}</td>
+            <td className="whitespace-nowrap py-2 text-[10px]">{fmtDate(row.date)}</td>
             <td className="py-2"><span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${LAB_STATUS_CLS(row.status)}`}>{row.status || "—"}</span></td>
           </tr>
         ))
@@ -1044,11 +1044,11 @@ bookedNext ? (
   </table>
   </div>
 )}
-<div className="flex items-center justify-between border-t border-slate-100 pt-3 text-sm">
-<span className="text-[#64748b]">Chemo Clearance <span className="text-[11px]">({fmtDate(clearanceDate)})</span> :</span>
+<div className="flex items-center justify-between border-t border-slate-100 pt-3 text-[10px]">
+<span className="text-slate-500">Chemo Clearance <span className="text-[10px]">({fmtDate(clearanceDate)})</span> :</span>
 <span className="text-right">
 <span className={`font-bold uppercase ${clearance.cls}`}>{clearance.label}</span>
-<span className="block text-[11px] text-[#64748b]">{clearance.note}</span>
+<span className="block text-[10px] text-slate-500">{clearance.note}</span>
 </span>
 </div>
 </div>
@@ -1056,20 +1056,20 @@ bookedNext ? (
 {/* BEGIN: Selected day banner */}
 {selected && (
 <div className={`mt-6 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border px-5 py-3 ${dayState.cls}`}>
-<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
 <span className="font-bold">Cycle {selected.cycle} / Day {selected.day}</span>
 <span>{fmtDate(sheetDay?.treatment_date || selectedRow?.date)}</span>
-<span className="font-semibold">{dayState.label}{selectedStatus === "COMPLETED" && (sheetDay?.completed_at || orderMap.get(selectedKey)?.completed_at) ? ` on ${fmtDate(sheetDay?.completed_at || orderMap.get(selectedKey)?.completed_at)}` : ""}</span>
-{dayLoading && <span className="text-xs"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading…</span>}
-{detail.error && <span className="text-xs text-red-600">{detail.error}</span>}
+<span className="font-bold">{dayState.label}{selectedStatus === "COMPLETED" && (sheetDay?.completed_at || orderMap.get(selectedKey)?.completed_at) ? ` on ${fmtDate(sheetDay?.completed_at || orderMap.get(selectedKey)?.completed_at)}` : ""}</span>
+{dayLoading && <span className="text-[10px]"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading…</span>}
+{detail.error && <span className="text-[10px] text-red-600">{detail.error}</span>}
 </div>
 {summary && summary.total > 0 && (
-<div className="flex flex-wrap gap-3 text-xs font-semibold">
+<div className="flex flex-wrap gap-3 text-[10px] font-bold">
 <span className="text-emerald-700">{summary.given} given</span>
 <span className="text-amber-700">{summary.pending} pending</span>
 {summary.skipped > 0 && <span className="text-orange-700">{summary.skipped} skipped</span>}
 {summary.cancelled > 0 && <span className="text-red-600">{summary.cancelled} cancelled</span>}
-{sheetDay?.administered_by?.length ? <span className="text-[#475569]">by {sheetDay.administered_by.join(", ")}</span> : null}
+{sheetDay?.administered_by?.length ? <span className="text-slate-600">by {sheetDay.administered_by.join(", ")}</span> : null}
 </div>
 )}
 </div>
@@ -1078,9 +1078,9 @@ bookedNext ? (
 <div className="mt-6 overflow-hidden rounded-[16px] border border-[#e2e8f0] bg-white shadow-sm">
 <div className="flex items-center border-b border-[#e2e8f0] px-5 py-4 text-[#1d4ed8]">
 <i className="fa-solid fa-flask mr-2"></i>
-<h4 className="text-sm font-bold">PROTOCOL: {savedPlan?.regimen_name || savedPlan?.protocol_name || "—"}</h4>
+<h4 className="text-[10px] font-bold">PROTOCOL: {savedPlan?.regimen_name || savedPlan?.protocol_name || "—"}</h4>
 {savedPlan?.protocol_name && savedPlan?.regimen_name && savedPlan.protocol_name !== savedPlan.regimen_name && (
-<span className="ml-2 text-xs text-[#64748b]">{savedPlan.protocol_name}</span>
+<span className="ml-2 text-[10px] text-slate-500">{savedPlan.protocol_name}</span>
 )}
 </div>
 <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-6">
@@ -1093,11 +1093,11 @@ bookedNext ? (
 </div>
 {hydration.length > 0 && (
 <div className="border-t border-slate-100 px-5 py-4">
-<div className="mb-2 text-[10px] font-semibold uppercase text-[#64748b]">Hydration</div>
-<ul className="space-y-1 text-sm text-[#1e293b]">
+<div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-800">Hydration</div>
+<ul className="space-y-1 text-[10px] text-slate-700">
 {hydration.map((row, index) => (
 <li key={row.plan_hydration_id ?? index}>
-<span className="font-semibold">{row.hydration_stage === "POST" ? "Post" : "Pre"}:</span>{" "}
+<span className="font-bold">{row.hydration_stage === "POST" ? "Post" : "Pre"}:</span>{" "}
 {joinParts(row.agent_name, row.diluent, row.dilution_volume != null ? `${row.dilution_volume} ${row.dilution_volume_unit ?? ""}`.trim() : "", row.guidance) || "—"}
 </li>
 ))}
@@ -1116,32 +1116,32 @@ bookedNext ? (
 <h4 className="text-[10px] font-bold">Discharge Medication</h4>
 </div>
 <div className="overflow-x-auto p-5">
-<table className="w-full text-left text-sm">
+<table className="w-full text-left text-[10px]">
 <thead>
-<tr className="border-b border-slate-100 text-[10px] uppercase text-[#64748b]">
-<th className="w-8 pb-2 font-semibold">#</th>
-<th className="pb-2 font-semibold">DRUG</th>
-<th className="pb-2 font-semibold">DOSE</th>
-<th className="pb-2 font-semibold">FREQUENCY</th>
-<th className="pb-2 font-semibold">INSTRUCTION</th>
-<th className="pb-2 text-right font-semibold">DURATION</th>
+<tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
+<th className="w-8 pb-2 font-bold">#</th>
+<th className="pb-2 font-bold">DRUG</th>
+<th className="pb-2 font-bold">DOSE</th>
+<th className="pb-2 font-bold">FREQUENCY</th>
+<th className="pb-2 font-bold">INSTRUCTION</th>
+<th className="pb-2 text-right font-bold">DURATION</th>
 </tr>
 </thead>
 <tbody>
 {dischargeRows.length === 0 && protocolDischargeLoading ? (
-<tr><td colSpan={6} className="py-6 text-center text-xs text-[#64748b]"><i className="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading discharge medicines…</td></tr>
+<tr><td colSpan={6} className="py-6 text-center text-[10px] text-slate-400"><i className="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading discharge medicines…</td></tr>
 ) : dischargeRows.length === 0 && protocolDischargeError ? (
-<tr><td colSpan={6} className="py-6 text-center text-xs text-red-500"><i className="fa-solid fa-triangle-exclamation mr-2"></i>{protocolDischargeError}</td></tr>
+<tr><td colSpan={6} className="py-6 text-center text-[10px] text-red-500"><i className="fa-solid fa-triangle-exclamation mr-2"></i>{protocolDischargeError}</td></tr>
 ) : dischargeRows.length === 0 ? (
-<tr><td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No discharge medicines recorded.</td></tr>
+<tr><td colSpan={6} className="py-6 text-center text-[10px] text-slate-400">No discharge medicines recorded.</td></tr>
 ) : (
 dischargeRows.map((item, index) => (
 <tr key={item.id} className="border-b border-slate-50 last:border-0">
 <td className="py-2">{index + 1}</td>
-<td className="whitespace-nowrap py-2 font-medium text-[#1e293b]">{item.name || "—"}</td>
+<td className="whitespace-nowrap py-2 font-bold text-slate-800">{item.name || "—"}</td>
 <td className="whitespace-nowrap py-2">{item.dose || "—"}</td>
 <td className="whitespace-nowrap py-2">{item.frequency || "—"}</td>
-<td className="py-2 text-xs text-[#64748b]">{item.instruction || "—"}</td>
+<td className="py-2 text-[10px] text-slate-500">{item.instruction || "—"}</td>
 <td className="whitespace-nowrap py-2 text-right">{item.duration || "—"}</td>
 </tr>
 ))
@@ -1158,61 +1158,61 @@ dischargeRows.map((item, index) => (
 <div className="min-w-0 flex-1">
 <div className="mb-4 flex items-center text-[#1d4ed8]">
 <i className="fa-regular fa-file-lines mr-2"></i>
-<h4 className="text-sm font-bold">Instructions</h4>
-<span className="ml-2 text-xs text-[#64748b]">{selected ? `Cycle ${selected.cycle} / Day ${selected.day}` : ""}</span>
+<h4 className="text-[10px] font-bold">Instructions</h4>
+<span className="ml-2 text-[10px] text-slate-500">{selected ? `Cycle ${selected.cycle} / Day ${selected.day}` : ""}</span>
 </div>
 {chemoInstructions && (
 <div className="mb-3">
-<div className="mb-1 text-[10px] font-semibold uppercase text-[#64748b]">Post Chemo Instructions</div>
-<p className="whitespace-pre-line text-sm text-[#1e293b]">{chemoInstructions}</p>
+<div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-800">Post Chemo Instructions</div>
+<p className="whitespace-pre-line text-[10px] text-slate-700">{chemoInstructions}</p>
 </div>
 )}
 {additionalNotes && (
 <div className="mb-3">
-<div className="mb-1 text-[10px] font-semibold uppercase text-[#64748b]">Additional Notes</div>
-<p className="whitespace-pre-line text-sm text-[#1e293b]">{additionalNotes}</p>
+<div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-800">Additional Notes</div>
+<p className="whitespace-pre-line text-[10px] text-slate-700">{additionalNotes}</p>
 </div>
 )}
 {medicineInstructions.length > 0 ? (
-<ul className="space-y-3 text-sm text-[#1e293b]">
+<ul className="space-y-3 text-[10px] text-slate-700">
 {medicineInstructions.map((row) => (
 <li key={row.id} className="rounded-[12px] border border-slate-100 p-3">
 <div className="flex items-start justify-between gap-3">
-<span className="font-bold text-[#1e293b]">{row.name || "—"}</span>
-{row.patientDose || row.dose ? <span className="whitespace-nowrap text-xs text-[#64748b]">{row.patientDose || row.dose}</span> : null}
+<span className="font-bold text-slate-800">{row.name || "—"}</span>
+{row.patientDose || row.dose ? <span className="whitespace-nowrap text-[10px] text-slate-500">{row.patientDose || row.dose}</span> : null}
 </div>
-<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#64748b]">
+<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
 {row.route ? <span>Route: {row.route}</span> : null}
 {row.infusion ? <span>Infusion: {row.infusion}</span> : null}
 {row.timing ? <span>Timing: {row.timing}</span> : null}
 </div>
-{row.detail ? <p className="mt-1.5 text-xs text-[#475569]">{row.detail}</p> : null}
+{row.detail ? <p className="mt-1.5 text-[10px] text-slate-600">{row.detail}</p> : null}
 </li>
 ))}
 </ul>
 ) : !chemoInstructions && !additionalNotes && storedInstructions.length > 0 ? (
-<ul className="space-y-3 text-sm text-[#1e293b]">
+<ul className="space-y-3 text-[10px] text-slate-700">
 {storedInstructions.map((instruction, index) => (
 <li key={index} className="rounded-[12px] border border-slate-100 p-3">
 <div className="flex items-start justify-between gap-3">
-<span className="font-bold text-[#1e293b]">{instruction.medicineName || `Item ${index + 1}`}</span>
-{instruction.dose ? <span className="whitespace-nowrap text-xs text-[#64748b]">{instruction.dose}</span> : null}
+<span className="font-bold text-slate-800">{instruction.medicineName || `Item ${index + 1}`}</span>
+{instruction.dose ? <span className="whitespace-nowrap text-[10px] text-slate-500">{instruction.dose}</span> : null}
 </div>
-{instruction.administrationDetail ? <p className="mt-1.5 text-xs text-[#475569]">{instruction.administrationDetail}</p> : null}
-{instruction.remarks ? <p className="mt-1.5 text-xs italic text-[#64748b]">{instruction.remarks}</p> : null}
+{instruction.administrationDetail ? <p className="mt-1.5 text-[10px] text-slate-600">{instruction.administrationDetail}</p> : null}
+{instruction.remarks ? <p className="mt-1.5 text-[10px] italic text-slate-500">{instruction.remarks}</p> : null}
 </li>
 ))}
 </ul>
 ) : !chemoInstructions && !additionalNotes ? (
-<p className="text-sm text-[#64748b]">No instructions recorded for this day.</p>
+<p className="text-[10px] text-slate-400">No instructions recorded for this day.</p>
 ) : null}
 </div>
 <div className="flex w-full flex-col items-center justify-center rounded-[12px] border border-slate-200 bg-slate-50 p-5 md:w-[180px]">
 <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#1d4ed8]">NEXT CYCLE</div>
-<div className="flex items-center text-sm font-bold text-[#1d4ed8]">
+<div className="flex items-center text-[10px] font-bold text-[#1d4ed8]">
 <i className="fa-regular fa-calendar mr-2"></i> {nextCycleDate ? fmtDate(nextCycleDate) : "—"}
 </div>
-{current && nextCycleDate && <div className="mt-1 text-[11px] text-[#64748b]">Cycle {current.cycle + 1} · {relativeDay(nextCycleDate)}</div>}
+{current && nextCycleDate && <div className="mt-1 text-[10px] text-slate-500">Cycle {current.cycle + 1} · {relativeDay(nextCycleDate)}</div>}
 </div>
 </div>
 {/* END: Instructions Card */}
