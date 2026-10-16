@@ -2254,7 +2254,7 @@ const Summary: React.FC<{
               <div className="flex flex-1 flex-col gap-6">
                 <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Cancer Type
                     </p>
                     <p className="text-xs text-slate-500">
@@ -2263,7 +2263,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Stage
                     </p>
 
@@ -2274,7 +2274,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Context
                     </p>
 
@@ -2284,7 +2284,7 @@ const Summary: React.FC<{
 
                 <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Protocol
                     </p>
 
@@ -2295,7 +2295,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Duration
                     </p>
 
@@ -2305,7 +2305,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Current
                     </p>
 
@@ -2317,7 +2317,7 @@ const Summary: React.FC<{
 
                 <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Diagnosis Date
                     </p>
 
@@ -2327,7 +2327,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Planned Date (Cycle / Day)
                     </p>
 
@@ -2337,7 +2337,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Date of Admission
                     </p>
 
@@ -2349,7 +2349,7 @@ const Summary: React.FC<{
 
                 <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Allergies
                     </p>
 
@@ -2361,7 +2361,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Symptoms
                     </p>
 
@@ -2373,7 +2373,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Reason for Visit
                     </p>
 
@@ -2385,7 +2385,7 @@ const Summary: React.FC<{
 
                 <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Discussion
                     </p>
 
@@ -2395,7 +2395,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       HOPI
                     </p>
 
@@ -2405,7 +2405,7 @@ const Summary: React.FC<{
                   </div>
 
                   <div>
-                    <p className="mb-2 font-medium text-slate-900">
+                    <p className="mb-2 text-[10px] font-medium text-slate-900">
                       Clinical findings
                     </p>
 
@@ -2418,7 +2418,7 @@ const Summary: React.FC<{
 
               {/* Vitals box - same vitals as shown in the patient header */}
               <aside className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-5 lg:w-72">
-                <p className="mb-3 text-xs font-semibold text-slate-900">
+                <p className="mb-3 text-[10px] font-semibold text-slate-900">
                   Vitals
                 </p>
 
@@ -2461,35 +2461,35 @@ const Summary: React.FC<{
 
             <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
               <div>
-                <p className="mb-2 font-medium text-slate-900">CNS</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">CNS</p>
                 <p className="text-xs text-slate-500">
                   {summaryCns || "Not recorded"}
                 </p>
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">CVS</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">CVS</p>
                 <p className="text-xs text-slate-500">
                   {summaryCvs || "Not recorded"}
                 </p>
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">Respiratory</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">Respiratory</p>
                 <p className="text-xs text-slate-500">
                   {summaryRespiratory || "Not recorded"}
                 </p>
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">Per Abdomen</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">Per Abdomen</p>
                 <p className="text-xs text-slate-500">
                   {summaryPerAbdomen || "Not recorded"}
                 </p>
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">
+                <p className="mb-2 text-[10px] font-medium text-slate-900">
                   General Examination Findings
                 </p>
                 <p className="text-xs text-slate-500">
@@ -2511,7 +2511,7 @@ const Summary: React.FC<{
 
             <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
               <div>
-                <p className="mb-2 font-medium text-slate-900">Immunization</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">Immunization</p>
                 <p className="text-xs text-slate-500">
                   {summaryImmunization.length > 0
                     ? summaryImmunization
@@ -2522,7 +2522,7 @@ const Summary: React.FC<{
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">
+                <p className="mb-2 text-[10px] font-medium text-slate-900">
                   Drug Consumption
                 </p>
                 <p className="text-xs text-slate-500">
@@ -2535,7 +2535,7 @@ const Summary: React.FC<{
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">Diet Type</p>
+                <p className="mb-2 text-[10px] font-medium text-slate-900">Diet Type</p>
                 <p className="text-xs text-slate-500">
                   {summaryDietType || "Not recorded"}
                 </p>
@@ -2560,7 +2560,7 @@ const Summary: React.FC<{
                       className="mb-6 grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3"
                     >
                       <div>
-                        <p className="mb-2 font-medium text-slate-900">
+                        <p className="mb-2 text-[10px] font-medium text-slate-900">
                           Treatment Type
                         </p>
                         <p className="text-xs text-slate-500">
@@ -2569,7 +2569,7 @@ const Summary: React.FC<{
                       </div>
 
                       <div>
-                        <p className="mb-2 font-medium text-slate-900">Date</p>
+                        <p className="mb-2 text-[10px] font-medium text-slate-900">Date</p>
                         <p className="text-xs text-slate-500">
                           {treatment.treatment_date
                             ? treatment.treatment_date.slice(0, 10)
@@ -2578,7 +2578,7 @@ const Summary: React.FC<{
                       </div>
 
                       <div>
-                        <p className="mb-2 font-medium text-slate-900">
+                        <p className="mb-2 text-[10px] font-medium text-slate-900">
                           Brief Note
                         </p>
                         <p className="text-xs text-slate-500">
@@ -2587,7 +2587,7 @@ const Summary: React.FC<{
                       </div>
 
                       <div>
-                        <p className="mb-2 font-medium text-slate-900">
+                        <p className="mb-2 text-[10px] font-medium text-slate-900">
                           Treatment Response
                         </p>
                         <p className="text-xs text-slate-500">
@@ -2632,16 +2632,16 @@ const Summary: React.FC<{
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead>
                   <tr>
-                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                    <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">
                       Lab Test
                     </th>
-                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                    <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">
                       Date
                     </th>
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Result
                     </th>
-                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                    <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">
                       Impression
                     </th>
                   </tr>
@@ -2688,23 +2688,23 @@ const Summary: React.FC<{
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead>
                   <tr>
-                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                    <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">
                       Drug Name
                     </th>
 
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Form
                     </th>
 
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Dose
                     </th>
 
-                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                    <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">
                       Unit
                     </th>
 
-                    <th className="pb-3 font-medium text-slate-900">
+                    <th className="pb-3 text-[10px] font-medium text-slate-900">
                       Patient Dose
                     </th>
                   </tr>
@@ -2751,12 +2751,12 @@ const Summary: React.FC<{
                 <table className="w-full min-w-[760px] text-left text-xs">
                   <thead>
                     <tr>
-                      <th className="w-1/5 pb-3 font-medium text-slate-900">Drug Name</th>
-                      <th className="pb-3 font-medium text-slate-900">Form</th>
-                      <th className="pb-3 font-medium text-slate-900">Dose</th>
-                      <th className="pb-3 font-medium text-slate-900">Diluent</th>
-                      <th className="pb-3 font-medium text-slate-900">Dilution Volume</th>
-                      <th className="w-1/4 pb-3 font-medium text-slate-900">Guidance</th>
+                      <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">Drug Name</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Form</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Dose</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Diluent</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Dilution Volume</th>
+                      <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">Guidance</th>
                     </tr>
                   </thead>
 
@@ -2794,19 +2794,19 @@ const Summary: React.FC<{
               <table className="w-full min-w-[600px] text-left text-xs">
                 <thead>
                   <tr>
-                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                    <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">
                       Drug Name
                     </th>
 
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Dose
                     </th>
 
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Route
                     </th>
 
-                    <th className="pb-3 font-medium text-slate-900">
+                    <th className="pb-3 text-[10px] font-medium text-slate-900">
                       Time
                     </th>
                   </tr>
@@ -2848,11 +2848,11 @@ const Summary: React.FC<{
                 <table className="w-full min-w-[700px] text-left text-xs">
                   <thead>
                     <tr>
-                      <th className="w-24 pb-3 font-medium text-slate-900">Stage</th>
-                      <th className="w-1/5 pb-3 font-medium text-slate-900">Agent</th>
-                      <th className="w-1/5 pb-3 font-medium text-slate-900">Diluent</th>
-                      <th className="w-1/6 pb-3 font-medium text-slate-900">Volume</th>
-                      <th className="pb-3 font-medium text-slate-900">Guidance</th>
+                      <th className="w-24 pb-3 text-[10px] font-medium text-slate-900">Stage</th>
+                      <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">Agent</th>
+                      <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">Diluent</th>
+                      <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">Volume</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Guidance</th>
                     </tr>
                   </thead>
 
@@ -2911,13 +2911,13 @@ const Summary: React.FC<{
                 <table className="w-full min-w-[960px] text-left text-xs">
                   <thead>
                     <tr>
-                      <th className="w-1/6 pb-3 font-medium text-slate-900">Drug Name</th>
-                      <th className="pb-3 font-medium text-slate-900">Route</th>
-                      <th className="pb-3 font-medium text-slate-900">Infusion</th>
-                      <th className="pb-3 font-medium text-slate-900">Frequency</th>
-                      <th className="pb-3 font-medium text-slate-900">Timing</th>
-                      <th className="w-1/5 pb-3 font-medium text-slate-900">Admin Detail</th>
-                      <th className="w-1/6 pb-3 font-medium text-slate-900">Remarks</th>
+                      <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">Drug Name</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Route</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Infusion</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Frequency</th>
+                      <th className="pb-3 text-[10px] font-medium text-slate-900">Timing</th>
+                      <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">Admin Detail</th>
+                      <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">Remarks</th>
                     </tr>
                   </thead>
 
@@ -2964,7 +2964,7 @@ const Summary: React.FC<{
 
             <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
               <div>
-                <p className="mb-2 font-medium text-slate-900">
+                <p className="mb-2 text-[10px] font-medium text-slate-900">
                   Post Chemo Instructions
                 </p>
                 <p className="whitespace-pre-line text-xs text-slate-500">
@@ -2973,7 +2973,7 @@ const Summary: React.FC<{
               </div>
 
               <div>
-                <p className="mb-2 font-medium text-slate-900">
+                <p className="mb-2 text-[10px] font-medium text-slate-900">
                   Additional Notes
                 </p>
                 <p className="whitespace-pre-line text-xs text-slate-500">
@@ -3013,23 +3013,23 @@ const Summary: React.FC<{
               <table className="w-full min-w-[700px] text-left text-xs">
                 <thead>
                   <tr>
-                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                    <th className="w-1/5 pb-3 text-[10px] font-medium text-slate-900">
                       Drug Name
                     </th>
 
-                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                    <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">
                       Dose
                     </th>
 
-                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                    <th className="w-1/6 pb-3 text-[10px] font-medium text-slate-900">
                       Frequency
                     </th>
 
-                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                    <th className="w-1/4 pb-3 text-[10px] font-medium text-slate-900">
                       Instruction
                     </th>
 
-                    <th className="pb-3 font-medium text-slate-900">
+                    <th className="pb-3 text-[10px] font-medium text-slate-900">
                       Duration
                     </th>
                   </tr>
@@ -3055,7 +3055,7 @@ const Summary: React.FC<{
           ================================================== */}
           <section className="grid grid-cols-1 gap-6 border-t border-slate-100 pt-6 sm:grid-cols-2">
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-900">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
                 Next Visit Date
               </p>
 
@@ -3063,7 +3063,7 @@ const Summary: React.FC<{
             </div>
 
             <div className="sm:pl-8">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-900">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
                 Next Cycle
               </p>
 
@@ -3159,7 +3159,7 @@ const Summary: React.FC<{
             </div>
 
             <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 Phone
               </p>
 
@@ -3176,7 +3176,7 @@ const Summary: React.FC<{
             </div>
 
             <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 Email
               </p>
 
@@ -3190,28 +3190,28 @@ const Summary: React.FC<{
         {/* Vitals */}
         <div className="mb-6 grid grid-cols-2 gap-x-4 gap-y-6 p-6">
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
               Height
             </p>
             <p className="text-xs font-semibold text-slate-800">{measurements.height}</p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
               Weight
             </p>
             <p className="text-xs font-semibold text-slate-800">{measurements.weight}</p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
               BSA
             </p>
             <p className="text-xs font-semibold text-slate-800">{measurements.bsa}</p>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
               BMI
             </p>
             <p className="text-xs font-semibold text-slate-800">{measurements.bmi}</p>

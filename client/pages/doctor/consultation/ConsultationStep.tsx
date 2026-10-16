@@ -1410,7 +1410,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex min-w-0 flex-col gap-1">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Visit Date &amp; Time
         </label>
 
@@ -1493,7 +1493,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex min-w-0 flex-col gap-1">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           First Visit for this Treatment
         </label>
 
@@ -1509,7 +1509,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex min-w-0 flex-col gap-1">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Consulted By
         </label>
 
@@ -1546,7 +1546,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex min-w-0 flex-col gap-1">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Visit Type
         </label>
 
@@ -1572,7 +1572,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Consultation Notes
         </label>
 
@@ -1591,7 +1591,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
           <div className="flex flex-col gap-1">
 
-            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+            <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
               Chief Complaint
             </div>
 
@@ -1650,7 +1650,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
-    <div className="text-[10px] font-bold leading-7 text-slate-800">
+    <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
       Personal History
     </div>
 
@@ -1662,7 +1662,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Immunization
         </label>
 
@@ -1695,13 +1695,13 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
               >
 
-                <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                   {name}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
 
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Date
                   </label>
 
@@ -1718,7 +1718,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
                 <div className="flex flex-col gap-1.5">
 
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Response
                   </label>
 
@@ -1744,7 +1744,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Drug Consumption
         </label>
 
@@ -1772,7 +1772,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Diet Type
         </label>
 
@@ -1823,12 +1823,12 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
-    <div className="text-[10px] font-bold leading-7 text-slate-800">
+    <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
       General Examination
     </div>
 
     <div className="flex flex-col gap-2 pt-2">
-      <label className="text-[10px] font-bold leading-4 text-slate-800">
+      <label className="text-[10px] uppercase leading-4 text-slate-800">
         Findings
       </label>
       <MultiSelectDropdown
@@ -1842,7 +1842,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     {/* Other findings: search general_examination_master; "+ Add" adds a
         finding to the master and ticks it for this patient. */}
     <div className="flex flex-col gap-2">
-      <label className="text-[10px] font-bold leading-4 text-slate-800">
+      <label className="text-[10px] uppercase leading-4 text-slate-800">
         Other Findings
       </label>
       <MultiSelectDropdown
@@ -1875,7 +1875,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
-    <div className="text-[10px] font-bold leading-7 text-slate-800">
+    <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
       Systemic Examination
     </div>
 
@@ -1888,7 +1888,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         { label: "Per Abdomen", value: systemicPerAbdomen, onChange: setSystemicPerAbdomen },
       ].map((item) => (
         <div key={item.label} className="flex flex-col gap-2">
-          <label className="text-[10px] font-bold leading-4 text-slate-800">
+          <label className="text-[10px] uppercase leading-4 text-slate-800">
             {item.label}
           </label>
           <input
@@ -1904,7 +1904,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     </div>
 
     <div className="flex flex-col gap-2 pt-2">
-      <label className="text-[10px] font-bold leading-4 text-slate-800">
+      <label className="text-[10px] uppercase leading-4 text-slate-800">
         Clinical Findings
       </label>
       <VoiceToText
@@ -1951,7 +1951,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
-    <div className="text-[10px] font-bold leading-7 text-slate-800">
+    <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
       Patient Details
     </div>
 
@@ -1967,7 +1967,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           History of Present Illness(HOPI)
         </label>
 
@@ -1983,7 +1983,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Reports (Previous)
         </label>
 
@@ -2020,12 +2020,12 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
               >
 
-                <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
                   {reportTestName(key)}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Date
                   </label>
                   <input
@@ -2039,7 +2039,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Enter Result
                   </label>
                   <VoiceToText
@@ -2050,7 +2050,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Enter Impression
                   </label>
                   <VoiceToText
@@ -2086,7 +2086,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Past History
         </label>
 
@@ -2121,12 +2121,12 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
               >
 
-                <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
                   {name}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Date
                   </label>
                   <input
@@ -2140,7 +2140,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Enter Brief Note
                   </label>
                   <VoiceToText
@@ -2151,7 +2151,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Treatment Response
                   </label>
                   <VoiceToText
@@ -2181,7 +2181,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       <div className="flex flex-col gap-2">
 
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
           Molecular Testing
         </label>
 
@@ -2207,12 +2207,12 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
               >
 
-                <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
                   {name}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Date
                   </label>
                   <input
@@ -2226,7 +2226,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Enter Result
                   </label>
                   <VoiceToText
@@ -2239,7 +2239,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
                     Enter Impression
                   </label>
                   <VoiceToText
@@ -2272,7 +2272,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     <section className="flex w-full flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5">
 
     <div className="flex items-center justify-between gap-2">
-      <div className="text-[10px] font-bold leading-7 text-slate-800">
+      <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
         Investigations / Scans
       </div>
       {selectedInvestigations.length > 0 && (
@@ -2404,7 +2404,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <div className="flex w-full flex-col gap-2 pt-2">
 
-      <label className="text-[10px] font-bold leading-4 text-slate-800">
+      <label className="text-[10px] uppercase leading-4 text-slate-800">
         Additional Instructions (if any)
       </label>
 

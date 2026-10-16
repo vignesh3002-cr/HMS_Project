@@ -321,7 +321,7 @@ function TrendChartCard({ chart }: { chart: TrendChart }) {
         <table className="mt-2 w-full text-left text-[10px]">
           <thead>
             <tr className="border-b border-gray-100 text-gray-500">
-              <th className="py-1.5 pr-3 font-bold text-gray-900">Report date</th>
+              <th className="py-1.5 pr-3 text-[10px] font-bold text-gray-900">Report date</th>
               <th className="py-1.5 pr-3 text-right font-bold text-gray-900">Value</th>
               <th className="py-1.5 font-bold text-gray-900">Status</th>
             </tr>
@@ -2367,27 +2367,27 @@ const HistoryTab: React.FC<{
             <table className="w-full text-[10px] text-left">
               <thead className="text-[10px] text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Cycle
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Dates
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Agent
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Planned Dose
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Actual Dose
                   </th>
 
-                  <th className="px-6 py-3 font-semibold text-right">
+                  <th className="px-6 py-3 text-[10px] font-semibold text-right">
                     Outcome
                   </th>
                 </tr>
@@ -2467,27 +2467,27 @@ const HistoryTab: React.FC<{
             <table className="w-full text-[10px] text-left">
               <thead className="text-[10px] text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Medication
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Start Date
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     End Date
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Dosage
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Route
                   </th>
 
-                  <th className="px-6 py-3 font-semibold text-right">
+                  <th className="px-6 py-3 text-[10px] font-semibold text-right">
                     Status
                   </th>
                 </tr>
@@ -2562,27 +2562,27 @@ const HistoryTab: React.FC<{
             <table className="w-full text-[10px] text-left">
               <thead className="text-[10px] text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Date
                   </th>
 
-                  <th className="px-6 py-3 font-semibold whitespace-nowrap">
+                  <th className="px-6 py-3 text-[10px] font-semibold whitespace-nowrap">
                     Cycle / Day
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Event
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Grade
                   </th>
 
-                  <th className="px-6 py-3 font-semibold">
+                  <th className="px-6 py-3 text-[10px] font-semibold">
                     Action Taken
                   </th>
 
-                  <th className="px-6 py-3 font-semibold text-right">
+                  <th className="px-6 py-3 text-[10px] font-semibold text-right">
                     Outcome
                   </th>
                 </tr>

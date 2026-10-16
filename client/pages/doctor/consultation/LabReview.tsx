@@ -340,7 +340,7 @@ const LabReview: React.FC<{
         {/* Card Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-8 py-6">
 
-          <span className="text-xs font-bold text-gray-900">
+          <span className="text-[10px] font-bold text-gray-900">
             {itemsLoading
               ? "Loading..."
               : `${orderedItems.length} Reports Found`}
@@ -372,23 +372,23 @@ const LabReview: React.FC<{
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-gray-100 bg-white">
-                <th className="w-[36%] px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-900">
+                <th className="w-[36%] px-8 py-4 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                   Investigation Name
                 </th>
 
-                <th className="w-[16%] px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-900">
+                <th className="w-[16%] px-8 py-4 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                   Ordered Date
                 </th>
 
-                <th className="w-[16%] px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-900">
+                <th className="w-[16%] px-8 py-4 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                   Target Date
                 </th>
 
-                <th className="w-[16%] px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-900">
+                <th className="w-[16%] px-8 py-4 text-[10px] font-bold uppercase tracking-wider text-gray-900">
                   Status
                 </th>
 
-                <th className="w-[16%] px-8 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-900">
+                <th className="w-[16%] px-8 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                   Action
                 </th>
               </tr>
@@ -493,7 +493,7 @@ const LabReview: React.FC<{
 
       {/* Clinical Remarks */}
       <section className="rounded-xl border border-gray-100 bg-white p-8 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)]">
-        <h2 className="mb-6 text-xs font-bold text-gray-900">
+        <h2 className="mb-6 text-[10px] font-bold text-gray-900">
           Clinical Remarks
         </h2>
 
