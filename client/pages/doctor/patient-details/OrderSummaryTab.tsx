@@ -822,11 +822,10 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
   return (
 <>
 {planNotice && (
-<div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+<div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-[10px] text-amber-700">
 <i className="fa-solid fa-triangle-exclamation mr-2"></i> {planNotice}
 </div>
 )}
-<div className="mb-8 flex flex-col gap-6 xl:flex-row">
 {/* Left Side (Timeline & Day Selector) */}
 <div className="min-w-0 flex-1 space-y-6">
 {/* BEGIN: Treatment Timeline */}
@@ -959,7 +958,7 @@ bookedNext ? (
 <div className="flex items-center justify-between gap-3">
 <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)]" style={progressPercent != null ? { backgroundImage: `conic-gradient(#10b981 ${progressPercent}%, #e2e8f0 ${progressPercent}% 100%)` } : undefined}>
 <div className="absolute inset-[6px] rounded-full bg-white"></div>
-<span className="relative z-10 text-sm font-bold text-[#1e293b]">{progressPercent != null ? `${progressPercent}%` : "—"}</span>
+<span className="relative z-10 text-[10px] font-bold text-[#1e293b]">{progressPercent != null ? `${progressPercent}%` : "—"}</span>
 </div>
 <div className="text-right">
 <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#64748b]">Completed</div>
@@ -976,8 +975,7 @@ bookedNext ? (
 </div>
 {/* END: Treatment Progress */}
 </div>
-</div>
-{/* BEGIN: Bottom Grid */}
+{/* Row 2: Clinical Info | Lab Validation */}
 <div className="grid grid-cols-12 gap-6">
 {/* Left Column */}
 <div className="col-span-12 space-y-6 lg:col-span-4 xl:col-span-3">
@@ -1120,7 +1118,7 @@ bookedNext ? (
 <div className="overflow-hidden rounded-[16px] border border-[#e2e8f0] bg-white shadow-sm">
 <div className="flex items-center border-b border-[#e2e8f0] px-5 py-4 text-orange-500">
 <i className="fa-solid fa-capsules mr-2"></i>
-<h4 className="text-sm font-bold">Discharge Medication</h4>
+<h4 className="text-[10px] font-bold">Discharge Medication</h4>
 </div>
 <div className="overflow-x-auto p-5">
 <table className="w-full text-left text-sm">

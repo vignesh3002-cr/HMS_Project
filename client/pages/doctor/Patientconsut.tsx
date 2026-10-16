@@ -47,7 +47,7 @@ type ToastMessage = string;
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
-    className="h-6 w-6"
+    className="h-4 w-4"
     viewBox="0 0 24 24"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
@@ -519,8 +519,20 @@ const Consultation: React.FC = () => {
 
   const patientPhoto = patient?.patient_photo_url || "";
 
+  const patientDob = (() => {
+    const dob = patient?.patient_dob;
+    if (!dob) return "—";
+    const d = new Date(dob);
+    if (isNaN(d.getTime())) return "—";
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+    return `${age}`;
+  })();
+
   const patientAgeSex = patient
-    ? `${patient.patient_age ?? ""} Y / ${patient.patient_gender ?? ""}`
+    ? `Y:${patientDob}/${patient.patient_gender ?? ""}`
     : "";
 
   const patientDisplayId = patient?.patient_id || "";
@@ -745,72 +757,43 @@ const Consultation: React.FC = () => {
             <div className="sticky top-0 z-30">
 
               {/* ==================================================
-                  HEADER
-              ================================================== */}
-
-              <header className="z-30 flex h-16 w-full shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
-
-                <div className="flex items-center gap-4">
-
-                  <button
-                    onClick={goBack}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-transparent p-2 transition hover:bg-slate-50"
-                  >
-
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#334155"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-5 w-5"
-                    >
-                      <path d="M19 12H5" />
-                      <path d="m12 19-7-7 7-7" />
-                    </svg>
-
-                  </button>
-
-                  <div className="text-lg font-bold leading-7 text-slate-800">
-                    Patients
-                  </div>
-
-                </div>
-
-                <div className="flex items-center gap-6">
-
-                  {/* NOTIFICATION (Global) */}
-
-                  <BellNotificationButton size="md" />
-
-                  {/* USER */}
-
-                  <UserProfileDropdown
-                    userName={getUser()?.username || "Doctor"}
-                    userSubtext={getUser()?.role || "Doctor"}
-                    userAvatar={userAvatarUrl || undefined}
-                    avatarLoading={avatarLoading}
-                    onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-                    profilePath="/doctor/profile"
-                    notificationsPath="/doctor/notifications"
-                  />
-
-                </div>
-
-              </header>
-
-              {/* ==================================================
                   PATIENT HEADER
               ================================================== */}
 
-              <section className="w-full bg-slate-50">
+              <section className="w-full bg-white">
 
-                <div className="flex w-full flex-col gap-5">
+                  <section className="flex w-full flex-col gap-3 bg-white px-5 pt-3 pb-2">
 
-                  <section className="flex w-full flex-col gap-5 bg-white p-5">
+                    {/* Top row: back arrow (left) | bell + profile (right) */}
+                    <div className="flex items-center justify-between">
 
-                    <div className="flex w-full items-center justify-between gap-4">
+                      <button
+                        onClick={goBack}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-transparent p-2 transition hover:bg-slate-50"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                          <path d="M19 12H5" />
+                          <path d="m12 19-7-7 7-7" />
+                        </svg>
+                      </button>
+
+                      <div className="flex items-center gap-4">
+                        <BellNotificationButton size="md" />
+                        <UserProfileDropdown
+                          userName={getUser()?.username || "Doctor"}
+                          userSubtext={getUser()?.role || "Doctor"}
+                          userAvatar={userAvatarUrl || undefined}
+                          avatarLoading={avatarLoading}
+                          onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+                          profilePath="/doctor/profile"
+                          notificationsPath="/doctor/notifications"
+                        />
+                      </div>
+
+                    </div>
+
+                    {/* Content row: photo, name, vitals */}
+                    <div className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-4 lg:flex-nowrap">
 
                       <div className="relative shrink-0">
                         <img
@@ -823,32 +806,27 @@ const Consultation: React.FC = () => {
                         )}
                       </div>
 
-                      <div className="min-w-0">
+                      <div>
 
-                        <div className="mb-1 flex min-w-0 items-center space-x-2">
+                        <div className="mb-1 flex items-center space-x-2">
 
-                          <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
+                          <h2 className="text-xs font-bold leading-5 text-[#1e293b]">
                             {patientName}
                           </h2>
                           {patientCriticalInfo.isCritical && (
                             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
                           )}
 
-                          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
+                          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-semibold text-[#64748b]">
                             {patientDisplayId}
                           </span>
 
                         </div>
 
-                        <div className="flex min-w-0 items-center space-x-2 text-sm leading-5 text-[#64748b]">
+                        <div className="flex items-center space-x-2 text-[10px] leading-4 text-[#64748b]">
 
-                          <span className="truncate">{patientAgeSex}</span>
+                          <span>{patientAgeSex}</span>
 
-                          <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
-
-                          <span className="shrink-0 font-semibold text-[#1d4ed8]">
-                            —
-                          </span>
 
                         </div>
 
@@ -872,11 +850,11 @@ const Consultation: React.FC = () => {
 
                         <div className="flex flex-col">
 
-                          <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          <div className="text-[11px] uppercase leading-[14px] tracking-[0.5px] text-slate-600">
                             PHONE
                           </div>
 
-                          <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
+                          <div className="whitespace-nowrap text-[10px] font-medium leading-4 text-slate-700">
                             {patientPhone}
                           </div>
 
@@ -908,11 +886,11 @@ const Consultation: React.FC = () => {
 
                         <div className="flex flex-col">
 
-                          <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          <div className="text-[11px] uppercase leading-[14px] tracking-[0.5px] text-slate-600">
                             EMAIL
                           </div>
 
-              <div className="whitespace-normal break-all text-sm font-medium leading-5 text-slate-700">
+              <div className="whitespace-normal break-all text-[10px] font-medium leading-4 text-slate-700">
                           {patientEmail}
                         </div>
 
@@ -926,7 +904,7 @@ const Consultation: React.FC = () => {
                           Same tile style as the admin-side PatientVitalsPanel:
                           pastel circular icon, muted label, bold reading. */}
 
-                      <div className="grid grid-cols-5 gap-x-6 gap-y-4">
+                      <div className="grid w-full grid-cols-3 gap-x-4 gap-y-4 lg:w-auto lg:grid-cols-5 lg:gap-x-6">
 
                         {measurementTiles.map((tile) => {
                           const Icon = tile.icon;
@@ -942,11 +920,11 @@ const Consultation: React.FC = () => {
                                 <Icon className="h-4 w-4" />
                               </div>
                               <div className="min-w-0">
-                                <p className="mb-1 text-xs text-slate-500">
+                                <p className="mb-1 text-[11px] uppercase text-slate-600">
                                   {tile.label}
                                 </p>
                                 <p
-                                  className={`truncate text-sm font-semibold ${
+                                  className={`truncate text-[10px] font-semibold ${
                                     tile.severity
                                       ? SEVERITY_TEXT[tile.severity]
                                       : "text-slate-900"
@@ -973,7 +951,7 @@ const Consultation: React.FC = () => {
                             state: { patientId: pid },
                           });
                         }}
-                        className="h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                        className="h-9 rounded-md border border-blue-600 bg-white px-4 text-[10px] font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
                       >
                         View Full Profile
                       </button>
@@ -981,8 +959,6 @@ const Consultation: React.FC = () => {
                     </div>
 
                   </section>
-
-                </div>
 
               </section>
 
@@ -1009,34 +985,28 @@ const Consultation: React.FC = () => {
                       className="relative h-[88.5px] w-[298.66px] shrink-0 bg-white"
                     >
 
-                      {/* ICON */}
+                      {/* ICON + LABEL */}
 
-                      <div className="absolute left-1/2 top-0 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-white">
+                      <div className="flex flex-col items-center gap-1 pt-3">
 
-                        {typeof step.icon === "string" ? (
-                          <img
-                            src={step.icon}
-                            alt=""
-                            className="h-6 w-6"
-                          />
-                        ) : (
-                          <StepCheckLogo active={step.active} />
-                        )}
+                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
+                          {typeof step.icon === "string" ? (
+                            <img src={step.icon} alt="" className="h-4 w-4" />
+                          ) : (
+                            <StepCheckLogo active={step.active} />
+                          )}
+                        </div>
 
-                      </div>
-
-                      {/* LABEL */}
-
-                      <div className="absolute left-1/2 top-[47px] -translate-x-1/2 whitespace-nowrap text-[11px] font-bold uppercase leading-[16.5px] tracking-[1.1px] text-gray-800">
-
-                        {step.name}
+                        <div className="whitespace-nowrap text-[10px] font-bold uppercase leading-[16.5px] tracking-[1.1px] text-gray-800">
+                          {step.name}
+                        </div>
 
                       </div>
 
                       {/* BAR */}
 
                       <div
-                        className={`absolute left-0 right-0 top-[80.5px] h-2 rounded-full ${
+                        className={`absolute left-0 right-0 top-[80.5px] h-1 rounded-full ${
                           step.active
                             ? "bg-green-500"
                             : "bg-white"

@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import VoiceToText from "@/components/ui/voicetotext";
 import {
   Select,
@@ -89,7 +89,7 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
           {index + 1}
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-slate-700">
+        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold leading-5 text-slate-700">
           {name}
         </span>
         {showMethod && (
@@ -167,7 +167,7 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
           >
             <SelectTrigger
               aria-label={`Priority for ${name}`}
-              className={`h-[38px] rounded-md text-sm shadow-none focus:ring-0 focus:ring-offset-0 ${
+              className={`h-[38px] rounded-md text-[10px] shadow-none focus:ring-0 focus:ring-offset-0 ${
                 urgent
                   ? "border-red-200 bg-red-50 text-red-700"
                   : "border-slate-200 bg-white text-slate-700"

@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from "react";
+﻿import React, { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 const TONES = {
@@ -68,7 +68,7 @@ export function ModalShell({
             </div>
             <div className="min-w-0">
               <h3 id={titleId} className="text-base font-bold text-slate-900">{title}</h3>
-              {subtitle && <div className="truncate text-xs text-slate-500">{subtitle}</div>}
+              {subtitle && <div className="truncate text-[10px] text-slate-500">{subtitle}</div>}
             </div>
           </div>
           <button
@@ -122,7 +122,7 @@ export function ModalButton({
       {...props}
       className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${look} ${className}`}
     >
-      {busy ? <i className="fa-solid fa-spinner fa-spin text-xs" /> : icon ? <i className={`fa-solid ${icon} text-xs`} /> : null}
+      {busy ? <i className="fa-solid fa-spinner fa-spin text-[10px]" /> : icon ? <i className={`fa-solid ${icon} text-[10px]`} /> : null}
       {children}
     </button>
   );
@@ -173,11 +173,11 @@ export function DetailTable<T>({
   empty?: string;
 }) {
   if (rows.length === 0) {
-    return <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">{empty}</p>;
+    return <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-[10px] text-slate-400">{empty}</p>;
   }
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200">
-      <table className="w-full min-w-[560px] text-left text-xs">
+      <table className="w-full min-w-[560px] text-left text-[10px]">
         <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           <tr>
             {columns.map(column => (

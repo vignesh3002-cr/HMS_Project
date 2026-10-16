@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -675,7 +675,7 @@ const AdviceComboField: React.FC<{
             setOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          className="min-w-0 flex-1 bg-transparent px-2 text-sm leading-5 text-slate-700 outline-none placeholder:text-slate-400 disabled:text-slate-400"
+          className="min-w-0 flex-1 bg-transparent px-2 text-[10px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 disabled:text-slate-400"
         />
 
         <button
@@ -742,13 +742,13 @@ const AdviceComboField: React.FC<{
         >
 
           {loading && (
-            <div className="px-3 py-1.5 text-xs leading-4 text-slate-400">
+            <div className="px-3 py-1.5 text-[10px] leading-4 text-slate-400">
               Searching...
             </div>
           )}
 
           {!loading && itemCount === 0 && (
-            <div className="px-3 py-1.5 text-xs leading-4 text-slate-400">
+            <div className="px-3 py-1.5 text-[10px] leading-4 text-slate-400">
               {query ? "No matches" : "No options"}
             </div>
           )}
@@ -767,11 +767,11 @@ const AdviceComboField: React.FC<{
                 index === highlight ? "bg-blue-50" : ""
               }`}
             >
-              <span className="text-sm leading-5 text-slate-700">
+              <span className="text-[10px] leading-5 text-slate-700">
                 {option.value}
               </span>
               {option.hint && (
-                <span className="text-[11px] leading-4 text-slate-400">
+                <span className="text-[10px] leading-4 text-slate-400">
                   {option.hint}
                 </span>
               )}
@@ -785,7 +785,7 @@ const AdviceComboField: React.FC<{
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setHighlight(visibleOptions.length)}
               onClick={add}
-              className={`flex w-full items-center gap-1 border-t border-slate-100 px-3 py-2 text-left text-sm font-semibold leading-5 text-blue-600 ${
+              className={`flex w-full items-center gap-1 border-t border-slate-100 px-3 py-2 text-left text-[10px] font-semibold leading-5 text-blue-600 ${
                 highlight === visibleOptions.length ? "bg-blue-50" : ""
               }`}
             >
@@ -1602,10 +1602,10 @@ const AdviceSection = forwardRef<
       <div className="flex w-full items-center justify-between gap-4">
 
         <div className="flex flex-col">
-          <div className="text-lg font-bold leading-7 text-slate-800">
+          <div className="text-[10px] font-bold leading-4 text-slate-800">
             Advice
           </div>
-          <div className="text-xs leading-4 text-slate-500">
+          <div className="text-[10px] leading-4 text-slate-500">
             Medicines prescribed to the patient for this visit
           </div>
         </div>
@@ -1634,11 +1634,11 @@ const AdviceSection = forwardRef<
       </div>
 
       {adviceLoading ? (
-        <div className="text-sm leading-5 text-slate-500">
+        <div className="text-[10px] leading-5 text-slate-500">
           Loading prescribed medicines...
         </div>
       ) : adviceRows.length === 0 ? (
-        <div className="flex w-full items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm leading-5 text-slate-500">
+        <div className="flex w-full items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-[10px] leading-5 text-slate-500">
           No medicines prescribed yet. Click "Add Medicine" to prescribe.
         </div>
       ) : (
@@ -1668,7 +1668,7 @@ const AdviceSection = forwardRef<
               ].map((heading) => (
                 <th
                   key={heading}
-                  className="border-y border-slate-200 bg-slate-50 px-2 py-2 text-xs font-bold leading-4 text-slate-500 first:rounded-tl-md first:border-l"
+                  className="border-y border-slate-200 bg-slate-50 px-2 py-2 text-[10px] font-bold leading-4 text-slate-800 first:rounded-tl-md first:border-l"
                 >
                   {heading}
                 </th>
@@ -1683,7 +1683,7 @@ const AdviceSection = forwardRef<
             {adviceRows.map((row, index) => (
               <tr key={row.rowId} className="align-top">
 
-                <td className="border-b border-slate-100 px-2 py-2 text-sm leading-[34px] text-slate-500">
+                <td className="border-b border-slate-100 px-2 py-2 text-[10px] leading-[34px] text-slate-500">
                   {index + 1}
                 </td>
 
@@ -1769,7 +1769,7 @@ const AdviceSection = forwardRef<
         <div className="flex items-center justify-between gap-2">
           <label
             htmlFor="advice-follow-up-date"
-            className="text-xs font-bold leading-4 text-slate-500"
+            className="text-[10px] font-bold leading-4 text-slate-500"
           >
             Follow-up Date
           </label>
@@ -1777,7 +1777,7 @@ const AdviceSection = forwardRef<
             <button
               type="button"
               onClick={() => setFollowUpDate("")}
-              className="text-[11px] font-medium text-slate-400 transition-colors hover:text-red-500"
+              className="text-[10px] font-medium text-slate-400 transition-colors hover:text-red-500"
             >
               Clear
             </button>
@@ -1808,7 +1808,7 @@ const AdviceSection = forwardRef<
 
       <div className="flex w-full flex-col gap-2">
 
-        <label className="text-xs font-bold leading-4 text-slate-500">
+        <label className="text-[10px] font-bold leading-4 text-slate-800">
           Discussion
         </label>
 
@@ -1821,7 +1821,7 @@ const AdviceSection = forwardRef<
       </div>
 
       {!adviceLoading && adviceStatus && (
-        <div className="text-xs font-medium leading-4">
+        <div className="text-[10px] font-medium leading-4">
           {adviceStatus}
         </div>
       )}

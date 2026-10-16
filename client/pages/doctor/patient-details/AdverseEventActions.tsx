@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { chemotherapyApi, type ChemoAdverseEventRecord } from "@/api/chemotherapy.api";
 import { useToast } from "@/hooks/use-toast";
 import { ComboInput } from "./ComboInput";
@@ -110,7 +110,7 @@ export function ResolveAdverseModal({
       <div className="space-y-4">
         <EventSummary event={event} dayLabel={dayLabel} />
         <div>
-          <label htmlFor="adverse-resolution-date" className="mb-1 block text-xs font-semibold text-slate-700">
+          <label htmlFor="adverse-resolution-date" className="mb-1 block text-[10px] font-semibold text-slate-700">
             Resolution Date <span className="text-red-500">*</span>
           </label>
           <input
@@ -192,12 +192,12 @@ export function RemoveAdverseModal({
     >
       <div className="space-y-4">
         <EventSummary event={event} dayLabel={dayLabel} />
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
           <i className="fa-solid fa-circle-info mt-0.5" />
           <span>The event is removed from the Administration and History tabs. The record and your reason are kept in the audit log.</span>
         </div>
         <div>
-          <label htmlFor="adverse-remove-reason" className="mb-1 block text-xs font-semibold text-slate-700">
+          <label htmlFor="adverse-remove-reason" className="mb-1 block text-[10px] font-semibold text-slate-700">
             Reason <span className="text-red-500">*</span>
           </label>
           <ComboInput
