@@ -233,6 +233,9 @@ const LabReview: React.FC<{
             /* An invalid typed date is dropped (Consultation's Proceed
                blocks it, but this step can be opened from the stepper). */
             const targetDate = dmyToIsoStrict(detail?.targetDate ?? "");
+            /* Only Molecular-category tests expose a Method, but a saved
+               value is always forwarded when present. */
+            const method = detail?.method ?? "";
 
             return labOrderItemApi.create({
               lab_order_id: labOrderId,
@@ -240,6 +243,7 @@ const LabReview: React.FC<{
               priority: detail?.priority ?? "Normal",
               ...(notes ? { clinical_notes: notes } : {}),
               ...(targetDate ? { target_date: targetDate } : {}),
+              ...(method.trim() ? { method: method.trim() } : {}),
               ...(branchId ? { branch_id: branchId } : {}),
             });
           })
@@ -435,6 +439,14 @@ const LabReview: React.FC<{
                         title={item.clinical_notes}
                       >
                         {item.clinical_notes}
+                      </div>
+                    )}
+                    {item.method && (
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-blue-600">
+                        <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold">
+                          Method
+                        </span>
+                        <span className="truncate">{item.method}</span>
                       </div>
                     )}
                   </td>

@@ -221,6 +221,22 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const investigationDetail = (name: string) =>
     investigationDetails[name] ?? EMPTY_INVESTIGATION_DETAIL;
 
+  /* A selected investigation is Molecular when its lab test master row
+     belongs to a "Molecular" category. The master groups molecular tests
+     under names like "Molecular - Breast Cancer" / "Molecular - Lung
+     Cancer", so the category name is matched by prefix, case-insensitively.
+     Custom (typed) tests have no master row, so they never show the
+     testing Method dropdown. */
+  const isMolecularTest = (name: string) => {
+    const test = labTests.find(
+      (item) => (item.test_name ?? "").toLowerCase() === name.toLowerCase()
+    );
+    return (test?.lab_test_category?.category_name ?? "")
+      .trim()
+      .toLowerCase()
+      .startsWith("molecular");
+  };
+
   const updateInvestigationDetail = (
     name: string,
     patch: Partial<InvestigationOrderDetail>
@@ -1015,6 +1031,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         const detail = investigationDetail(name);
         return {
           name,
+          method: isMolecularTest(name) ? detail.method : "",
           notes: detail.notes,
           priority: detail.priority,
           targetDate: detail.targetDate,
@@ -2392,6 +2409,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
             index={index}
             name={investigation}
             detail={investigationDetail(investigation)}
+            showMethod={isMolecularTest(investigation)}
             onChange={(patch) =>
               updateInvestigationDetail(investigation, patch)
             }
