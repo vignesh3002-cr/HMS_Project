@@ -1602,7 +1602,7 @@ const AdviceSection = forwardRef<
       <div className="flex w-full items-center justify-between gap-4">
 
         <div className="flex flex-col">
-          <div className="text-[10px] font-bold leading-4 text-slate-800">
+          <div className="text-[14px] font-bold uppercase leading-7 text-slate-800">
             Advice
           </div>
           <div className="text-[10px] leading-4 text-slate-500">

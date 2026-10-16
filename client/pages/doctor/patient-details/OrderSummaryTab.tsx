@@ -908,10 +908,25 @@ Day {row.day}
 )}
 {/* END: Day Selector */}
 </div>
-{/* Right Side (Cards) */}
-<div className="flex flex-col gap-6 sm:flex-row">
+{/* Sub-cards: Cycle & Schedule · Next Appointment · Treatment Progress · Clinical Info · Lab Validation */}
+<div className="grid grid-cols-1 gap-6 mt-2 md:grid-cols-2 xl:grid-cols-6">
+{/* BEGIN: Cycle & Schedule */}
+<div className="flex h-full min-h-[200px] flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
+<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Cycle &amp; Schedule</h4>
+<div className="grid grid-cols-2 gap-4">
+<InfoTile label="Cycle" value={current ? `${current.cycle}${plannedCycles ? ` / ${plannedCycles}` : ""}` : ""} />
+<InfoTile label="Day" value={current ? `${current.day}${daysInCycle(current.cycle) ? ` / ${daysInCycle(current.cycle)}` : ""}` : ""} />
+<InfoTile label="Start Date" value={fmtDate(firstDate)} />
+<InfoTile label="End Date" value={fmtDate(lastDate)} />
+<InfoTile label="Interval" value={savedPlan?.cycle_interval_days ? `${savedPlan.cycle_interval_days} days` : ""} />
+<InfoTile label="Total Days" value={totalDays ?? ""} />
+<InfoTile label="Cycle Status" value={currentCycleStatus ? String(currentCycleStatus).replace(/_/g, " ") : ""} />
+<InfoTile label="Next Cycle" value={nextCycleDate ? fmtDate(nextCycleDate) : ""} />
+</div>
+</div>
+{/* END: Cycle & Schedule */}
 {/* BEGIN: Next Appointment */}
-<div className="flex min-h-[200px] w-full flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-6 shadow-sm sm:w-[240px]">
+<div className="flex h-full min-h-[200px] flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
 <div>
 <h4 className="mb-4 text-sm font-bold text-[#1e293b]">Next Appointment</h4>
 {planClosed ? (
@@ -953,8 +968,8 @@ bookedNext ? (
 </div>
 {/* END: Next Appointment */}
 {/* BEGIN: Treatment Progress */}
-<div className="flex min-h-[200px] w-full flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-6 shadow-sm sm:w-[240px]">
-<h4 className="mb-2 text-sm font-bold text-[#1e293b]">Treatment Progress</h4>
+<div className="flex h-full min-h-[200px] flex-col justify-between rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
+<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Treatment Progress</h4>
 <div className="flex items-center justify-between gap-3">
 <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)]" style={progressPercent != null ? { backgroundImage: `conic-gradient(#10b981 ${progressPercent}%, #e2e8f0 ${progressPercent}% 100%)` } : undefined}>
 <div className="absolute inset-[6px] rounded-full bg-white"></div>
@@ -974,25 +989,8 @@ bookedNext ? (
 </div>
 </div>
 {/* END: Treatment Progress */}
-</div>
-{/* Row 2: Clinical Info | Lab Validation */}
-<div className="grid grid-cols-12 gap-6">
-{/* Left Column */}
-<div className="col-span-12 space-y-6 lg:col-span-4 xl:col-span-3">
-<div className="rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm">
-<h4 className="mb-4 text-sm font-bold text-[#1e293b]">Cycle &amp; Schedule</h4>
-<div className="grid grid-cols-2 gap-4">
-<InfoTile label="Cycle" value={current ? `${current.cycle}${plannedCycles ? ` / ${plannedCycles}` : ""}` : ""} />
-<InfoTile label="Day" value={current ? `${current.day}${daysInCycle(current.cycle) ? ` / ${daysInCycle(current.cycle)}` : ""}` : ""} />
-<InfoTile label="Start Date" value={fmtDate(firstDate)} />
-<InfoTile label="End Date" value={fmtDate(lastDate)} />
-<InfoTile label="Interval" value={savedPlan?.cycle_interval_days ? `${savedPlan.cycle_interval_days} days` : ""} />
-<InfoTile label="Total Days" value={totalDays ?? ""} />
-<InfoTile label="Cycle Status" value={currentCycleStatus ? String(currentCycleStatus).replace(/_/g, " ") : ""} />
-<InfoTile label="Next Cycle" value={nextCycleDate ? fmtDate(nextCycleDate) : ""} />
-</div>
-</div>
-<div className="rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm">
+{/* BEGIN: Clinical Info */}
+<div className="flex h-full flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm xl:col-span-2">
 <h4 className="mb-4 text-sm font-bold text-[#1e293b]">Clinical Info</h4>
 <div className="grid grid-cols-2 gap-4">
 <div className="col-span-2"><InfoTile label="Type" value={cancerType} /></div>
@@ -1005,10 +1003,8 @@ bookedNext ? (
 <div className="col-span-2"><InfoTile label="Consulting Oncologist" value={oncologist} /></div>
 </div>
 </div>
-</div>
-{/* Middle Column */}
-<div className="col-span-12 space-y-6 lg:col-span-8 xl:col-span-9">
-<div className="rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm">
+{/* BEGIN: Lab Validation */}
+<div className="flex h-full flex-col rounded-[16px] border border-[#e2e8f0] bg-white p-5 shadow-sm md:col-span-2 xl:col-span-4">
 <div className="mb-4 flex items-center">
 <h4 className="mr-3 text-sm font-bold text-[#1e293b]">Lab Validation</h4>
 <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase text-[#64748b]">{labLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
@@ -1019,7 +1015,7 @@ bookedNext ? (
 {labLoading ? (
   <div className="py-6 text-center text-xs text-[#64748b]"><i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…</div>
 ) : (
-  <div className="max-h-[260px] overflow-y-auto">
+  <div className="max-h-[260px] overflow-auto">
   <table className="mb-4 w-full text-left text-sm">
     <thead className="sticky top-0 bg-white">
       <tr className="border-b border-slate-100 text-[10px] uppercase text-[#64748b]">
@@ -1054,7 +1050,6 @@ bookedNext ? (
 <span className={`font-bold uppercase ${clearance.cls}`}>{clearance.label}</span>
 <span className="block text-[11px] text-[#64748b]">{clearance.note}</span>
 </span>
-</div>
 </div>
 </div>
 </div>
