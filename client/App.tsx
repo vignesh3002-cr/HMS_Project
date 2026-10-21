@@ -52,6 +52,7 @@ import Security from "@/components/Forms/view/Security";
 
 import Appointments from "./pages/Appointments";
 import InpatientAdmissions from "./pages/InpatientAdmissions";
+import InpatientDutyRoster from "./pages/InpatientDutyRoster";
 import BedMaster from "./pages/BedMaster";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
@@ -342,6 +343,12 @@ const protectedRoutes = [
   {
     path: "/inpatient/admissions",
     element: <InpatientAdmissions />,
+    permission: "admission.read",
+  },
+
+  {
+    path: "/inpatient/duty-roster",
+    element: <InpatientDutyRoster />,
     permission: "admission.read",
   },
 

@@ -30,6 +30,9 @@ import { getUser } from "@/utils/token";
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
 import type { CriticalInfo } from "@/components/hms/CriticalPatientIndicator";
+import { WardOccupancyWidget } from "@/components/hms/dashboard/WardOccupancyWidget";
+import { SystemIntegrityWidget } from "@/components/hms/dashboard/SystemIntegrityWidget";
+import { AdminQuickActionToolbar } from "@/components/hms/dashboard/AdminQuickActionToolbar";
 
 function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
   const reasons: string[] = [];
@@ -66,7 +69,7 @@ function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
   }
   return reasons;
 }
-import { getKpiPreferences, saveKpiPreferences } from "@/api/userPreferences.api";
+import { getKpiPreferences, saveKpiPreferences, getKpiUsage, saveKpiUsage } from "@/api/userPreferences.api";
 
 const navItems = [
   {
@@ -382,6 +385,7 @@ export default function Dashboard() {
   const [selectedKpis, setSelectedKpis] = useState<string[]>(ALL_KPI_IDS);
   const [isKpiShowerOpen, setIsKpiShowerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showWardOccupancy, setShowWardOccupancy] = useState(false);
   const { toast } = useToast();
   // Aliased -- this page already has its own local `branches` state below
   // for the branch-performance widget, so the real branch directory from
@@ -429,6 +433,82 @@ export default function Dashboard() {
     }, 500);
     return () => clearTimeout(timer);
   }, [kpiHydrated, selectedKpis]);
+
+  // ---- KPI usage tracking (frequency-based ordering) ----
+  // Hydrated once from the backend; used only for sorting so the order
+  // stays stable for the whole session (re-sorts on next page load).
+  const [kpiUsageSnapshot, setKpiUsageSnapshot] = useState<Record<string, number>>({});
+  // Live mutable counts — incremented on click, never drives a re-render,
+  // so cards don't jump around mid-session. Flushed to the backend on a
+  // debounce and on unmount.
+  const kpiUsageRef = useRef<Record<string, number>>({});
+  const [kpiUsageHydrated, setKpiUsageHydrated] = useState(false);
+  const skipNextUsageSaveRef = useRef(false);
+  const kpiUsageSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Master toggle: when off, KPIs keep their default order regardless of
+  // usage counts. Persisted in localStorage (pure UI preference).
+  const [usageSortEnabled, setUsageSortEnabled] = useState(() => {
+    return localStorage.getItem("hms_kpi_usage_sort") !== "off";
+  });
+
+  const toggleUsageSort = useCallback(() => {
+    setUsageSortEnabled((prev) => {
+      const next = !prev;
+      localStorage.setItem("hms_kpi_usage_sort", next ? "on" : "off");
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (permissionsLoading) return;
+    if (kpiUsageHydrated) return;
+
+    getKpiUsage()
+      .then((usage) => {
+        skipNextUsageSaveRef.current = true;
+        kpiUsageRef.current = { ...usage };
+        setKpiUsageSnapshot(usage);
+        setKpiUsageHydrated(true);
+      })
+      .catch(() => {
+        skipNextUsageSaveRef.current = true;
+        setKpiUsageHydrated(true);
+      });
+  }, [permissionsLoading, kpiUsageHydrated]);
+
+  const flushKpiUsageSave = useCallback(() => {
+    const usage = { ...kpiUsageRef.current };
+    if (Object.keys(usage).length > 0) {
+      saveKpiUsage(usage).catch(() => {});
+    }
+  }, []);
+
+  const trackKpiUsage = useCallback((kpiId: string) => {
+    if (!kpiUsageHydrated) return;
+    kpiUsageRef.current = {
+      ...kpiUsageRef.current,
+      [kpiId]: (kpiUsageRef.current[kpiId] ?? 0) + 1,
+    };
+    if (kpiUsageSaveTimerRef.current) clearTimeout(kpiUsageSaveTimerRef.current);
+    kpiUsageSaveTimerRef.current = setTimeout(() => {
+      flushKpiUsageSave();
+      kpiUsageSaveTimerRef.current = null;
+    }, 2000);
+  }, [kpiUsageHydrated, flushKpiUsageSave]);
+
+  // Persist any pending usage counts on unmount (page refresh/navigation).
+  useEffect(() => {
+    return () => {
+      if (kpiUsageSaveTimerRef.current) {
+        clearTimeout(kpiUsageSaveTimerRef.current);
+        kpiUsageSaveTimerRef.current = null;
+        const usage = { ...kpiUsageRef.current };
+        if (Object.keys(usage).length > 0) {
+          saveKpiUsage(usage).catch(() => {});
+        }
+      }
+    };
+  }, []);
 
  
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
@@ -688,6 +768,24 @@ export default function Dashboard() {
   const criticalPatientCount = useMemo(() => {
     return criticalCountIds.filter((id) => getLiveCriticalInfo(id).isCritical).length;
   }, [criticalCountIds, getLiveCriticalInfo]);
+
+  const doctorsOnLeave = useMemo(() => {
+    if (!realDoctors) return [];
+    return (realDoctors as any[])
+      .filter((d) => d.status === "Leave")
+      .map((d) => ({ id: String(d.id ?? ""), name: String(d.name ?? "Dr. Doctor") }));
+  }, [realDoctors]);
+
+  const unassignedApptsCount = useMemo(() => {
+    if (!realAppointments) return 0;
+    return (realAppointments as any[]).filter(
+      (a) =>
+        !a.doctorId ||
+        !a.doctorName ||
+        String(a.doctorName).toLowerCase().includes("unassigned") ||
+        a.doctorName === "Laboratory"
+    ).length;
+  }, [realAppointments]);
 
   useEffect(() => {
     if (!appointmentsQuery.error) return;
@@ -1290,7 +1388,7 @@ export default function Dashboard() {
         icon: <AlertCircle className="w-[17px] h-[17px]" color="#DC2626" />,
         isActive: false,
         onClick: () => {
-          navigate("/patients");
+          navigate("/patients?critical=true");
         },
       },
       {
@@ -1535,9 +1633,25 @@ export default function Dashboard() {
     return allKpiItems.filter((stat) => !stat.permission || can(stat.permission));
   }, [allKpiItems, can]);
 
+  // Filter to selected KPIs, then (when the usage-sort toggle is on) order
+  // by usage frequency — most-clicked first (left), least-clicked last
+  // (right). Ties keep the default order from allKpiItems. Uses the
+  // hydrated snapshot so the order only changes on the next page load,
+  // not mid-session.
   const displayedStats = useMemo(() => {
-    return visibleStats.filter((stat) => selectedKpis.includes(stat.id));
-  }, [visibleStats, selectedKpis]);
+    const filtered = visibleStats
+      .filter((stat) => selectedKpis.includes(stat.id))
+      .map((stat, defaultIndex) => ({ stat, defaultIndex }));
+    if (usageSortEnabled) {
+      filtered.sort((a, b) => {
+        const usageA = kpiUsageSnapshot[a.stat.id] ?? 0;
+        const usageB = kpiUsageSnapshot[b.stat.id] ?? 0;
+        if (usageA !== usageB) return usageB - usageA;
+        return a.defaultIndex - b.defaultIndex;
+      });
+    }
+    return filtered.map((entry) => entry.stat);
+  }, [visibleStats, selectedKpis, kpiUsageSnapshot, usageSortEnabled]);
 
   useEffect(() => {
     const timer = setTimeout(updateScrollButtons, 150);
@@ -1704,6 +1818,36 @@ export default function Dashboard() {
                       </div>
                     </div>
 
+                    {/* Usage-based sort toggle */}
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-slate-50/60">
+                      <div className="flex flex-col gap-[1px] min-w-0">
+                        <span className="text-[11px] font-semibold text-slate-700 leading-tight">
+                          Sort by most used
+                        </span>
+                        <span className="text-[10px] text-slate-400 leading-tight truncate">
+                          {usageSortEnabled
+                            ? "Frequently clicked KPIs appear first"
+                            : "KPIs stay in default order"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={usageSortEnabled}
+                        onClick={toggleUsageSort}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00488D] focus-visible:ring-offset-2 ${
+                          usageSortEnabled ? "bg-[#00488D]" : "bg-slate-300"
+                        }`}
+                        title={usageSortEnabled ? "Disable usage-based sorting" : "Enable usage-based sorting"}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+                            usageSortEnabled ? "translate-x-[19px]" : "translate-x-[3px]"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
                     {/* KPI Multi-select List */}
                     <div className="max-h-64 overflow-y-auto p-1 space-y-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                       {visibleStats.map((stat) => {
@@ -1786,12 +1930,16 @@ export default function Dashboard() {
                   displayedStats.map((card) => (
                     <div
                       key={card.id}
-                      onClick={card.onClick}
+                      onClick={() => {
+                        trackKpiUsage(card.id);
+                        card.onClick();
+                      }}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
+                          trackKpiUsage(card.id);
                           card.onClick();
                         }
                       }}
@@ -1982,23 +2130,23 @@ export default function Dashboard() {
           </div>
 
 {/* Overview Header */}
-           <div className="flex items-end justify-between">
+           <div className="flex items-center justify-between flex-wrap gap-3">
              <div>
                <h2 className="hms-heading">Admin Overview</h2>
-               <p className="hms-subheading">Real-time performance across all branches.</p>
+               <p className="hms-subheading">Real-time clinical, inpatient, and staff performance across all branches.</p>
              </div>
-             {can("appointment.create") && (
-             <button
-               onClick={() => navigate("/appointments/add")}
-               className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
-             >
-               <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                 <path d="M8 2V10M4 6H12" stroke="white" strokeWidth="2" strokeLinecap="round"/>
-               </svg>
-               Add Appointment
-             </button>
-             )}
+             <AdminQuickActionToolbar
+               showWardOccupancy={showWardOccupancy}
+               onToggleWardOccupancy={() => setShowWardOccupancy((prev) => !prev)}
+             />
            </div>
+
+           {/* Full-Width Ward & Bed Occupancy Drawer (Default: Closed) */}
+           {showWardOccupancy && (
+             <div className="w-full transition-all duration-300">
+               <WardOccupancyWidget />
+             </div>
+           )}
 
           {/* Table Card */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
@@ -2263,38 +2411,16 @@ export default function Dashboard() {
             <BranchPerformance selectedDate={selectedDate} />
             )}
 
-            {/* System Integrity */}
-            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">System Integrity</h3>
-                  <p className="text-[#424752] text-[9px] font-semibold tracking-[0.9px] capitalize">Alerts</p>
-                </div>
-                <button className="px-3 py-1 rounded border border-[rgba(194,198,212,0.30)] text-[#424752] text-[9px] font-semibold tracking-[0.9px]">View All</button>
-              </div>
-              <div className="flex flex-col gap-2">
-                {/* Alert 1 */}
-                <div className="flex items-start gap-3 p-2 rounded-[4px]">
-                  <svg width="17" height="15" viewBox="0 0 17 15" fill="none" className="flex-shrink-0 mt-0.5">
-                    <path d="M0 14.25L8.25 0L16.5 14.25H0ZM2.5875 12.75H13.9125L8.25 3L2.5875 12.75ZM8.25 12C8.4625 12 8.64062 11.9281 8.78438 11.7844C8.92813 11.6406 9 11.4625 9 11.25C9 11.0375 8.92813 10.8594 8.78438 10.7156C8.64062 10.5719 8.4625 10.5 8.25 10.5C8.0375 10.5 7.85938 10.5719 7.71562 10.7156C7.57187 10.8594 7.5 11.0375 7.5 11.25C7.5 11.4625 7.57187 11.6406 7.71562 11.7844C7.85938 11.9281 8.0375 12 8.25 12ZM7.5 9.75H9V6H7.5V9.75Z" fill="#BA1A1A"/>
-                  </svg>
-                  <div>
-                    <div className="text-[#191C1E] font-semibold text-xs leading-[15px]">Admin Access Granted</div>
-                    <div className="text-[#424752] font-normal text-[10px] leading-[15px]">John Doe (IT) authorized for DB.</div>
-                  </div>
-                </div>
-                {/* Alert 2 */}
-                <div className="flex items-start gap-3 p-2 rounded-[4px]">
-                  <svg width="17" height="15" viewBox="0 0 17 15" fill="none" className="flex-shrink-0 mt-0.5">
-                    <path d="M0 14.25L8.25 0L16.5 14.25H0ZM2.5875 12.75H13.9125L8.25 3L2.5875 12.75ZM8.25 12C8.4625 12 8.64062 11.9281 8.78438 11.7844C8.92813 11.6406 9 11.4625 9 11.25C9 11.0375 8.92813 10.8594 8.78438 10.7156C8.64062 10.5719 8.4625 10.5 8.25 10.5C8.0375 10.5 7.85938 10.5719 7.71562 10.7156C7.57187 10.8594 7.5 11.0375 7.5 11.25C7.5 11.4625 7.57187 11.6406 7.71562 11.7844C7.85938 11.9281 8.0375 12 8.25 12ZM7.5 9.75H9V6H7.5V9.75Z" fill="#BA1A1A"/>
-                  </svg>
-                  <div>
-                    <div className="text-[#191C1E] font-semibold text-xs leading-[15px]">Server Latency</div>
-                    <div className="text-[#424752] font-normal text-[10px] leading-[15px]">Billing module experiencing delays.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* System Integrity Control Center */}
+            <SystemIntegrityWidget
+              criticalPatientCount={criticalPatientCount}
+              doctorsOnLeave={doctorsOnLeave}
+              unassignedApptsCount={unassignedApptsCount}
+              onFilterCritical={() => {
+                setActiveTab("appointments");
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </main>
       </div>
