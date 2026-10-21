@@ -1,11 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getActiveBranchId } from "../../../api/axios";
 import { labOrderItemApi, type LabOrderItemRecord } from "../../../api/labOrder.api";
 import { labReportApi, parseReportComment } from "../../../api/labReport.api";
-import { appointmentApi, type AppointmentRecord } from "../../../api/appointment.api";
-import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
-import { patientApi, type PatientRecord } from "../../../api/patient.api";
 import {
   chemotherapyApi,
   chemoPlanCurrentItems,
@@ -15,7 +10,7 @@ import {
   type ChemoPlanOrder,
 } from "../../../api/chemotherapy.api";
 import type { SummaryPlanItem, SummaryPlan } from "./types";
-import { useDischargeMedicines } from "./hooks";
+import { useDischargeMedicines, useNextVisitBooking } from "./hooks";
 
 /* ============================================================
    ORDER SUMMARY TAB
@@ -223,7 +218,6 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
   savedPlan,
   planNotice,
 }) => {
-  const navigate = useNavigate();
   const today = localTodayIso();
   const planId = savedPlan?.chemotherapy_plan_id ?? "";
   const planClosed = isChemoPlanClosed(savedPlan);
@@ -499,47 +493,9 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
 
   /* ---------------- appointments, encounter, patient ---------------- */
 
-  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
-  const [latestEncounter, setLatestEncounter] = useState<EncounterRecord | null>(null);
-  const [patient, setPatient] = useState<PatientRecord | null>(null);
-
-  useEffect(() => {
-    const patientId = resolvedPatientId;
-    if (!patientId) return;
-    let cancelled = false;
-    const from = isoDay(savedPlan?.treatment_start_date);
-    appointmentApi
-      .getAll({
-        patientId,
-        dateFrom: from && from < today ? from : today,
-        sortBy: "appointment_date",
-        sortOrder: "desc",
-        limit: 100,
-      })
-      .then((response) => {
-        if (!cancelled) setAppointments(response.data?.data?.appointments ?? []);
-      })
-      .catch((error) => console.error("Failed to load the patient's appointments:", error));
-    encounterApi
-      .getLatest(patientId, 1)
-      .then((response) => {
-        if (!cancelled) setLatestEncounter(response.data?.data?.encounters?.[0] ?? null);
-      })
-      .catch(() => undefined);
-    patientApi
-      .getById(patientId)
-      .then((response) => {
-        if (!cancelled) setPatient(response.data?.data ?? null);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedPatientId, savedPlan?.treatment_start_date]);
-
-  const activeAppointments = appointments.filter(
-    (appointment) => !["CANCELLED", "NO_SHOW"].includes(String(appointment.status ?? "").toUpperCase())
+  const { activeAppointments, latestEncounter, bookedOn, book, reschedule } = useNextVisitBooking(
+    resolvedPatientId,
+    { planDoctorId: savedPlan?.employee_id, treatmentStartDate: savedPlan?.treatment_start_date }
   );
 
   /* Next visit: the first cycle day not given yet (from today). */
@@ -553,13 +509,7 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medicationRows, planClosed, today]);
 
-  const bookedNext = nextVisit
-    ? activeAppointments.find(
-        (appointment) =>
-          isoDay(appointment.appointment_date) === nextVisit.date &&
-          String(appointment.status ?? "").toUpperCase() !== "COMPLETED"
-      ) ?? null
-    : null;
+  const bookedNext = bookedOn(nextVisit?.date);
 
   const followUpDate =
     latestEncounter?.follow_up_date && isoDay(latestEncounter.follow_up_date) >= today
@@ -575,61 +525,12 @@ const OrderSummaryTab: React.FC<OrderSummaryTabProps> = ({
     return `Overdue by ${-diff} day${diff === -1 ? "" : "s"}`;
   };
 
-  const placement = {
-    doctorId: latestEncounter?.employee_id || savedPlan?.employee_id || "",
-    branchId: latestEncounter?.branch_id || getActiveBranchId() || "",
-    departmentId: latestEncounter?.department_id || "",
-  };
-
   const bookNextVisit = () => {
-    if (!nextVisit) return;
-    const date = nextVisit.date && nextVisit.date >= today ? nextVisit.date : today;
-    navigate("/doctor/appointments/add", {
-      state: {
-        ...(patient
-          ? {
-              patient: {
-                patient_id: patient.patient_id,
-                patient_first_name: patient.patient_first_name,
-                patient_middle_name: patient.patient_middle_name ?? "",
-                patient_last_name: patient.patient_last_name ?? "",
-                patient_primary_mobile: patient.patient_primary_mobile ?? "",
-              },
-            }
-          : {}),
-        ...(placement.doctorId && placement.branchId && placement.departmentId
-          ? { slot: { ...placement, date } }
-          : {}),
-        ...(placement.doctorId
-          ? {
-              doctorBooking: {
-                doctorId: placement.doctorId,
-                ...(placement.branchId ? { branchId: placement.branchId } : {}),
-                ...(placement.departmentId ? { departmentId: placement.departmentId } : {}),
-              },
-            }
-          : {}),
-        defaultVisitType: "Chemotherapy Visit",
-      },
-    });
+    if (nextVisit) book(nextVisit.date);
   };
 
   const rescheduleNextVisit = () => {
-    if (!bookedNext) return;
-    const doctorId = bookedNext.employee_id || placement.doctorId;
-    navigate(`/doctor/appointments/edi</${bookedNext.appointment_id}`, {
-      state: doctorId
-        ? {
-            doctorBooking: {
-              doctorId,
-              ...(bookedNext.branch_id || placement.branchId ? { branchId: bookedNext.branch_id || placement.branchId } : {}),
-              ...(bookedNext.department_id || placement.departmentId
-                ? { departmentId: bookedNext.department_id || placement.departmentId }
-                : {}),
-            },
-          }
-        : undefined,
-    });
+    if (bookedNext) reschedule(bookedNext);
   };
 
   /* ---------------- progress + schedule ---------------- */
