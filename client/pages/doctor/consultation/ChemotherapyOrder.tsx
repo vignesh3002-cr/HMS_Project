@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+﻿import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import {
@@ -8,6 +8,7 @@ import {
   type ChemoPlanItem,
   type ChemoPlanOrder,
   type ChemoPlanOrderHeader,
+  type ChemoPlanScheduleRow,
 } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { Calendar } from "../../../components/ui/calendar";
@@ -28,8 +29,10 @@ import type {
   RegimenProtocolItem,
 } from "./types";
 import {
+  addDaysToIsoDate,
   COURSE_CLOSED_MESSAGE,
   createChemotherapyPlanForPatient,
+  dateOnlyDMY,
   findActiveEncounter,
   formatDateDMY,
   orderDosingFromSnapshot,
@@ -185,6 +188,8 @@ type ChemotherapyPlan = {
   /* Saved cycle day orders (by cycle / day) and the current one. */
   plan_orders?: ChemoPlanOrderHeader[] | null;
   current_order?: ChemoPlanOrder | null;
+  /* The planned date of every cycle day. */
+  chemotherapy_plan_schedule?: ChemoPlanScheduleRow[] | null;
 };
 
 const orderKey = (cycle: number, day: number) => `${cycle}/${day}`;
@@ -227,6 +232,8 @@ const ChemotherapyOrder: React.FC<{
   gender?: string;
   age?: string | number | null;
   onNext?: () => void;
+  /* The consultation's encounter - the order is saved in it. */
+  encounterNo?: string;
 }> = ({
   embedded = false,
   patientId,
@@ -234,6 +241,7 @@ const ChemotherapyOrder: React.FC<{
   gender,
   age,
   onNext,
+  encounterNo,
 }) => {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
@@ -291,6 +299,11 @@ const ChemotherapyOrder: React.FC<{
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
+  /* Start Date is per cycle day: the plan's schedule gives each day's
+     planned date, and a date the doctor picks applies to that day only
+     ("cycle/day" -> DD-MM-YYYY). */
+  const scheduleRef = useRef<ChemoPlanScheduleRow[]>([]);
+  const editedDatesRef = useRef(new Map<string, string>());
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
   const cycleDayRef = useRef<string>("");
   const planIdRef = useRef<string>("");
@@ -413,11 +426,6 @@ const ChemotherapyOrder: React.FC<{
     const baseStart = new Date(baseDate);
     baseStart.setHours(0, 0, 0, 0);
 
-    const formDate = new Date(baseStart);
-    formDate.setDate(
-      formDate.getDate() + (formCycleNumber - 1) * interval
-    );
-
     const formatDate = (date: Date) => {
       const day = String(date.getDate()).padStart(2, "0");
       const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -442,7 +450,7 @@ const ChemotherapyOrder: React.FC<{
     );
 
     updateCycleDay(formCycleStr);
-    setStartDate(formatDate(formDate));
+    showDayDate(formCycleStr);
     localStorage.setItem(
       `hms_next_cycle_${resolvedPatientId}`,
       nextCycleStr
@@ -471,6 +479,43 @@ const ChemotherapyOrder: React.FC<{
   const getCycleNumber = (value: string): number | null => {
     const match = value.trim().match(/Cycle\s*(\d+)/i);
     return match ? Number(match[1]) : null;
+  };
+
+  /* "c/d" of a "Cycle N / Day M" label. */
+  const dayKeyOf = (value: string) =>
+    orderKey(getCycleNumber(value) ?? 1, getCycleDayNumber(value) ?? 1);
+
+  /* A cycle day's Start Date: the date picked for it this session, else
+     its planned date in the plan's schedule, else (no plan yet) the planned
+     treatment start + (day - 1). */
+  const dayPlannedDate = (cycle: number, day: number): string => {
+    const edited = editedDatesRef.current.get(orderKey(cycle, day));
+    if (edited) return edited;
+    const scheduled = scheduleRef.current.find(
+      (row) => row.cycle_number === cycle && row.cycle_day === day
+    );
+    if (scheduled) return dateOnlyDMY(scheduled.planned_date);
+    const base =
+      toIsoDate(
+        localStorage.getItem(`hms_planned_start_date_${resolvedPatientId}`)
+      ) || toIsoDate(new Date().toISOString());
+    return base ? dateOnlyDMY(addDaysToIsoDate(base, day - 1)) : "";
+  };
+
+  /* Show the Start Date of the cycle day in the Cycle / Day field. */
+  const showDayDate = (value: string = cycleDayRef.current) => {
+    if (!value) return;
+    const cycle = getCycleNumber(value) ?? 1;
+    const day = getCycleDayNumber(value) ?? 1;
+    userTouched.current.startDate = editedDatesRef.current.has(orderKey(cycle, day));
+    setStartDate(dayPlannedDate(cycle, day));
+  };
+
+  /* The doctor picked / typed a Start Date for the cycle day on screen. */
+  const editStartDate = (value: string) => {
+    editedDatesRef.current.set(dayKeyOf(cycleDayRef.current), value);
+    userTouched.current.startDate = true;
+    setStartDate(value);
   };
 
   const getCycleAndDay = (
@@ -916,6 +961,8 @@ const ChemotherapyOrder: React.FC<{
       const data = JSON.parse(saved) as {
         cycleDay?: string;
         startDate?: string;
+        /* "cycle/day" the Start Date was picked for. */
+        startDateKey?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
@@ -947,9 +994,10 @@ const ChemotherapyOrder: React.FC<{
         setSerumCreatinine(data.serumCreatinine);
       }
 
-      if (data.startDate) {
-        setStartDate(data.startDate);
-        userTouched.current.startDate = true;
+      /* A Start Date picked earlier belongs to its own cycle day (older
+         drafts without the day are dropped). */
+      if (data.startDate && data.startDateKey) {
+        editedDatesRef.current.set(data.startDateKey, data.startDate);
       }
 
       if (Array.isArray(data.drugs) && data.drugs.length > 0) {
@@ -994,6 +1042,7 @@ const ChemotherapyOrder: React.FC<{
       JSON.stringify({
         cycleDay: userTouched.current.cycleDay ? cycleDay : "",
         startDate: userTouched.current.startDate ? startDate : "",
+        startDateKey: userTouched.current.startDate ? dayKeyOf(cycleDay) : "",
         drugs: userTouched.current.drugs ? drugs : [],
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
@@ -1085,15 +1134,19 @@ const ChemotherapyOrder: React.FC<{
   })();
 
   /* Set the cycle while preserving the currently selected day (clamped to
-     the protocol's available days). Updates the Cycle / Day field and
-     refetches that cycle's medications. */
+     the protocol's available days, and moved off a completed day).
+     Updates the Cycle / Day field and refetches that cycle's medications. */
   const selectCycle = (cycle: number) => {
     const currentDay = getCycleDayNumber(cycleDay) ?? availableDays[0] ?? 1;
-    const day = availableDays.includes(currentDay)
-      ? currentDay
-      : (availableDays[0] ?? 1);
+    const openDays = availableDays.filter((d) => isDaySelectable(cycle, d));
+    const medicationDays = getAvailableDays(protocolRef.current);
+    const day =
+      availableDays.includes(currentDay) && isDaySelectable(cycle, currentDay)
+        ? currentDay
+        : (openDays.find((d) => medicationDays.includes(d)) ?? openDays[0] ?? availableDays[0] ?? 1);
     const value = `Cycle ${cycle} / Day ${day}`;
     updateCycleDay(value);
+    showDayDate(value);
     applySelectedDay(value);
   };
 
@@ -1105,6 +1158,7 @@ const ChemotherapyOrder: React.FC<{
     const currentCycle = getCycleNumber(cycleDay) || 1;
     const value = `Cycle ${currentCycle} / Day ${day}`;
     updateCycleDay(value);
+    showDayDate(value);
     applySelectedDay(value);
   };
 
@@ -1158,6 +1212,11 @@ const ChemotherapyOrder: React.FC<{
       return;
     }
 
+    if (startDateError) {
+      setPlanError(startDateError);
+      return;
+    }
+
     const hasAnyData = cycleDay.trim() || startDate.trim();
 
     if (!hasAnyData) {
@@ -1205,12 +1264,19 @@ const ChemotherapyOrder: React.FC<{
         discussion,
         buildDosingSnapshot(dosingInputs),
         {
+          encounterNo,
           order: {
             cycle: getCycleNumber(cycleDayRef.current) ?? 1,
             day: displayedDayRef.current ?? 1,
             hydration: hydrationPayload(hydrationRows),
             chemoInstructions: postChemoInstructions,
             additionalNotes,
+            /* Only a date the doctor changed moves the day's schedule. */
+            plannedDate: editedDatesRef.current.has(
+              orderKey(getCycleNumber(cycleDayRef.current) ?? 1, displayedDayRef.current ?? 1)
+            )
+              ? toIsoDate(startDate)
+              : undefined,
           },
         }
       );
@@ -1351,9 +1417,7 @@ const ChemotherapyOrder: React.FC<{
         setPlanOrders(planOrdersRef.current);
         cacheOrder(plan.current_order);
 
-        if (!userTouched.current.startDate) {
-          setStartDate(formatDateDMY(plan.treatment_start_date));
-        }
+        scheduleRef.current = plan.chemotherapy_plan_schedule ?? [];
 
         /* Resume at the saved orders' cycle day (snapped to a medication
            day once the protocol is known). */
@@ -1366,6 +1430,7 @@ const ChemotherapyOrder: React.FC<{
           );
         }
         applyNextCycle(protocolRef.current, plan.treatment_start_date);
+        showDayDate();
 
         /* The protocol may have loaded first: show the plan's saved order
            for the displayed day now that it is known. */
@@ -1482,6 +1547,9 @@ const ChemotherapyOrder: React.FC<{
   /* The encounter this visit's orders are saved in (the consultation's
      submit completes them), looked up once. */
   const resolveEncounterNo = async () => {
+    if (encounterNo) {
+      encounterNoRef.current = encounterNo;
+    }
     if (encounterNoRef.current || !resolvedPatientId) {
       return encounterNoRef.current;
     }
@@ -1779,6 +1847,76 @@ const ChemotherapyOrder: React.FC<{
      closed course is read-only. */
   const orderLocked = planClosed || isSubmittedOrder(displayedOrder);
 
+  /* ---------------- Completed cycles / days ----------------
+     A completed cycle day can't be ordered again, and a cycle whose
+     medication days are all completed (or that is closed) can't be picked
+     at all - only the open cycles and days are selectable. */
+  const orderOfDay = (cycle: number, day: number) =>
+    planOrders.find((order) => order.cycle_number === cycle && order.cycle_day === day);
+  const isDayCompleted = (cycle: number, day: number) =>
+    orderOfDay(cycle, day)?.order_status === "COMPLETED";
+  const isCycleCompleted = (cycle: number) => {
+    const cycleOrders = planOrders.filter((order) => order.cycle_number === cycle);
+    if (cycleOrders.some(isClosedCycleOrder)) return true;
+    const medicationDays = getAvailableDays(protocolRef.current);
+    const days = medicationDays.length > 0 ? medicationDays : availableDays;
+    return days.length > 0 && days.every((day) => isDayCompleted(cycle, day));
+  };
+  const isDaySelectable = (cycle: number, day: number) =>
+    !isCycleCompleted(cycle) && !isDayCompleted(cycle, day);
+
+  /* ---------------- Start Date limits ----------------
+     A cycle day's date can't be in the past, before the previous cycle
+     day's date, or on a date another (completed or planned) cycle day
+     already has. */
+  const isoOfDate = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const localTodayIso = isoOfDate(new Date());
+  const startDateLimits = (() => {
+    const cycle = getCycleNumber(cycleDay) ?? 1;
+    const day = getCycleDayNumber(cycleDay) ?? 1;
+    const currentKey = orderKey(cycle, day);
+    /* Every other cycle day's date (its picked date, else its scheduled one). */
+    const taken = new Map<string, string>();
+    const rows = [...scheduleRef.current].sort(
+      (a, b) => a.cycle_number - b.cycle_number || a.cycle_day - b.cycle_day
+    );
+    let previousIso = "";
+    rows.forEach((row) => {
+      const key = orderKey(row.cycle_number, row.cycle_day);
+      if (key === currentKey) return;
+      const iso = toIsoDate(editedDatesRef.current.get(key)) || toIsoDate(row.planned_date);
+      if (!iso) return;
+      if (row.medication_day !== false || orderOfDay(row.cycle_number, row.cycle_day)) {
+        taken.set(iso, `Cycle ${row.cycle_number} / Day ${row.cycle_day}`);
+      }
+      const before =
+        row.cycle_number < cycle || (row.cycle_number === cycle && row.cycle_day < day);
+      if (before && iso > previousIso) previousIso = iso;
+    });
+    const afterPrevious = previousIso ? addDaysToIsoDate(previousIso, 1) : "";
+    const minIso = afterPrevious && afterPrevious > localTodayIso ? afterPrevious : localTodayIso;
+    return { minIso, taken, previousIso };
+  })();
+
+  /* The picked / typed Start Date breaks a limit. Only a date the doctor
+     changed is checked - an untouched overdue day keeps its date. */
+  const startDateError = (() => {
+    if (orderLocked || !cycleDay || !editedDatesRef.current.has(dayKeyOf(cycleDay))) return "";
+    const picked = parsePickedDate(startDate.trim());
+    const iso = toIsoDate(startDate);
+    if (!iso || !picked || formatPickedDate(picked) !== startDate.trim()) {
+      return "Enter the Start Date as DD-MM-YYYY.";
+    }
+    if (iso < localTodayIso) return "The Start Date can't be in the past.";
+    if (iso < startDateLimits.minIso) {
+      return `The Start Date must be after the previous cycle day (${dateOnlyDMY(startDateLimits.previousIso)}).`;
+    }
+    const takenBy = startDateLimits.taken.get(iso);
+    if (takenBy) return `${dateOnlyDMY(iso)} is already the date of ${takenBy}.`;
+    return "";
+  })();
+
   /* Saved orders before the displayed cycle day, latest first. */
   const copySources = planIdRef.current
     ? planOrders
@@ -2053,7 +2191,7 @@ const ChemotherapyOrder: React.FC<{
           value={method}
           onChange={(event) => onChange({ doseCalc: event.target.value })}
           disabled={disabled}
-          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500"
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[10px] text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500"
         >
           {DOSE_CALC_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -2062,7 +2200,7 @@ const ChemotherapyOrder: React.FC<{
           ))}
         </select>
         {method === "AUC" && (
-          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+          <label className="flex items-center gap-1.5 text-[10px] font-bold text-gray-900">
             Target AUC
             <input
               type="number"
@@ -2071,7 +2209,7 @@ const ChemotherapyOrder: React.FC<{
               value={drug.targetAuc ?? String(resolveTargetAuc(drug) ?? "")}
               onChange={(event) => onChange({ targetAuc: event.target.value })}
               disabled={disabled}
-              className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
           </label>
         )}
@@ -2082,15 +2220,15 @@ const ChemotherapyOrder: React.FC<{
   const renderPatientDoseCell = (result: PatientDoseResult) =>
     result.value !== null ? (
       <div>
-        <span className="text-base font-semibold text-gray-900">
+        <span className="text-[10px] font-semibold text-gray-900">
           {result.value} {result.unit}
         </span>
         {result.note && (
-          <p className="mt-0.5 text-xs text-gray-500">{result.note}</p>
+          <p className="mt-0.5 text-[10px] text-gray-500">{result.note}</p>
         )}
       </div>
     ) : (
-      <span className="text-xs font-medium text-amber-600">
+      <span className="text-[10px] font-medium text-amber-600">
         {result.message}
       </span>
     );
@@ -2098,7 +2236,7 @@ const ChemotherapyOrder: React.FC<{
   const usesCalvert = drugs.some((drug) => resolveDoseCalc(drug) === "AUC");
 
   const EDIT_INPUT_CLASS =
-    "w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+    "w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 
   /* Drug Name editor: a drug from medicine_master, or any name the doctor
      types for this patient - kept on this cycle day's order only, never
@@ -2139,10 +2277,10 @@ const ChemotherapyOrder: React.FC<{
           }
           createLabel="Use"
           placeholder={medicineOptions.length > 0 ? "Select or type a drug" : "Loading drugs..."}
-          className="h-10 rounded-md border-gray-300 text-base shadow-none"
+          className="h-10 rounded-md border-gray-300 text-[10px] shadow-none"
         />
         {!editDraft.medicineId && editDraft.name.trim() && (
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-[10px] text-gray-500">
             Custom name - saved for this patient only
           </p>
         )}
@@ -2165,7 +2303,7 @@ const ChemotherapyOrder: React.FC<{
       onChange={(event) => updateEditDraft(field, event.target.value)}
       placeholder={placeholder}
       rows={2}
-      className={`${EDIT_INPUT_CLASS} min-w-[180px] resize-y text-sm`}
+      className={`${EDIT_INPUT_CLASS} min-w-[180px] resize-y text-[10px]`}
     />
   );
 
@@ -2175,7 +2313,7 @@ const ChemotherapyOrder: React.FC<{
         type="button"
         onClick={onSave}
         disabled={savingEdit}
-        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-md bg-blue-600 px-4 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {savingEdit ? "Saving" : "Save"}
       </button>
@@ -2184,7 +2322,7 @@ const ChemotherapyOrder: React.FC<{
         type="button"
         onClick={cancelEdit}
         disabled={savingEdit}
-        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
         Cancel
       </button>
@@ -2221,7 +2359,7 @@ const ChemotherapyOrder: React.FC<{
 
   const renderRowError = () =>
     editError && (
-      <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+      <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-[10px] font-medium text-red-600">
         {editError}
       </div>
     );
@@ -2246,7 +2384,7 @@ const ChemotherapyOrder: React.FC<{
           type="button"
           onClick={onAdd}
           disabled={Boolean(editingRow) || savingEdit || copying || tablesLoading}
-          className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-[10px] font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path
@@ -2278,7 +2416,7 @@ const ChemotherapyOrder: React.FC<{
           <div className="space-y-2">
             <label
               htmlFor="protocol"
-              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+              className="block text-[10px] font-bold uppercase tracking-wide text-gray-900"
             >
               Protocol
             </label>
@@ -2288,7 +2426,7 @@ const ChemotherapyOrder: React.FC<{
               type="text"
               value={protocolName}
               readOnly
-              className="mt-1 block w-full rounded-md border border-gray-300 px-4 py-3 text-base text-gray-900 shadow-sm outline-none"
+              className="mt-1 block w-full rounded-md border border-gray-300 px-4 py-3 text-[10px] text-gray-900 shadow-sm outline-none"
             />
           </div>
 
@@ -2296,7 +2434,7 @@ const ChemotherapyOrder: React.FC<{
           <div className="relative space-y-2">
             <label
               htmlFor="cycle-day"
-              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+              className="block text-[10px] font-bold uppercase tracking-wide text-gray-900"
             >
               Cycle / Day
             </label>
@@ -2305,7 +2443,7 @@ const ChemotherapyOrder: React.FC<{
             <button
               type="button"
               onClick={() => setCycleDayOpen((prev) => !prev)}
-              className="relative mt-1 flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-4 py-3 text-left text-base text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="relative mt-1 flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-4 py-3 text-left text-[10px] text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             >
               <span className={cycleDay ? "text-gray-900" : "text-gray-400"}>
                 {cycleDay || "Select Cycle / Day"}
@@ -2333,28 +2471,36 @@ const ChemotherapyOrder: React.FC<{
                 <div className="grid grid-cols-2 gap-4">
                   {/* Cycles */}
                   <div className="space-y-1.5">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-900">
                       Cycles
                     </div>
                     <div className="max-h-40 space-y-1 overflow-y-auto">
                       {availableCycles.map((cycle) => {
                         const isChecked = getCycleNumber(cycleDay) === cycle;
+                        const completed = isCycleCompleted(cycle);
                         return (
                           <label
                             key={cycle}
-                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                            title={completed ? `Cycle ${cycle} is completed` : undefined}
+                            className={`flex items-center gap-2 text-sm ${completed ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-700"}`}
                           >
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={completed}
                               onChange={() => {
                                 userTouched.current.cycleDay = true;
                                 setCycleDayOpen(false);
                                 selectCycle(cycle);
                               }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <span>Cycle {cycle}</span>
+                            {completed && (
+                              <span className="ml-auto rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                Completed
+                              </span>
+                            )}
                           </label>
                         );
                       })}
@@ -2363,28 +2509,45 @@ const ChemotherapyOrder: React.FC<{
 
                   {/* Days */}
                   <div className="space-y-1.5">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-900">
                       Days
                     </div>
                     <div className="max-h-40 space-y-1 overflow-y-auto">
                       {availableDays.map((day) => {
                         const isChecked = getCycleDayNumber(cycleDay) === day;
+                        const cycle = getCycleNumber(cycleDay) ?? 1;
+                        const selectable = isDaySelectable(cycle, day);
+                        const status = orderOfDay(cycle, day)?.order_status;
+                        const tag = !selectable
+                          ? { label: "Completed", cls: "bg-emerald-50 text-emerald-700" }
+                          : status === "IN_ADMINISTRATION"
+                            ? { label: "In administration", cls: "bg-amber-50 text-amber-700" }
+                            : status === "ORDERED"
+                              ? { label: "Ordered", cls: "bg-blue-50 text-blue-700" }
+                              : null;
                         return (
                           <label
                             key={day}
-                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                            title={!selectable ? `Cycle ${cycle} / Day ${day} is completed` : undefined}
+                            className={`flex items-center gap-2 text-sm ${selectable ? "cursor-pointer text-gray-700" : "cursor-not-allowed text-gray-400"}`}
                           >
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={!selectable}
                               onChange={() => {
                                 userTouched.current.cycleDay = true;
                                 setCycleDayOpen(false);
                                 selectDay(day);
                               }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <span>Day {day}</span>
+                            {tag && (
+                              <span className={`ml-auto whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold ${tag.cls}`}>
+                                {tag.label}
+                              </span>
+                            )}
                           </label>
                         );
                       })}
@@ -2399,9 +2562,22 @@ const ChemotherapyOrder: React.FC<{
           <div className="space-y-2">
             <label
               htmlFor="start-date"
-              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+              className="block text-[10px] font-bold uppercase tracking-wide text-gray-900"
             >
-              Start Date
+              Start Date  {cycleDay && (
+              <span className="text-[10px] text-gray-500">
+                (Planned date of {cycleDay}
+                {editedDatesRef.current.has(dayKeyOf(cycleDay)) ||
+                scheduleRef.current.some(
+                  (row) =>
+                    row.edited &&
+                    orderKey(row.cycle_number, row.cycle_day) === dayKeyOf(cycleDay)
+                )
+                  ? " (changed)"
+                  : ""})
+              </span>
+            )}
+                         
             </label>
 
             <Popover>
@@ -2411,11 +2587,8 @@ const ChemotherapyOrder: React.FC<{
                     id="start-date"
                     type="text"
                     value={startDate}
-                    onChange={(e) => {
-                      userTouched.current.startDate = true;
-                      setStartDate(e.target.value);
-                    }}
-                    className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    onChange={(e) => editStartDate(e.target.value)}
+                    className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                   />
 
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
@@ -2427,21 +2600,29 @@ const ChemotherapyOrder: React.FC<{
                 <Calendar
                   mode="single"
                   selected={parsePickedDate(startDate)}
+                  defaultMonth={parsePickedDate(startDate)}
+                  disabled={(date: Date) => {
+                    const iso = isoOfDate(date);
+                    return iso < startDateLimits.minIso || startDateLimits.taken.has(iso);
+                  }}
                   onSelect={(date) => {
                     if (date instanceof Date) {
-                      userTouched.current.startDate = true;
-                      setStartDate(formatPickedDate(date));
+                      editStartDate(formatPickedDate(date));
                     }
                   }}
                 />
               </PopoverContent>
             </Popover>
+            {startDateError && (
+              <p className="text-xs font-medium text-red-600">{startDateError}</p>
+            )}
+
           </div>
         </div>
 
         {/* A completed cycle day / closed course is read-only. */}
         {orderLocked && (
-          <div className="mx-8 mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          <div className="mx-8 mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-[10px] font-medium text-amber-800">
             {planClosed && <p>{COURSE_CLOSED_MESSAGE}</p>}
             {displayedOrder?.order_status === "COMPLETED" && (
               <p>
@@ -2480,7 +2661,7 @@ const ChemotherapyOrder: React.FC<{
                     <button
                       type="button"
                       onClick={() => setActiveTab(tab)}
-                      className={`whitespace-nowrap border-b-2 px-1 py-4 text-base font-medium transition-colors ${
+                      className={`whitespace-nowrap border-b-2 px-1 py-4 text-[10px] font-medium transition-colors ${
                         isActive
                           ? "border-blue-600 text-blue-600"
                           : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
@@ -2497,7 +2678,7 @@ const ChemotherapyOrder: React.FC<{
             {/* Copy as Cycle X / Day Y + Next */}
             <div className="flex flex-col items-end gap-2 pb-3">
               {planError && (
-                <div className="text-sm font-medium text-red-600">{planError}</div>
+                <div className="text-[10px] font-medium text-red-600">{planError}</div>
               )}
               <div className="flex flex-wrap items-center justify-end gap-3">
                 {/* Copy an earlier cycle day's whole order into this one;
@@ -2509,7 +2690,7 @@ const ChemotherapyOrder: React.FC<{
                       onClick={() => void copyFromOrder(copySources[0])}
                       disabled={copying || savingEdit || Boolean(editingRow)}
                       title={`Copy the Cycle ${copySources[0].cycle_number} / Day ${copySources[0].cycle_day} order (every tab) into this cycle day`}
-                      className="inline-flex items-center rounded-l-md border border-blue-600 bg-white px-4 py-2.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center rounded-l-md border border-blue-600 bg-white px-4 py-2.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {copying
                         ? "Copying..."
@@ -2559,12 +2740,12 @@ const ChemotherapyOrder: React.FC<{
                           role="menuitem"
                           tabIndex={copyMenuOpen ? 0 : -1}
                           onClick={() => void copyFromOrder(source)}
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[10px] text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
                         >
                           <span>
                             Copy as Cycle {source.cycle_number} / Day {source.cycle_day}
                           </span>
-                          <span className="text-xs text-gray-400">
+                          <span className="text-[10px] text-gray-400">
                             {source.order_status === "COMPLETED"
                               ? `Completed ${formatDateDMY(source.completed_at)}`
                               : source.order_status === "IN_ADMINISTRATION"
@@ -2581,7 +2762,7 @@ const ChemotherapyOrder: React.FC<{
                   type="button"
                   onClick={handleNext}
                   disabled={savingPlan}
-                  className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-[10px] font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {savingPlan ? "Saving..." : "Next"}
                 </button>
@@ -2601,31 +2782,31 @@ const ChemotherapyOrder: React.FC<{
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="py-4 pl-6 pr-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Drug Name
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Form
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Dose Cal
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Dose
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Unit
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Patient Dose
                     </th>
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -2636,7 +2817,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={7}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading chemotherapy orders
                       </td>
@@ -2647,7 +2828,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={7}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         No chemotherapy orders found for this patient.
                       </td>
@@ -2658,7 +2839,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={7}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -2703,7 +2884,7 @@ const ChemotherapyOrder: React.FC<{
                                   event.target.value
                                 )
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
@@ -2717,7 +2898,7 @@ const ChemotherapyOrder: React.FC<{
                                   event.target.value
                                 )
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
@@ -2727,13 +2908,13 @@ const ChemotherapyOrder: React.FC<{
                             )}
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={saveEditedDrug}
                                 disabled={savingEdit}
-                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md bg-blue-600 px-4 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 {savingEdit ? "Saving" : "Save"}
                               </button>
@@ -2742,7 +2923,7 @@ const ChemotherapyOrder: React.FC<{
                                 type="button"
                                 onClick={cancelEdit}
                                 disabled={savingEdit}
-                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 Cancel
                               </button>
@@ -2757,11 +2938,11 @@ const ChemotherapyOrder: React.FC<{
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
                     >
-                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px] font-medium text-gray-900">
                         {drug.name}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                         {drug.form}
                       </td>
 
@@ -2773,11 +2954,11 @@ const ChemotherapyOrder: React.FC<{
                         )}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-900">
                         {drug.dose}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-blue-500">
                         {drug.unit}
                       </td>
 
@@ -2787,7 +2968,7 @@ const ChemotherapyOrder: React.FC<{
                         )}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                      <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                         <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
@@ -2828,23 +3009,23 @@ const ChemotherapyOrder: React.FC<{
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="py-4 pl-6 pr-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Drug Name
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Form
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Dose
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Unit
                     </th>
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -2855,7 +3036,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={5}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading premedication
                       </td>
@@ -2868,7 +3049,7 @@ const ChemotherapyOrder: React.FC<{
                       <tr>
                         <td
                           colSpan={5}
-                          className="px-6 py-8 text-center text-sm text-gray-500"
+                          className="px-6 py-8 text-center text-[10px] text-gray-500"
                         >
                           No premedication drugs found for this protocol.
                         </td>
@@ -2879,7 +3060,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={5}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -2916,7 +3097,7 @@ const ChemotherapyOrder: React.FC<{
                                   event.target.value
                                 )
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
@@ -2930,17 +3111,17 @@ const ChemotherapyOrder: React.FC<{
                                   event.target.value
                                 )
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={saveEditedDrug}
                                 disabled={savingEdit}
-                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md bg-blue-600 px-4 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 {savingEdit ? "Saving" : "Save"}
                               </button>
@@ -2949,7 +3130,7 @@ const ChemotherapyOrder: React.FC<{
                                 type="button"
                                 onClick={cancelEdit}
                                 disabled={savingEdit}
-                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 Cancel
                               </button>
@@ -2964,23 +3145,23 @@ const ChemotherapyOrder: React.FC<{
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
                     >
-                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px] font-medium text-gray-900">
                         {drug.name}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                         {drug.form}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-900">
                         {drug.dose}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-blue-500">
                         {drug.unit}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                      <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                         <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
@@ -3020,23 +3201,23 @@ const ChemotherapyOrder: React.FC<{
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="py-4 pl-6 pr-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Drug Name
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Form
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Dose
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-3 py-4 text-left text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Unit
                     </th>
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -3047,7 +3228,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={5}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading supportive drugs
                       </td>
@@ -3060,7 +3241,7 @@ const ChemotherapyOrder: React.FC<{
                       <tr>
                         <td
                           colSpan={5}
-                          className="px-6 py-8 text-center text-sm text-gray-500"
+                          className="px-6 py-8 text-center text-[10px] text-gray-500"
                         >
                           No supportive drugs found for this protocol.
                         </td>
@@ -3071,7 +3252,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={5}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -3105,7 +3286,7 @@ const ChemotherapyOrder: React.FC<{
                               onChange={(event) =>
                                 updateEditDraft("dose", event.target.value)
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
@@ -3116,17 +3297,17 @@ const ChemotherapyOrder: React.FC<{
                               onChange={(event) =>
                                 updateEditDraft("unit", event.target.value)
                               }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-[10px] text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={saveEditedDrug}
                                 disabled={savingEdit}
-                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md bg-blue-600 px-4 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 {savingEdit ? "Saving" : "Save"}
                               </button>
@@ -3135,7 +3316,7 @@ const ChemotherapyOrder: React.FC<{
                                 type="button"
                                 onClick={cancelEdit}
                                 disabled={savingEdit}
-                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 Cancel
                               </button>
@@ -3150,23 +3331,23 @@ const ChemotherapyOrder: React.FC<{
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
                     >
-                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px] font-medium text-gray-900">
                         {drug.name}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                         {drug.form}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-900">
                         {drug.dose}
                       </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                      <td className="whitespace-nowrap px-3 py-5 text-[10px] text-blue-500">
                         {drug.unit}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                      <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                         <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
@@ -3198,7 +3379,7 @@ const ChemotherapyOrder: React.FC<{
         ) : activeTab === "Admin Instructions" ? (
           <div className="p-8">
             {renderRowError()}
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="mb-4 text-[10px] text-gray-500">
               Administration instructions for the drugs of this order:
             </p>
 
@@ -3219,13 +3400,13 @@ const ChemotherapyOrder: React.FC<{
                         key={label}
                         className={`${
                           index === 0 ? "py-4 pl-6 pr-3" : "px-3 py-4"
-                        } text-left text-xs font-semibold uppercase tracking-wider text-gray-500`}
+                        } text-left text-[10px] font-bold uppercase tracking-wider text-gray-900`}
                       >
                         {label}
                       </th>
                     ))}
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -3236,7 +3417,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading administration instructions
                       </td>
@@ -3247,7 +3428,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         No administration instructions found for this
                         protocol.
@@ -3259,7 +3440,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -3289,7 +3470,7 @@ const ChemotherapyOrder: React.FC<{
                           <td className="px-3 py-3">
                             <div className="flex min-w-[160px] flex-col gap-1.5">
                               {renderEditInput("infusionType", "Infusion type")}
-                              <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                              <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
                                 <input
                                   type="number"
                                   min="0"
@@ -3328,7 +3509,7 @@ const ChemotherapyOrder: React.FC<{
                             {renderEditTextarea("remarks", "Remarks")}
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             {renderEditActions(saveEditedDrug)}
                           </td>
                         </tr>
@@ -3340,35 +3521,35 @@ const ChemotherapyOrder: React.FC<{
                         key={`${kind}-${drug.id}`}
                         className="align-top transition-colors hover:bg-gray-50"
                       >
-                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm font-medium text-gray-900">
+                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px] font-medium text-gray-900">
                           {drug.name || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.route || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {infusionLabel(drug) || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.frequency || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.timing || "—"}
                         </td>
 
-                        <td className="px-3 py-5 text-sm text-gray-700">
+                        <td className="px-3 py-5 text-[10px] text-gray-700">
                           {drug.administrationDetail || "—"}
                         </td>
 
-                        <td className="px-3 py-5 text-sm text-gray-500">
+                        <td className="px-3 py-5 text-[10px] text-gray-500">
                           {drug.remarks || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                        <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                           {renderRowActions(
                             drug.name,
                             () => startEdit(kind, drug, "admin"),
@@ -3385,7 +3566,7 @@ const ChemotherapyOrder: React.FC<{
         ) : activeTab === "Hydration" ? (
           <div className="p-8">
             {renderRowError()}
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="mb-4 text-[10px] text-gray-500">
               Hydration guidance for the selected protocol (document Section 3
               - values by chemotherapy agent):
             </p>
@@ -3400,14 +3581,14 @@ const ChemotherapyOrder: React.FC<{
                           key={label}
                           className={`${
                             index === 0 ? "py-4 pl-6 pr-3" : "px-3 py-4"
-                          } text-left text-xs font-semibold uppercase tracking-wider text-gray-500`}
+                          } text-left text-[10px] font-bold uppercase tracking-wider text-gray-900`}
                         >
                           {label}
                         </th>
                       )
                     )}
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -3418,7 +3599,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={6}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading hydration guidance
                       </td>
@@ -3431,7 +3612,7 @@ const ChemotherapyOrder: React.FC<{
                       <tr>
                         <td
                           colSpan={6}
-                          className="px-6 py-8 text-center text-sm text-gray-500"
+                          className="px-6 py-8 text-center text-[10px] text-gray-500"
                         >
                           No mandatory hydration for this protocol.
                         </td>
@@ -3442,7 +3623,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={6}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -3533,11 +3714,11 @@ const ChemotherapyOrder: React.FC<{
                               }
                               placeholder="Guidance"
                               rows={2}
-                              className={`${EDIT_INPUT_CLASS} min-w-[220px] resize-y text-sm`}
+                              className={`${EDIT_INPUT_CLASS} min-w-[220px] resize-y text-[10px]`}
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             {renderEditActions(saveHydrationRow)}
                           </td>
                         </tr>
@@ -3549,37 +3730,37 @@ const ChemotherapyOrder: React.FC<{
                         key={row.id}
                         className="align-top transition-colors hover:bg-gray-50"
                       >
-                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm">
+                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px]">
                           <span
                             className={
                               row.stage === "PRE"
-                                ? "rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700"
-                                : "rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
+                                ? "rounded-full bg-blue-100 px-3 py-1 text-[10px] font-semibold text-blue-700"
+                                : "rounded-full bg-amber-100 px-3 py-1 text-[10px] font-semibold text-amber-700"
                             }
                           >
                             {row.stage}
                           </span>
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm font-medium text-gray-900">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] font-medium text-gray-900">
                           {row.agent || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {row.diluent || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {row.volume
                             ? `${row.volume}${row.volumeUnit ? ` ${row.volumeUnit}` : ""}`
                             : "—"}
                         </td>
 
-                        <td className="px-3 py-5 text-sm text-gray-700">
+                        <td className="px-3 py-5 text-[10px] text-gray-700">
                           {row.guidance || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                        <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                           {renderRowActions(
                             row.agent || "hydration row",
                             () => startHydrationEdit(row),
@@ -3597,7 +3778,7 @@ const ChemotherapyOrder: React.FC<{
         ) : activeTab === "Dilution" ? (
           <div className="p-8">
             {renderRowError()}
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="mb-4 text-[10px] text-gray-500">
               Dilution details for the selected protocol day - the diluent
               and volume each agent is prepared in. A row added or changed
               here is saved on this patient's cycle day order only.
@@ -3620,13 +3801,13 @@ const ChemotherapyOrder: React.FC<{
                         key={label}
                         className={`${
                           index === 0 ? "py-4 pl-6 pr-3" : "px-3 py-4"
-                        } text-left text-xs font-semibold uppercase tracking-wider text-gray-500`}
+                        } text-left text-[10px] font-bold uppercase tracking-wider text-gray-900`}
                       >
                         {label}
                       </th>
                     ))}
 
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-wider text-gray-900">
                       Action
                     </th>
                   </tr>
@@ -3637,7 +3818,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-6 py-8 text-center text-sm text-gray-500"
+                        className="px-6 py-8 text-center text-[10px] text-gray-500"
                       >
                         Loading dilution details
                       </td>
@@ -3650,7 +3831,7 @@ const ChemotherapyOrder: React.FC<{
                       <tr>
                         <td
                           colSpan={8}
-                          className="px-6 py-8 text-center text-sm text-gray-500"
+                          className="px-6 py-8 text-center text-[10px] text-gray-500"
                         >
                           No dilution details found for this protocol day.
                         </td>
@@ -3661,7 +3842,7 @@ const ChemotherapyOrder: React.FC<{
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-6 py-8 text-center text-sm text-red-500"
+                        className="px-6 py-8 text-center text-[10px] text-red-500"
                       >
                         {planError}
                       </td>
@@ -3717,7 +3898,7 @@ const ChemotherapyOrder: React.FC<{
                             )}
                           </td>
 
-                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-[10px] font-medium">
                             {renderEditActions(saveEditedDrug)}
                           </td>
                         </tr>
@@ -3729,35 +3910,35 @@ const ChemotherapyOrder: React.FC<{
                         key={drug.id}
                         className="align-top transition-colors hover:bg-gray-50"
                       >
-                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-[10px] font-medium text-gray-900">
                           {drug.name}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.form || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-900">
                           {drug.dose || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-blue-500">
                           {drug.unit || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.dilutionSolution || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        <td className="whitespace-nowrap px-3 py-5 text-[10px] text-gray-500">
                           {drug.volume || "—"}
                         </td>
 
-                        <td className="px-3 py-5 text-sm text-gray-700">
+                        <td className="px-3 py-5 text-[10px] text-gray-700">
                           {drug.administrationDetail || "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                        <td className="whitespace-nowrap px-6 py-5 text-right text-[10px] font-medium">
                           {renderRowActions(
                             drug.name || "dilution row",
                             () => handleEditDilution(drug.id),
@@ -3776,11 +3957,11 @@ const ChemotherapyOrder: React.FC<{
           /* Other Tabs */
           <div className="flex min-h-[300px] items-center justify-center p-8">
             <div className="text-center">
-              <p className="text-lg font-semibold text-gray-700">
+              <p className="text-[10px] font-bold text-gray-900">
                 {activeTab}
               </p>
 
-              <p className="mt-2 text-sm text-gray-500">
+              <p className="mt-2 text-[10px] text-gray-500">
                 No items available.
               </p>
             </div>
@@ -3788,7 +3969,7 @@ const ChemotherapyOrder: React.FC<{
         )}
 
         <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
-          <div className="text-base font-semibold text-gray-900">
+          <div className="text-[10px] font-semibold text-gray-900">
             Discussion
           </div>
           <VoiceToText
@@ -3799,7 +3980,7 @@ const ChemotherapyOrder: React.FC<{
         </div>
 
         <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
-          <div className="text-base font-semibold text-gray-900">
+          <div className="text-[10px] font-semibold text-gray-900">
             Post Chemo Instructions
           </div>
           <VoiceToText
@@ -3810,7 +3991,7 @@ const ChemotherapyOrder: React.FC<{
         </div>
 
         <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
-          <div className="text-base font-semibold text-gray-900">
+          <div className="text-[10px] font-semibold text-gray-900">
             Additional Notes
           </div>
           <VoiceToText
@@ -3841,7 +4022,7 @@ const ChemotherapyOrder: React.FC<{
             <BackIcon />
           </button>
 
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
+          <h1 className="text-[10px] font-semibold tracking-tight text-gray-900">
             Patients
           </h1>
         </div>
@@ -3887,7 +4068,7 @@ const ChemotherapyOrder: React.FC<{
                     <CheckIcon />
                   </span>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-900">
                     Diagnosis
                   </span>
                 </div>
@@ -3902,7 +4083,7 @@ const ChemotherapyOrder: React.FC<{
                     <CheckIcon />
                   </span>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-900">
                     Treatment Plan
                   </span>
                 </div>
@@ -3918,7 +4099,7 @@ const ChemotherapyOrder: React.FC<{
                     <CheckIcon />
                   </span>
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-900">
                     Chemotherapy Order
                   </span>
 
@@ -3934,7 +4115,7 @@ const ChemotherapyOrder: React.FC<{
                 <div className="flex flex-col items-center opacity-50">
                   <span className="relative z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white shadow-sm" />
 
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-900">
                     Discharge Plan
                   </span>
                 </div>

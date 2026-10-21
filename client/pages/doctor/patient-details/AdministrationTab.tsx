@@ -1,16 +1,25 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SummaryPlan } from "./types";
+import type { PatientRecord } from "@/api/patient.api";
 import {
   chemotherapyApi,
   type ChemoAdministrationDay,
   type ChemoAdministrationItem,
   type ChemoAdministrationSheet,
   type ChemoAdministrationStatus,
+  type ChemoAdverseEventRecord,
 } from "@/api/chemotherapy.api";
-import { useCanAny } from "@/context/PermissionContext";
+import { useCan, useCanAny } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ComboInput } from "./ComboInput";
+import { CTCAE_GRADES, doseText, fmtDate, fmtTime, infusionText, plural } from "./adminFormat";
+import AdverseEventModal from "./AdverseEventModal";
+import { RemoveAdverseModal, ResolveAdverseModal } from "./AdverseEventActions";
+import ProtocolViewModal from "./ProtocolViewModal";
+import OrderViewModal from "./OrderViewModal";
+import { printAdministrationMar, type AdministrationPrintPatient } from "./marPrint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +34,8 @@ type ReasonStatus = Extract<ChemoAdministrationStatus, "SKIPPED" | "CANCELLED">;
 
 interface AdministrationTabProps {
   patientId: string | null;
+  /* The patient record, for the printed MAR / report header. */
+  patient?: PatientRecord | null;
   plan?: SummaryPlan | null;
   /* A cycle day was completed: the plan (cycles, course status) changed. */
   onPlanChanged?: () => void;
@@ -67,54 +78,6 @@ const SKIP_CANCEL_REASONS = [
   "Others",
 ];
 
-/* ---------- formatting ---------- */
-
-/* 09-Oct-2026. Date-only values (YYYY-MM-DD) are calendar dates; full
-   timestamps are shown in IST, the hospital's timezone. */
-function fmtDate(value?: string | null): string {
-  if (!value) return "—";
-  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const date = new Date(isDateOnly ? `${value}T00:00:00Z` : value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date
-    .toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      timeZone: isDateOnly ? "UTC" : "Asia/Kolkata",
-    })
-    .replace(/ /g, "-");
-}
-
-function fmtTime(value?: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
-}
-
-function doseText(value: number | null, unit: string | null): string {
-  if (value === null || value === undefined) return "";
-  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })} ${unit ?? ""}`.trim();
-}
-
-function infusionText(item: ChemoAdministrationItem): string {
-  if (item.infusion_rate) return item.infusion_rate;
-  const minutes = item.infusion_duration_minutes;
-  if (minutes) {
-    if (minutes >= 60 && minutes % 60 === 0) {
-      const hours = minutes / 60;
-      return `${hours} hr${hours > 1 ? "s" : ""}`;
-    }
-    return `${minutes} min`;
-  }
-  return item.infusion_type || "—";
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 function errorMessage(error: any, fallback: string): string {
   return error?.response?.data?.message || error?.message || fallback;
 }
@@ -124,113 +87,10 @@ function errorMessage(error: any, fallback: string): string {
 function StatusBadge({ status }: { status: BadgeStatus }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.PENDING;
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cfg.className}`}>
-      <i className={`fa-solid ${cfg.icon} text-[9px]`} />
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${cfg.className}`}>
+      <i className={`fa-solid ${cfg.icon} text-[10px]`} />
       {cfg.label}
     </span>
-  );
-}
-
-function ReasonDropdown({ value, onChange, hasError }: { value: string; onChange: (v: string) => void; hasError: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      const wrapper = inputRef.current?.closest(".relative");
-      if (!menuRef.current?.contains(e.target as Node) && !wrapper?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const updatePos = () => {
-      if (inputRef.current && menuRef.current) {
-        const r = inputRef.current.getBoundingClientRect();
-        menuRef.current.style.top = `${r.bottom + 2}px`;
-        menuRef.current.style.left = `${r.left}px`;
-        menuRef.current.style.width = `${r.width}px`;
-      }
-    };
-    window.addEventListener("scroll", updatePos, true);
-    return () => window.removeEventListener("scroll", updatePos, true);
-  }, [open]);
-
-  const borderCls = hasError ? "border-red-300" : "border-slate-200";
-
-  function openDropdown() {
-    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
-    setOpen(true);
-  }
-
-  return (
-    <div className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        maxLength={500}
-        onChange={e => { onChange(e.target.value); if (e.target.value) openDropdown(); }}
-        onKeyDown={e => {
-          if (e.key === "Enter" && value) { e.preventDefault(); setOpen(false); }
-          /* Escape closes this list first, not the dialog around it. */
-          if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); }
-        }}
-        onFocus={openDropdown}
-        placeholder="Select or type a reason..."
-        className={`w-full rounded-lg border ${borderCls} bg-white py-2 pl-3 pr-8 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-200`}
-      />
-      <button
-        type="button"
-        onMouseDown={e => { e.preventDefault(); open ? setOpen(false) : openDropdown(); inputRef.current?.focus(); }}
-        className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-600"
-        tabIndex={-1}
-      >
-        <i className={`fa-solid fa-chevron-down text-[10px] transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && rect && createPortal(
-        <div
-          ref={menuRef}
-          style={{ position: "fixed", top: rect.bottom + 2, left: rect.left, width: rect.width, zIndex: 9999 }}
-          className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
-        >
-          {value && !SKIP_CANCEL_REASONS.includes(value) && (
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); onChange(value); setOpen(false); }}
-              className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-blue-600 hover:bg-blue-50"
-            >
-              <i className="fa-solid fa-plus mr-2 text-[10px]" />
-              "{value}"
-            </button>
-          )}
-          {SKIP_CANCEL_REASONS.map(r => (
-            <button
-              key={r}
-              type="button"
-              onMouseDown={e => {
-                e.preventDefault();
-                onChange(r === "Others" ? "" : r);
-                setOpen(false);
-                if (r === "Others") inputRef.current?.focus();
-              }}
-              className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ${value === r ? "font-semibold text-blue-600" : "text-slate-700"}`}
-            >
-              {r}
-              {value === r && <i className="fa-solid fa-check text-[10px] text-blue-500" />}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </div>
   );
 }
 
@@ -289,10 +149,10 @@ function ReasonModal({
               <i className={`fa-solid ${isSkip ? "fa-forward" : "fa-ban"}`} />
             </div>
             <div>
-              <h3 id="admin-reason-title" className="text-base font-bold text-slate-900">
+              <h3 id="admin-reason-title" className="text-[10px] font-bold text-slate-900">
                 {isSkip ? "Skip medication" : "Cancel medication"}
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-[10px] text-slate-500">
                 {isSkip
                   ? "The medicine is not given on this treatment day."
                   : "The medicine will not be given for this treatment day."}{" "}
@@ -314,30 +174,36 @@ function ReasonModal({
         <div className="space-y-4 px-5 py-4">
           <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-blue-700">{item.drug_name}</p>
-              <p className="truncate text-[11px] text-slate-500">
+              <p className="truncate text-[10px] font-semibold text-blue-700">{item.drug_name}</p>
+              <p className="truncate text-[10px] text-slate-500">
                 {[item.brand_name, item.administration_route, infusionText(item) !== "—" ? infusionText(item) : null]
                   .filter(Boolean)
                   .join(" · ") || "—"}
               </p>
             </div>
-            {dose && <span className="flex-shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm">{dose}</span>}
+            {dose && <span className="flex-shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-800 shadow-sm">{dose}</span>}
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
+            <label className="mb-1 block text-[10px] font-bold text-slate-800">
               Reason <span className="text-red-500">*</span>
             </label>
-            <ReasonDropdown value={reason} onChange={setReason} hasError={touched && missingReason} />
+            <ComboInput
+              value={reason}
+              onChange={setReason}
+              options={SKIP_CANCEL_REASONS}
+              placeholder="Select or type a reason..."
+              hasError={touched && missingReason}
+            />
             {touched && missingReason && (
-              <p className="mt-1 text-[11px] font-medium text-red-500">
+              <p className="mt-1 text-[10px] font-medium text-red-500">
                 Reason is required to {isSkip ? "skip" : "cancel"} a medication
               </p>
             )}
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
+            <label className="mb-1 block text-[10px] font-bold text-slate-800">
               Remarks <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <textarea
@@ -346,7 +212,7 @@ function ReasonModal({
               value={remarks}
               onChange={e => setRemarks(e.target.value)}
               placeholder="Add clinical notes, e.g. what the patient reported..."
-              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-200"
+              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] text-slate-700 outline-none focus:ring-2 focus:ring-blue-200"
             />
             <p className="text-right text-[10px] text-slate-400">{remarks.length}/500</p>
           </div>
@@ -357,7 +223,7 @@ function ReasonModal({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
           >
             Back
           </button>
@@ -365,9 +231,9 @@ function ReasonModal({
             type="button"
             onClick={submit}
             disabled={saving || (touched && missingReason)}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${isSkip ? "bg-slate-700 hover:bg-slate-800" : "bg-red-600 hover:bg-red-700"}`}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-[10px] font-semibold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${isSkip ? "bg-slate-700 hover:bg-slate-800" : "bg-red-600 hover:bg-red-700"}`}
           >
-            {saving && <i className="fa-solid fa-spinner fa-spin text-xs" />}
+            {saving && <i className="fa-solid fa-spinner fa-spin text-[10px]" />}
             {isSkip ? "Skip Medication" : "Cancel Medication"}
           </button>
         </div>
@@ -396,16 +262,16 @@ function PendingMarquee({ sheet }: { sheet: ChemoAdministrationSheet }) {
 
   return (
     <div role="alert" className={`group relative flex h-10 items-center overflow-hidden rounded-xl border shadow-sm ${tone.box}`}>
-      <span className={`relative z-10 ml-2 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white ${tone.pill}`}>
+      <span className={`relative z-10 ml-2 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white ${tone.pill}`}>
         <i className={`fa-solid ${overdue ? "fa-triangle-exclamation" : "fa-bell"} ${overdue ? "" : "fa-shake"}`} />
         {overdue ? "Overdue" : "Reminder"}
       </span>
       <div className="relative h-full flex-1 overflow-hidden">
-        <span className="absolute top-0 flex h-full items-center whitespace-nowrap text-sm font-medium animate-admin-marquee group-hover:[animation-play-state:paused] motion-reduce:hidden">
-          <i className="fa-solid fa-syringe mr-2 text-xs opacity-70" />
+        <span className="absolute top-0 flex h-full items-center whitespace-nowrap text-[10px] font-medium animate-admin-marquee group-hover:[animation-play-state:paused] motion-reduce:hidden">
+          <i className="fa-solid fa-syringe mr-2 text-[10px] opacity-70" />
           {message}
         </span>
-        <span className="hidden h-full items-center truncate px-3 text-sm font-medium motion-reduce:flex" title={message}>
+        <span className="hidden h-full items-center truncate px-3 text-[10px] font-medium motion-reduce:flex" title={message}>
           {message}
         </span>
         <div className={`pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r ${tone.fade} to-transparent`} />
@@ -431,7 +297,7 @@ function RowActions({
   if (saving) {
     return (
       <span className="inline-flex h-7 w-7 items-center justify-center text-blue-500" aria-label="Saving">
-        <i className="fa-solid fa-spinner fa-spin text-sm" />
+        <i className="fa-solid fa-spinner fa-spin text-[10px]" />
       </span>
     );
   }
@@ -439,7 +305,7 @@ function RowActions({
   if (!actionable) {
     return (
       <span className="inline-flex h-7 w-7 items-center justify-center text-slate-300" title={lockedReason}>
-        <i className="fa-solid fa-lock text-xs" />
+        <i className="fa-solid fa-lock text-[10px]" />
       </span>
     );
   }
@@ -452,11 +318,11 @@ function RowActions({
           aria-label={`Update status of ${item.drug_name}`}
           className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-700"
         >
-          <i className="fa-solid fa-ellipsis-vertical text-sm" />
+          <i className="fa-solid fa-ellipsis-vertical text-[10px]" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wide text-slate-800">
           Update status
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -470,13 +336,58 @@ function RowActions({
             >
               <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${STATUS_CONFIG[action.status].dot}`} />
               <span className="flex-1">
-                <span className={`block text-xs ${current ? "font-bold" : "font-semibold"} text-slate-800`}>{action.label}</span>
+                <span className={`block text-[10px] ${current ? "font-bold" : "font-semibold"} text-slate-800`}>{action.label}</span>
                 <span className="block text-[10px] text-slate-400">{action.hint}</span>
               </span>
               {current && <i className="fa-solid fa-check mt-0.5 text-[10px] text-slate-500" />}
             </DropdownMenuItem>
           );
         })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* Edit / Mark resolved / Remove menu of an Adverse Events card row. */
+function AdverseRowActions({
+  event,
+  onEdit,
+  onResolve,
+  onRemove,
+}: {
+  event: ChemoAdverseEventRecord;
+  onEdit: () => void;
+  onResolve: () => void;
+  onRemove: () => void;
+}) {
+  const itemCls = "flex cursor-pointer items-center gap-2.5 py-2 text-[10px] font-semibold";
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Actions for ${event.adverse_event_name}`}
+          className="mt-1.5 flex-shrink-0 rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-700"
+        >
+          <i className="fa-solid fa-ellipsis-vertical text-sm" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onSelect={onEdit} className={`${itemCls} text-slate-700`}>
+          <i className="fa-solid fa-pen-to-square w-3.5 text-slate-400" />
+          Edit
+        </DropdownMenuItem>
+        {!event.resolved && (
+          <DropdownMenuItem onSelect={onResolve} className={`${itemCls} text-slate-700`}>
+            <i className="fa-solid fa-circle-check w-3.5 text-green-500" />
+            Mark resolved
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onRemove} className={`${itemCls} text-red-600 focus:bg-red-50 focus:text-red-600`}>
+          <i className="fa-solid fa-trash-can w-3.5" />
+          Remove
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -508,10 +419,10 @@ function MedicationRows({
             key={item.administration_id ?? item.chemotherapy_plan_item_id}
             className={`border-b border-slate-50 transition-colors hover:bg-slate-50/50 ${item.status === "PENDING" && actionable ? "bg-amber-50/20" : ""}`}
           >
-            <td className="px-3 py-3 align-top text-sm text-slate-600">{index + 1}</td>
+            <td className="px-3 py-3 align-top text-[10px] text-slate-600">{index + 1}</td>
             <td className="px-3 py-3 align-top">
-              <p className="text-sm font-semibold text-blue-700">{item.drug_name}</p>
-              {item.brand_name && <p className="text-[11px] text-slate-400">({item.brand_name})</p>}
+              <p className="text-[10px] font-semibold text-blue-700">{item.drug_name}</p>
+              {item.brand_name && <p className="text-[10px] text-slate-400">({item.brand_name})</p>}
               {item.timing_relative_to_primary && (
                 <p className="mt-0.5 text-[10px] text-slate-400">
                   <i className="fa-regular fa-clock mr-1" />
@@ -520,15 +431,15 @@ function MedicationRows({
               )}
             </td>
             <td className="px-3 py-3 align-top">
-              <p className="text-sm font-medium text-slate-800">{planned || calculated || "—"}</p>
+              <p className="text-[10px] font-medium text-slate-800">{planned || calculated || "—"}</p>
               {planned && calculated && planned !== calculated && (
-                <p className="text-[11px] text-slate-500">({calculated})</p>
+                <p className="text-[10px] text-slate-500">({calculated})</p>
               )}
             </td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{item.administration_route || "—"}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{dilution || "—"}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">{infusionText(item)}</td>
-            <td className="px-3 py-3 align-top text-sm text-slate-700">
+            <td className="px-3 py-3 align-top text-[10px] text-slate-700">{item.administration_route || "—"}</td>
+            <td className="px-3 py-3 align-top text-[10px] text-slate-700">{dilution || "—"}</td>
+            <td className="px-3 py-3 align-top text-[10px] text-slate-700">{infusionText(item)}</td>
+            <td className="px-3 py-3 align-top text-[10px] text-slate-700">
               {item.status === "GIVEN" ? (
                 <>
                   <p>{item.administered_by_name || "—"}</p>
@@ -568,7 +479,7 @@ function MedicationRows({
 function MedicationTableHead() {
   return (
     <thead>
-      <tr className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-800">
         <th className="px-3 py-3">#</th>
         <th className="px-3 py-3">Medication</th>
         <th className="px-3 py-3">Dose</th>
@@ -615,18 +526,19 @@ function EmptyState({ icon, title, text }: { icon: string; title: string; text: 
       <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50">
         <i className={`fa-solid ${icon} text-blue-500`} />
       </div>
-      <h3 className="text-sm font-bold text-slate-800">{title}</h3>
-      <p className="mt-1 max-w-md text-sm text-slate-500">{text}</p>
+      <h3 className="text-[10px] font-bold text-slate-800">{title}</h3>
+      <p className="mt-1 max-w-md text-[10px] text-slate-500">{text}</p>
     </div>
   );
 }
 
 /* ---------- the tab ---------- */
 
-export default function AdministrationTab({ patientId, plan, onPlanChanged }: AdministrationTabProps) {
+export default function AdministrationTab({ patientId, patient, plan, onPlanChanged }: AdministrationTabProps) {
   const planId = plan?.chemotherapy_plan_id ?? null;
   const { toast } = useToast();
   const canRecord = useCanAny(["chemo.administration.record", "chemo.cycle.manage"]);
+  const canRecordAdverse = useCan("chemo.adverse_event.record");
 
   const [sheet, setSheet] = useState<ChemoAdministrationSheet | null>(null);
   const [loading, setLoading] = useState(false);
@@ -640,6 +552,17 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const [pendingOnly, setPendingOnly] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ PREMEDICATION: true, SUPPORTIVE: true, POST: true });
   const [showAllCycles, setShowAllCycles] = useState(false);
+  /* Add Adverse: the popup, and the adverse events of the cycle on screen. */
+  const [adverseOpen, setAdverseOpen] = useState(false);
+  const [adverseEvents, setAdverseEvents] = useState<ChemoAdverseEventRecord[]>([]);
+  const [adverseLoading, setAdverseLoading] = useState(false);
+  const [showAllAdverse, setShowAllAdverse] = useState(false);
+  const [editingAdverse, setEditingAdverse] = useState<ChemoAdverseEventRecord | null>(null);
+  /* Quick Actions: View Protocol / View Orders popups, report download. */
+  const [protocolOpen, setProtocolOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [adverseAction, setAdverseAction] = useState<{ type: "resolve" | "remove"; event: ChemoAdverseEventRecord } | null>(null);
   const [localInstructions, setLocalInstructions] = useState<{
     medicineName: string; route: string; infusion: string; dose: string;
     frequency: string; timing: string; remarks: string; administrationDetail: string;
@@ -794,6 +717,58 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
     }
   };
 
+  /* The adverse events recorded for the cycle of the day on screen. */
+  const adverseCycleId = sheet?.day?.chemotherapy_cycle_id ?? null;
+  useEffect(() => {
+    setShowAllAdverse(false);
+    if (!adverseCycleId) { setAdverseEvents([]); return; }
+    let cancelled = false;
+    setAdverseLoading(true);
+    chemotherapyApi
+      .listAdverseEvents(adverseCycleId)
+      .then(response => { if (!cancelled) setAdverseEvents(response.data.data ?? []); })
+      .catch(error => {
+        console.error("Failed to load adverse events:", error);
+        if (!cancelled) setAdverseEvents([]);
+      })
+      .finally(() => { if (!cancelled) setAdverseLoading(false); });
+    return () => { cancelled = true; };
+  }, [adverseCycleId]);
+
+  const adverseSaved = (record: ChemoAdverseEventRecord) => {
+    setAdverseEvents(prev => [...prev, record]);
+    setAdverseOpen(false);
+    toast({
+      title: "Adverse event recorded",
+      description: `${record.adverse_event_name}${record.ctcae_grade ? ` (Grade ${record.ctcae_grade})` : ""} saved for Cycle ${sheet?.day?.cycle_number} · Day ${record.cycle_day ?? sheet?.day?.cycle_day}.`,
+    });
+  };
+
+  /* An edited / resolved event replaces its row; a removed one drops out. */
+  const adverseUpdated = (record: ChemoAdverseEventRecord, title: string) => {
+    setAdverseEvents(prev => prev.map(event => (event.adverse_event_id === record.adverse_event_id ? record : event)));
+    setEditingAdverse(null);
+    setAdverseAction(null);
+    toast({ title, description: `${record.adverse_event_name}${record.ctcae_grade ? ` (Grade ${record.ctcae_grade})` : ""}` });
+  };
+
+  const adverseRemoved = (adverseEventId: string) => {
+    const removed = adverseEvents.find(event => event.adverse_event_id === adverseEventId);
+    setAdverseEvents(prev => prev.filter(event => event.adverse_event_id !== adverseEventId));
+    setAdverseAction(null);
+    toast({ title: "Adverse event removed", description: removed?.adverse_event_name });
+  };
+
+  /* "Cycle 2 · Day 1 · 12-Oct-2026" for an event of the cycle on screen. */
+  const adverseDayLabel = (event: ChemoAdverseEventRecord) =>
+    [
+      sheet?.day ? `Cycle ${sheet.day.cycle_number}` : null,
+      event.cycle_day ? `Day ${event.cycle_day}` : null,
+      fmtDate(event.event_date),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
   /* ---------- states without a sheet ---------- */
 
   if (!planId) {
@@ -809,12 +784,12 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   if (!sheet) {
     if (loadError) {
       return (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-[10px] text-red-700">
           <span><i className="fa-solid fa-circle-exclamation mr-2" />{loadError}</span>
           <button
             type="button"
             onClick={() => void loadSheet(selectedDay)}
-            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
           >
             Retry
           </button>
@@ -845,6 +820,122 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
   const dayOrders = new Map(sheet.cycle_days.map(order => [order.cycle_day, order]));
   const visibleCycles = showAllCycles ? sheet.previous_cycles : sheet.previous_cycles.slice(0, 3);
   const treatmentStatus = day?.treatment_status ? TREATMENT_STATUS[day.treatment_status] : null;
+  const adverseBlockedReason = !day
+    ? "No cycle day ordered yet"
+    : !canRecordAdverse
+      ? "You don't have permission to record adverse events."
+      : "";
+  const sortedAdverse = [...adverseEvents].sort(
+    (a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
+  );
+  const visibleAdverse = showAllAdverse ? sortedAdverse : sortedAdverse.slice(0, 3);
+
+  /* ---------- Quick Actions: printouts ---------- */
+
+  const hospitalName = patient?.branch?.branch_name ?? "";
+  const printPatient: AdministrationPrintPatient = {
+    name: patient
+      ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+      : "",
+    uhid: patient?.patient_id ?? patientId ?? "",
+    ageSex: patient
+      ? [patient.patient_age != null ? `${patient.patient_age}Y` : "", patient.patient_gender ?? ""].filter(Boolean).join(" / ")
+      : "",
+  };
+  const physician = sheet.plan.doctor_name ?? "";
+  const protocolId = plan?.source_protocol_id ?? null;
+  const noDayReason = "No cycle day ordered yet";
+
+  /* The day's adverse events: recorded against its order (events of older
+     records without one match on the day number). */
+  const dayAdverseEvents = (target: ChemoAdministrationDay) =>
+    adverseEvents.filter(event =>
+      event.plan_order_id ? event.plan_order_id === target.plan_order_id : event.cycle_day === target.cycle_day
+    );
+
+  const printMar = () => {
+    if (!day) return;
+    printAdministrationMar({
+      hospitalName,
+      patient: printPatient,
+      regimen: protocol,
+      physician,
+      day,
+      adverseEvents: dayAdverseEvents(day),
+    });
+  };
+
+  /* The whole cycle of the day on screen: each ordered day's sheet, then
+     the PDF (jsPDF is loaded only when a report is made). */
+  const downloadReport = async () => {
+    if (!day || !planId || reportBusy) return;
+    setReportBusy(true);
+    try {
+      const orders = [...sheet.cycle_days].sort((a, b) => a.cycle_day - b.cycle_day);
+      const [days, { downloadCycleAdministrationReport }] = await Promise.all([
+        Promise.all(
+          orders.map(order =>
+            order.plan_order_id === day.plan_order_id
+              ? Promise.resolve(day)
+              : chemotherapyApi
+                  .getAdministrationSheet(planId, { cycle_number: order.cycle_number, cycle_day: order.cycle_day })
+                  .then(response => response.data.data.day)
+          )
+        ),
+        import("./cycleReportPdf"),
+      ]);
+      downloadCycleAdministrationReport({
+        hospitalName,
+        patient: printPatient,
+        regimen: protocol,
+        physician,
+        cycleNumber: day.cycle_number,
+        days: days.filter((entry): entry is ChemoAdministrationDay => !!entry),
+        adverseEvents,
+      });
+      toast({ title: "Report downloaded", description: `Cycle ${day.cycle_number} administration report` });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't prepare the report",
+        description: errorMessage(error, "Please try again."),
+      });
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  const quickActions: { icon: string; label: string; onClick: () => void; disabled: boolean; title: string; busy?: boolean }[] = [
+    {
+      icon: "fa-file-medical",
+      label: "View Protocol",
+      onClick: () => setProtocolOpen(true),
+      disabled: !protocolId,
+      title: protocolId ? "View the protocol this plan was built from" : "This plan wasn't created from a protocol",
+    },
+    {
+      icon: "fa-clipboard-list",
+      label: "View Orders",
+      onClick: () => setOrdersOpen(true),
+      disabled: !day,
+      title: day ? `Chemotherapy Order of Cycle ${day.cycle_number} · Day ${day.cycle_day}` : noDayReason,
+    },
+    {
+      icon: "fa-print",
+      label: "Print MAR",
+      onClick: printMar,
+      disabled: !day,
+      title: day ? `Print the administration record of Cycle ${day.cycle_number} · Day ${day.cycle_day}` : noDayReason,
+    },
+    {
+      icon: "fa-download",
+      label: reportBusy ? "Preparing report..." : "Download Report",
+      onClick: () => void downloadReport(),
+      disabled: !day || reportBusy,
+      busy: reportBusy,
+      title: day ? `Download the Cycle ${day.cycle_number} administration report (PDF)` : noDayReason,
+    },
+  ];
 
   const matchesFilter = (item: ChemoAdministrationItem) => !pendingOnly || item.status === "PENDING";
   const itemsFor = (role: string) => items.filter(item => item.drug_role === role && matchesFilter(item));
@@ -876,13 +967,13 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
       <PendingMarquee sheet={sheet} />
 
       {loadError && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[10px] text-red-700">
           <span><i className="fa-solid fa-circle-exclamation mr-2" />{loadError}</span>
-          <button type="button" onClick={() => void loadSheet(selectedDay)} className="text-xs font-semibold underline">Retry</button>
+          <button type="button" onClick={() => void loadSheet(selectedDay)} className="text-[10px] font-semibold underline">Retry</button>
         </div>
       )}
 
-      <div className="flex gap-5">
+      <div className="flex flex-col gap-5 lg:flex-row">
         {/* ─── MAIN CONTENT ─── */}
         <div className={`min-w-0 flex-1 space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
 
@@ -904,11 +995,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       <i className="fa-solid fa-syringe text-blue-600" />
                     </div>
                     <div>
-                      <h2 className="text-base font-bold text-slate-900">Chemotherapy Administration</h2>
-                      <p className="text-sm text-slate-500">
+                      <h2 className="text-[10px] font-bold text-slate-900">Chemotherapy Administration</h2>
+                      <p className="text-[10px] text-slate-500">
                         Cycle {day.cycle_number}&nbsp;&nbsp;|&nbsp;&nbsp;{fmtDate(day.treatment_date)} (Day {day.cycle_day})
                       </p>
-                      <p className="mt-0.5 text-xs text-slate-400">Protocol: {protocol}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">Protocol: {protocol}</p>
                     </div>
                   </div>
                   {/* Day timeline: the cycle's medication days */}
@@ -961,9 +1052,9 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
 
                 {/* Day state + completion */}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-[10px]">
                     {treatmentStatus && (
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${treatmentStatus.className}`}>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${treatmentStatus.className}`}>
                         {treatmentStatus.label}
                       </span>
                     )}
@@ -987,9 +1078,9 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       disabled={!day.can_complete || completing}
                       onClick={() => setConfirmOpen(true)}
                       title={day.can_complete ? "" : "Mark every medicine as Given, Skipped or Cancelled first"}
-                      className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                      className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-[10px] font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
                     >
-                      <i className="fa-solid fa-circle-check text-xs" />
+                      <i className="fa-solid fa-circle-check text-[10px]" />
                       Complete Cycle {day.cycle_number} · Day {day.cycle_day}
                     </button>
                   )}
@@ -1006,17 +1097,17 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                   ].map(stat => (
                     <div key={stat.label} className="p-4 text-center">
                       <div className={`mb-1 flex items-center justify-center gap-1.5 ${stat.color}`}>
-                        <i className={`fa-solid ${stat.icon} text-xs`} />
-                        <span className="text-xs font-medium">{stat.label}</span>
+                        <i className={`fa-solid ${stat.icon} text-[10px]`} />
+                        <span className="text-[10px] font-medium">{stat.label}</span>
                       </div>
-                      <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                      <p className={`text-[10px] font-bold ${stat.color}`}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
               {day.order_status === "ORDERED" && (
-                <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[10px] text-blue-800">
                   <i className="fa-solid fa-circle-info mt-0.5" />
                   <p>
                     Cycle {day.cycle_number} / Day {day.cycle_day} has been ordered but its consultation is not submitted yet.
@@ -1025,7 +1116,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 </div>
               )}
               {day.order_status === "COMPLETED" && items.some(item => item.status === "NOT_RECORDED") && (
-                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[10px] text-slate-600">
                   <i className="fa-solid fa-clock-rotate-left mt-0.5" />
                   <p>
                     This cycle day was completed{day.completed_at ? ` on ${fmtDate(day.completed_at)}` : ""} before administration
@@ -1046,15 +1137,15 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <div key={section.role} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <i className={`fa-solid ${section.icon} text-sm text-blue-500`} />
-                          <h3 className="text-sm font-bold text-slate-800">{section.title}</h3>
+                          <i className={`fa-solid ${section.icon} text-[10px] text-blue-500`} />
+                          <h3 className="text-[10px] font-bold text-slate-800">{section.title}</h3>
                           <PendingCount items={sectionAll} />
                         </div>
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
                             onClick={() => setPendingOnly(value => !value)}
-                            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${pendingOnly ? "bg-amber-100 text-amber-700" : "text-blue-600 hover:text-blue-800"}`}
+                            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${pendingOnly ? "bg-amber-100 text-amber-700" : "text-blue-600 hover:text-blue-800"}`}
                           >
                             <i className={`fa-solid ${pendingOnly ? "fa-filter-circle-xmark" : "fa-filter"} text-[10px]`} />
                             {pendingOnly ? "Pending only" : "Show All Drugs"}
@@ -1066,7 +1157,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                               placeholder="Search drug name..."
                               value={searchTerm}
                               onChange={e => setSearchTerm(e.target.value)}
-                              className="w-36 bg-transparent text-xs text-slate-700 outline-none placeholder:text-slate-400"
+                              className="w-36 bg-transparent text-[10px] text-slate-700 outline-none placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -1085,7 +1176,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                           </tbody>
                         </table>
                         {sectionItems.length === 0 && (
-                          <p className="px-5 py-6 text-center text-sm text-slate-400">
+                          <p className="px-5 py-6 text-center text-[10px] text-slate-400">
                             {sectionAll.length === 0 ? section.emptyText : "No drugs match the current filter."}
                           </p>
                         )}
@@ -1103,12 +1194,12 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                       className="flex w-full items-center justify-between px-5 py-3"
                     >
                       <div className="flex items-center gap-2">
-                        <i className={`fa-solid ${section.icon} text-sm text-blue-500`} />
-                        <h3 className="text-sm font-bold text-slate-800">{section.title}</h3>
-                        <span className="text-[11px] font-medium text-slate-400">({sectionAll.length})</span>
+                        <i className={`fa-solid ${section.icon} text-[10px] text-blue-500`} />
+                        <h3 className="text-[10px] font-bold text-slate-800">{section.title}</h3>
+                        <span className="text-[10px] font-medium text-slate-400">({sectionAll.length})</span>
                         <PendingCount items={sectionAll} />
                       </div>
-                      <i className={`fa-solid fa-chevron-${open ? "up" : "down"} text-xs text-slate-400`} />
+                      <i className={`fa-solid fa-chevron-${open ? "up" : "down"} text-[10px] text-slate-400`} />
                     </button>
                     {open && (
                       <div className="overflow-x-auto border-t border-slate-100">
@@ -1126,7 +1217,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                             </tbody>
                           </table>
                         ) : (
-                          <p className="px-5 py-5 text-center text-sm text-slate-400">
+                          <p className="px-5 py-5 text-center text-[10px] text-slate-400">
                             {sectionAll.length === 0 ? section.emptyText : "No drugs match the current filter."}
                           </p>
                         )}
@@ -1146,19 +1237,19 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               className="flex w-full items-center justify-between px-5 py-3"
             >
               <div className="flex items-center gap-2">
-                <i className="fa-solid fa-capsules text-sm text-blue-500" />
-                <h3 className="text-sm font-bold text-slate-800">Post Medications</h3>
-                <span className="text-[11px] font-medium text-slate-400">({sheet.post_medications.length})</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Take-home · reference</span>
+                <i className="fa-solid fa-capsules text-[10px] text-blue-500" />
+                <h3 className="text-[10px] font-bold text-slate-800">Post Medications</h3>
+                <span className="text-[10px] font-medium text-slate-400">({sheet.post_medications.length})</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-800">Take-home · reference</span>
               </div>
-              <i className={`fa-solid fa-chevron-${openSections.POST !== false ? "up" : "down"} text-xs text-slate-400`} />
+              <i className={`fa-solid fa-chevron-${openSections.POST !== false ? "up" : "down"} text-[10px] text-slate-400`} />
             </button>
             {openSections.POST !== false && (
               <div className="overflow-x-auto border-t border-slate-100">
                 {sheet.post_medications.length > 0 ? (
                   <table className="w-full text-left">
                     <thead>
-                      <tr className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <tr className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-800">
                         <th className="px-5 py-2.5">#</th>
                         <th className="px-3 py-2.5">Medication</th>
                         <th className="px-3 py-2.5">Dose</th>
@@ -1170,21 +1261,21 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     <tbody>
                       {sheet.post_medications.map((med, index) => (
                         <tr key={med.chemotherapy_plan_item_id} className="border-t border-slate-50">
-                          <td className="px-5 py-3 text-sm text-slate-600">{index + 1}</td>
+                          <td className="px-5 py-3 text-[10px] text-slate-600">{index + 1}</td>
                           <td className="px-3 py-3">
-                            <p className="text-sm font-semibold text-slate-800">{med.drug_name}</p>
-                            {med.brand_name && <p className="text-[11px] text-slate-400">({med.brand_name})</p>}
+                            <p className="text-[10px] font-semibold text-slate-800">{med.drug_name}</p>
+                            {med.brand_name && <p className="text-[10px] text-slate-400">({med.brand_name})</p>}
                           </td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{doseText(med.protocol_dose, med.protocol_dose_unit) || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.administration_route || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.frequency || "—"}</td>
-                          <td className="px-3 py-3 text-sm text-slate-700">{med.duration || "—"}</td>
+                          <td className="px-3 py-3 text-[10px] text-slate-700">{doseText(med.protocol_dose, med.protocol_dose_unit) || "—"}</td>
+                          <td className="px-3 py-3 text-[10px] text-slate-700">{med.administration_route || "—"}</td>
+                          <td className="px-3 py-3 text-[10px] text-slate-700">{med.frequency || "—"}</td>
+                          <td className="px-3 py-3 text-[10px] text-slate-700">{med.duration || "—"}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 ) : (
-                  <p className="px-5 py-5 text-center text-sm text-slate-400">No post-treatment medicines on this plan.</p>
+                  <p className="px-5 py-5 text-center text-[10px] text-slate-400">No post-treatment medicines on this plan.</p>
                 )}
               </div>
             )}
@@ -1195,46 +1286,46 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
             <div className="flex-1">
               <div className="mb-4 flex items-center text-[#1d4ed8]">
                 <i className="fa-regular fa-file-lines mr-2" />
-                <h4 className="text-sm font-bold">Instructions</h4>
+                <h4 className="text-[10px] font-bold">Instructions</h4>
               </div>
-              <p className="mb-3 text-sm text-[#64748b]">Administration instructions for this cycle day:</p>
+              <p className="mb-3 text-[10px] text-[#64748b]">Administration instructions for this cycle day:</p>
               {instructionItems.length > 0 ? (
-                <ul className="space-y-3 text-sm text-[#1e293b]">
+                <ul className="space-y-3 text-[10px] text-[#1e293b]">
                   {instructionItems.map(item => (
                     <li key={item.chemotherapy_plan_item_id} className="rounded-[12px] border border-slate-100 p-3">
                       <div className="flex items-start justify-between gap-3">
                         <span className="font-bold text-[#1e293b]">{item.drug_name}</span>
                         {(doseText(item.calculated_dose, item.calculated_dose_unit) || doseText(item.protocol_dose, item.protocol_dose_unit)) && (
-                          <span className="whitespace-nowrap text-xs text-[#64748b]">
+                          <span className="whitespace-nowrap text-[10px] text-[#64748b]">
                             {doseText(item.calculated_dose, item.calculated_dose_unit) || doseText(item.protocol_dose, item.protocol_dose_unit)}
                           </span>
                         )}
                       </div>
-                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#64748b]">
+                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#64748b]">
                         {item.administration_route && <span>Route: {item.administration_route}</span>}
                         {infusionText(item) !== "—" && <span>Infusion: {infusionText(item)}</span>}
                         {item.frequency && <span>Frequency: {item.frequency}</span>}
                         {item.timing_relative_to_primary && <span>Timing: {item.timing_relative_to_primary}</span>}
                       </div>
                       {item.administration_detail && (
-                        <p className="mt-1.5 text-xs text-[#475569]">{item.administration_detail}</p>
+                        <p className="mt-1.5 text-[10px] text-[#475569]">{item.administration_detail}</p>
                       )}
                       {item.item_remarks && (
-                        <p className="mt-1.5 text-xs italic text-[#64748b]">{item.item_remarks}</p>
+                        <p className="mt-1.5 text-[10px] italic text-[#64748b]">{item.item_remarks}</p>
                       )}
                     </li>
                   ))}
                 </ul>
               ) : localInstructions.length > 0 ? (
-                <ul className="space-y-3 text-sm text-[#1e293b]">
+                <ul className="space-y-3 text-[10px] text-[#1e293b]">
                   {localInstructions.map((instr, idx) => (
                     <li key={idx} className="rounded-[12px] border border-slate-100 p-3">
                       <div className="flex items-start justify-between gap-3">
                         <span className="font-bold text-[#1e293b]">{instr.medicineName || `Item ${idx + 1}`}</span>
-                        {instr.dose && <span className="whitespace-nowrap text-xs text-[#64748b]">{instr.dose}</span>}
+                        {instr.dose && <span className="whitespace-nowrap text-[10px] text-[#64748b]">{instr.dose}</span>}
                       </div>
                       {(instr.route || instr.infusion || instr.frequency || instr.timing) && (
-                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#64748b]">
+                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#64748b]">
                           {instr.route     && <span>Route: {instr.route}</span>}
                           {instr.infusion  && <span>Infusion: {instr.infusion}</span>}
                           {instr.frequency && <span>Frequency: {instr.frequency}</span>}
@@ -1242,21 +1333,21 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                         </div>
                       )}
                       {instr.administrationDetail && (
-                        <p className="mt-1.5 text-xs text-[#475569]">{instr.administrationDetail}</p>
+                        <p className="mt-1.5 text-[10px] text-[#475569]">{instr.administrationDetail}</p>
                       )}
                       {instr.remarks && (
-                        <p className="mt-1.5 text-xs italic text-[#64748b]">{instr.remarks}</p>
+                        <p className="mt-1.5 text-[10px] italic text-[#64748b]">{instr.remarks}</p>
                       )}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <ul className="list-inside list-disc space-y-2 text-sm font-medium text-[#1e293b]">
+                <ul className="list-inside list-disc space-y-2 text-[10px] font-medium text-[#1e293b]">
                   <li>No instructions recorded.</li>
                 </ul>
               )}
               {(day?.chemo_instructions || day?.additional_notes) && (
-                <div className="mt-4 space-y-2 rounded-[12px] bg-slate-50 p-3 text-xs text-[#475569]">
+                <div className="mt-4 space-y-2 rounded-[12px] bg-slate-50 p-3 text-[10px] text-[#475569]">
                   {day?.chemo_instructions && (
                     <p><span className="font-semibold text-[#1e293b]">Post chemo instructions: </span>{day.chemo_instructions}</p>
                   )}
@@ -1270,7 +1361,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
               <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#1d4ed8]">
                 {currentCycle?.next_cycle_number ? `NEXT · CYCLE ${currentCycle.next_cycle_number}` : "NEXT CYCLE"}
               </div>
-              <div className="flex items-center text-sm font-bold text-[#1d4ed8]">
+              <div className="flex items-center text-[10px] font-bold text-[#1d4ed8]">
                 <i className="fa-regular fa-calendar mr-2" />
                 {fmtDate(currentCycle?.next_cycle_date)}
               </div>
@@ -1280,70 +1371,166 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
         </div>
 
         {/* ─── RIGHT SIDEBAR ─── */}
-        <div className="w-64 flex-shrink-0 space-y-4">
+        <div className="grid w-full flex-shrink-0 grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:flex lg:w-64 lg:flex-col lg:items-stretch">
 
           {/* Quick Actions */}
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <i className="fa-solid fa-bolt text-xs text-yellow-500" />
-              <h4 className="text-sm font-bold text-slate-800">Quick Actions</h4>
+              <i className="fa-solid fa-bolt text-[10px] text-yellow-500" />
+              <h4 className="text-[10px] font-bold text-slate-800">Quick Actions</h4>
             </div>
             <div className="space-y-2 p-3">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                onClick={() => setAdverseOpen(true)}
+                disabled={!!adverseBlockedReason}
+                title={adverseBlockedReason || "Record an adverse event for this cycle day"}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-[10px] font-semibold text-white transition-all hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
-                <i className="fa-solid fa-plus text-xs" />
-                Add Administration
+                <i className="fa-solid fa-triangle-exclamation text-[10px]" />
+                Add Adverse
               </button>
-              {[
-                { icon: "fa-file-medical",     label: "View Protocol" },
-                { icon: "fa-clipboard-list",   label: "View Orders" },
-                { icon: "fa-print",            label: "Print MAR" },
-                { icon: "fa-download",         label: "Download Report" },
-              ].map(action => (
+              {quickActions.map(action => (
                 <button
-                  key={action.label}
+                  key={action.icon}
                   type="button"
-                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                  title={action.title}
+                  className="flex w-full items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                 >
-                  <i className={`fa-solid ${action.icon} text-xs text-slate-400`} />
+                  <i className={`fa-solid ${action.busy ? "fa-spinner fa-spin" : action.icon} text-[10px] text-slate-400`} />
                   {action.label}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Adverse Events of the cycle on screen */}
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-triangle-exclamation text-[10px] text-red-500" />
+                <h4 className="text-sm font-bold text-slate-800">Adverse Events</h4>
+                {adverseEvents.length > 0 && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">
+                    {adverseEvents.length}
+                  </span>
+                )}
+              </div>
+              {sortedAdverse.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAdverse(value => !value)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                >
+                  {showAllAdverse ? "Show Less" : "View All"}
+                </button>
+              )}
+            </div>
+            {adverseLoading && adverseEvents.length === 0 ? (
+              <p className="px-4 py-4 text-[10px] text-slate-400">
+                <i className="fa-solid fa-spinner fa-spin mr-1.5" />
+                Loading adverse events...
+              </p>
+            ) : visibleAdverse.length > 0 ? (
+              <div className="divide-y divide-slate-50">
+                {visibleAdverse.map(event => {
+                  const grade = CTCAE_GRADES.find(g => g.value === String(event.ctcae_grade ?? ""));
+                  const onThisDay = !!day && !!event.plan_order_id && event.plan_order_id === day.plan_order_id;
+                  const edited =
+                    !!event.updated_at && !!event.created_at &&
+                    new Date(event.updated_at).getTime() - new Date(event.created_at).getTime() > 60_000;
+                  return (
+                    <div key={event.adverse_event_id} className={`flex items-start gap-0.5 px-2 py-1 transition-colors ${onThisDay ? "bg-red-50/40" : ""}`}>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAdverse(event)}
+                      disabled={!canRecordAdverse}
+                      title={canRecordAdverse ? "Open to edit this adverse event" : undefined}
+                      className="min-w-0 flex-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 disabled:cursor-default disabled:hover:bg-transparent"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 truncate text-[10px] font-semibold text-slate-800" title={event.adverse_event_name}>
+                          {event.adverse_event_name}
+                        </p>
+                        {event.ctcae_grade && (
+                          <span
+                            className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${grade?.badge ?? "border border-slate-200 bg-slate-100 text-slate-600"}`}
+                            title={grade ? `CTCAE Grade ${grade.value} - ${grade.severity}` : undefined}
+                          >
+                            G{event.ctcae_grade}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-500">
+                          {event.cycle_day ? `Day ${event.cycle_day} · ` : ""}
+                          {fmtDate(event.event_date)} {fmtTime(event.event_date)}
+                        </p>
+                        <span
+                          className={`flex-shrink-0 text-[10px] font-semibold ${event.resolved ? "text-green-600" : "text-amber-600"}`}
+                          title={event.resolved && event.resolution_date ? `Resolved on ${fmtDate(event.resolution_date.slice(0, 10))}` : undefined}
+                        >
+                          {event.resolved ? "Resolved" : "Ongoing"}
+                        </span>
+                      </div>
+                      {edited && (
+                        <p
+                          className="mt-0.5 text-[10px] italic text-slate-400"
+                          title={`Last edited ${fmtDate(event.updated_at)} ${fmtTime(event.updated_at)}`}
+                        >
+                          Edited
+                        </p>
+                      )}
+                    </button>
+                    {canRecordAdverse && (
+                      <AdverseRowActions
+                        event={event}
+                        onEdit={() => setEditingAdverse(event)}
+                        onResolve={() => setAdverseAction({ type: "resolve", event })}
+                        onRemove={() => setAdverseAction({ type: "remove", event })}
+                      />
+                    )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="px-4 py-4 text-[10px] text-slate-400">No adverse events recorded for this cycle.</p>
+            )}
+          </div>
+
           {/* Current Cycle */}
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <i className="fa-solid fa-rotate text-xs text-blue-500" />
-              <h4 className="text-sm font-bold text-slate-800">Current Cycle</h4>
+              <i className="fa-solid fa-rotate text-[10px] text-blue-500" />
+              <h4 className="text-[10px] font-bold text-slate-800">Current Cycle</h4>
             </div>
             <div className="space-y-4 p-4">
               {courseCompleted || !currentCycle ? (
-                <div className="rounded-lg bg-green-50 px-3 py-2.5 text-sm font-semibold text-green-700">
+                <div className="rounded-lg bg-green-50 px-3 py-2.5 text-[10px] font-semibold text-green-700">
                   <i className="fa-solid fa-flag-checkered mr-2" />
                   {courseCompleted ? "Course completed" : "No open cycle"}
-                  <p className="mt-0.5 text-xs font-normal text-green-600">
+                  <p className="mt-0.5 text-[10px] font-normal text-green-600">
                     {sheet.plan.completed_cycles} / {sheet.plan.planned_cycles} cycles completed
                   </p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-sm font-bold text-slate-900">
+                    <p className="text-[10px] font-bold text-slate-900">
                       Cycle {currentCycle.cycle_number} - Day {currentCycle.current_day}
                     </p>
-                    <span className="text-[11px] text-slate-400">of {sheet.plan.planned_cycles}</span>
+                    <span className="text-[10px] text-slate-400">of {sheet.plan.planned_cycles}</span>
                   </div>
                   {!currentCycle.started && (
-                    <p className="-mt-2 text-[11px] font-medium text-blue-600">Upcoming cycle</p>
+                    <p className="-mt-2 text-[10px] font-medium text-blue-600">Upcoming cycle</p>
                   )}
                   <div>
                     <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-500">Days completed</span>
-                      <span className="text-xs font-semibold text-blue-600">
+                      <span className="text-[10px] text-slate-500">Days completed</span>
+                      <span className="text-[10px] font-semibold text-blue-600">
                         {currentCycle.completed_days} / {currentCycle.total_days} Days
                       </span>
                     </div>
@@ -1355,16 +1542,16 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                     </div>
                   </div>
                   <div>
-                    <p className="mb-0.5 text-xs text-slate-500">
+                    <p className="mb-0.5 text-[10px] text-slate-500">
                       {currentCycle.started ? "Next Cycle Date" : `Cycle ${currentCycle.cycle_number} Due`}
                     </p>
-                    <p className="text-sm font-semibold text-slate-800">{fmtDate(currentCycle.next_cycle_date)}</p>
+                    <p className="text-[10px] font-semibold text-slate-800">{fmtDate(currentCycle.next_cycle_date)}</p>
                   </div>
                 </>
               )}
               <div>
-                <p className="mb-0.5 text-xs text-slate-500">Regimen</p>
-                <p className="text-sm font-semibold text-slate-800">{protocol}</p>
+                <p className="mb-0.5 text-[10px] text-slate-500">Regimen</p>
+                <p className="text-[10px] font-semibold text-slate-800">{protocol}</p>
               </div>
             </div>
           </div>
@@ -1372,8 +1559,8 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           {/* Administration Details */}
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <i className="fa-solid fa-clipboard-list text-xs text-blue-500" />
-              <h4 className="text-sm font-bold text-slate-800">Administration Details</h4>
+              <i className="fa-solid fa-clipboard-list text-[10px] text-blue-500" />
+              <h4 className="text-[10px] font-bold text-slate-800">Administration Details</h4>
             </div>
             <div className="space-y-3 p-4">
               {[
@@ -1382,32 +1569,32 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 { icon: "fa-file-medical", label: "Treatment Plan",  value: day ? `${protocol} - Cycle ${day.cycle_number}` : protocol },
               ].map(item => (
                 <div key={item.label} className="flex items-start gap-2.5">
-                  <i className={`fa-solid ${item.icon} mt-0.5 text-xs text-slate-400`} />
+                  <i className={`fa-solid ${item.icon} mt-0.5 text-[10px] text-slate-400`} />
                   <div>
-                    <p className="text-[11px] text-slate-500">{item.label}</p>
-                    <p className="text-xs font-semibold text-slate-800">{item.value}</p>
+                    <p className="text-[10px] text-slate-500">{item.label}</p>
+                    <p className="text-[10px] font-semibold text-slate-800">{item.value}</p>
                   </div>
                 </div>
               ))}
               <div className="flex items-start gap-2.5">
-                <i className="fa-solid fa-shield-halved mt-0.5 text-xs text-slate-400" />
+                <i className="fa-solid fa-shield-halved mt-0.5 text-[10px] text-slate-400" />
                 <div>
-                  <p className="text-[11px] text-slate-500">Verification Status</p>
-                  <p className={`text-xs font-semibold ${day?.physician_approved ? "text-green-700" : "text-amber-600"}`}>
+                  <p className="text-[10px] text-slate-500">Verification Status</p>
+                  <p className={`text-[10px] font-semibold ${day?.physician_approved ? "text-green-700" : "text-amber-600"}`}>
                     {day?.physician_approved ? "Physician approved" : "Awaiting physician approval"}
                   </p>
                 </div>
               </div>
               <div className="flex items-start gap-2.5">
-                <i className="fa-solid fa-spinner mt-0.5 text-xs text-slate-400" />
+                <i className="fa-solid fa-spinner mt-0.5 text-[10px] text-slate-400" />
                 <div>
-                  <p className="text-[11px] text-slate-500">Treatment Status</p>
+                  <p className="text-[10px] text-slate-500">Treatment Status</p>
                   {treatmentStatus ? (
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${treatmentStatus.className}`}>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${treatmentStatus.className}`}>
                       {treatmentStatus.label}
                     </span>
                   ) : (
-                    <p className="text-xs font-semibold text-slate-800">—</p>
+                    <p className="text-[10px] font-semibold text-slate-800">—</p>
                   )}
                 </div>
               </div>
@@ -1418,14 +1605,14 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div className="flex items-center gap-2">
-                <i className="fa-solid fa-clock-rotate-left text-xs text-blue-500" />
-                <h4 className="text-sm font-bold text-slate-800">Previous Cycles</h4>
+                <i className="fa-solid fa-clock-rotate-left text-[10px] text-blue-500" />
+                <h4 className="text-[10px] font-bold text-slate-800">Previous Cycles</h4>
               </div>
               {sheet.previous_cycles.length > 3 && (
                 <button
                   type="button"
                   onClick={() => setShowAllCycles(value => !value)}
-                  className="text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                  className="text-[10px] font-medium text-blue-600 hover:text-blue-800"
                 >
                   {showAllCycles ? "Show Less" : "View All"}
                 </button>
@@ -1438,11 +1625,11 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                   return (
                     <div key={row.chemotherapy_cycle_id} className="flex items-start justify-between gap-2 px-4 py-3">
                       <div>
-                        <p className="text-xs font-semibold text-slate-800">Cycle {row.cycle_number}</p>
-                        <p className="text-[11px] text-slate-500">{fmtDate(row.completion_date)}</p>
-                        <p className="mt-0.5 text-[11px] leading-tight text-slate-400">{row.protocol_name || protocol}</p>
+                        <p className="text-[10px] font-semibold text-slate-800">Cycle {row.cycle_number}</p>
+                        <p className="text-[10px] text-slate-500">{fmtDate(row.completion_date)}</p>
+                        <p className="mt-0.5 text-[10px] leading-tight text-slate-400">{row.protocol_name || protocol}</p>
                       </div>
-                      <span className={`mt-0.5 flex-shrink-0 text-[11px] font-semibold ${completed ? "text-green-600" : "text-red-500"}`}>
+                      <span className={`mt-0.5 flex-shrink-0 text-[10px] font-semibold ${completed ? "text-green-600" : "text-red-500"}`}>
                         {completed ? "Completed" : "Cancelled"}
                       </span>
                     </div>
@@ -1450,12 +1637,66 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
                 })}
               </div>
             ) : (
-              <p className="px-4 py-4 text-xs text-slate-400">No completed cycles yet.</p>
+              <p className="px-4 py-4 text-[10px] text-slate-400">No completed cycles yet.</p>
             )}
           </div>
 
         </div>
       </div>
+
+      {protocolOpen && protocolId && (
+        <ProtocolViewModal
+          protocolId={protocolId}
+          cycleIntervalDays={sheet.plan.cycle_interval_days}
+          onClose={() => setProtocolOpen(false)}
+        />
+      )}
+
+      {ordersOpen && day && planId && (
+        <OrderViewModal
+          planId={planId}
+          cycleNumber={day.cycle_number}
+          cycleDay={day.cycle_day}
+          treatmentDate={day.treatment_date}
+          onClose={() => setOrdersOpen(false)}
+        />
+      )}
+
+      {editingAdverse && (
+        <AdverseEventModal
+          event={editingAdverse}
+          dayLabel={adverseDayLabel(editingAdverse)}
+          onSaved={record => adverseUpdated(record, "Adverse event updated")}
+          onClose={() => setEditingAdverse(null)}
+        />
+      )}
+
+      {adverseAction?.type === "resolve" && (
+        <ResolveAdverseModal
+          event={adverseAction.event}
+          dayLabel={adverseDayLabel(adverseAction.event)}
+          onSaved={record => adverseUpdated(record, "Adverse event resolved")}
+          onClose={() => setAdverseAction(null)}
+        />
+      )}
+
+      {adverseAction?.type === "remove" && (
+        <RemoveAdverseModal
+          event={adverseAction.event}
+          dayLabel={adverseDayLabel(adverseAction.event)}
+          onRemoved={adverseRemoved}
+          onClose={() => setAdverseAction(null)}
+        />
+      )}
+
+      {adverseOpen && day && (
+        <AdverseEventModal
+          day={day}
+          dayLabel={`Cycle ${day.cycle_number} · Day ${day.cycle_day} · ${fmtDate(day.treatment_date)}`}
+          onSaved={adverseSaved}
+          onClose={() => setAdverseOpen(false)}
+        />
+      )}
 
       {reasonTarget && (
         <ReasonModal
@@ -1473,7 +1714,7 @@ export default function AdministrationTab({ patientId, plan, onPlanChanged }: Ad
           type="success"
           title={`Complete Cycle ${day.cycle_number} · Day ${day.cycle_day}?`}
           description={
-            <div className="space-y-2 text-sm">
+            <div className="space-y-2 text-[10px]">
               <p>
                 All {plural(summary.total, "medicine")} are resolved — <b>{summary.given}</b> given,{" "}
                 <b>{summary.skipped}</b> skipped, <b>{summary.cancelled}</b> cancelled. The day's administration

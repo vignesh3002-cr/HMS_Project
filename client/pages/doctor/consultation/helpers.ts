@@ -97,6 +97,60 @@ export const dateOnlyDMY = (value?: string | null) => {
   return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : "";
 };
 
+/* Whole days since the epoch of a "YYYY-MM-DD..." value (UTC-safe). */
+const isoDayNumber = (value?: string | null) => {
+  const iso = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) / 86_400_000 : NaN;
+};
+
+/* The Next Visit Date (DD-MM-YYYY) for a "Cycle N / Day M" label, from
+   the patient's chemotherapy plan schedule; "" when the plan (or that day)
+   has none. It follows on from this visit's cycle day and its Start Date
+   (as set in the Chemotherapy Order, edited or not): the next day comes
+   the same number of days after it as the schedule spaces the two days
+   (e.g. Cycle 2 / Day 3 moved to 20-10 -> Day 4 on 21-10). A next day
+   whose own date the doctor already set keeps that date. */
+export const fetchScheduledDate = async (
+  patientId: string,
+  cycleLabel: string
+): Promise<string> => {
+  const match = cycleLabel.match(/Cycle\s*(\d+)\s*\/\s*Day\s*(\d+)/i);
+  if (!patientId || !match) return "";
+  try {
+    const response = await chemotherapyApi.getLatestPlanForPatient(patientId);
+    const schedule = response.data.data?.chemotherapy_plan_schedule ?? [];
+    const rowOf = (cycle: number, day: number) =>
+      schedule.find((entry) => entry.cycle_number === cycle && entry.cycle_day === day);
+    const next = rowOf(Number(match[1]), Number(match[2]));
+    if (!next) return "";
+    if (next.edited) return dateOnlyDMY(next.planned_date);
+
+    /* This visit's cycle day and its Start Date, from the order draft. */
+    let draft: { orderCycle?: number | null; orderDay?: number | null; startDate?: string; startDateKey?: string } = {};
+    try {
+      draft = JSON.parse(localStorage.getItem(`hms_chemo_order_${patientId}`) ?? "{}") ?? {};
+    } catch {
+      draft = {};
+    }
+    const current =
+      draft.orderCycle && draft.orderDay ? rowOf(draft.orderCycle, draft.orderDay) : undefined;
+    const currentDate =
+      (current && draft.startDateKey === `${current.cycle_number}/${current.cycle_day}`
+        ? toIsoDate(draft.startDate)
+        : undefined) ?? current?.planned_date;
+    const gap =
+      isoDayNumber(next.calculated_date ?? next.planned_date) -
+      isoDayNumber(current?.calculated_date ?? current?.planned_date);
+
+    if (current && currentDate && Number.isFinite(gap) && gap > 0) {
+      return dateOnlyDMY(addDaysToIsoDate(currentDate, gap));
+    }
+    return dateOnlyDMY(next.planned_date);
+  } catch {
+    return "";
+  }
+};
+
 /* A DATE column value moved by whole days, as YYYY-MM-DD. */
 export const addDaysToIsoDate = (value: string, days: number) => {
   const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -695,6 +749,26 @@ export type PlanOrderTarget = {
      what the day's order already has. */
   chemoInstructions?: string;
   additionalNotes?: string;
+  /* The day's planned date (YYYY-MM-DD) from the Start Date; moves only
+     this cycle day. */
+  plannedDate?: string;
+};
+
+/* The visit's encounter by its number (it must be this patient's), else
+   the patient's open encounter. */
+const resolveVisitEncounter = async (
+  patientId: string,
+  encounterNo?: string | null
+): Promise<{ encounter: EncounterRecord | null; scopeError?: string }> => {
+  if (encounterNo) {
+    try {
+      const found = (await encounterApi.getByNumber(encounterNo)).data?.data ?? null;
+      if (found && found.patient_id === patientId) return { encounter: found };
+    } catch (error) {
+      console.error("Failed to load the visit's encounter:", error);
+    }
+  }
+  return findActiveEncounter(patientId);
 };
 
 export const COURSE_CLOSED_MESSAGE =
@@ -717,9 +791,16 @@ export const createChemotherapyPlanForPatient = async (
   plannedCycles?: number,
   discussion?: string | null,
   dosing?: DosingSnapshot,
-  options?: { order?: PlanOrderTarget; allowNewCourse?: boolean }
+  options?: {
+    order?: PlanOrderTarget;
+    allowNewCourse?: boolean;
+    /* The consultation's own encounter: the order is saved in it, so the
+       Summary's Submit (same encounter) sends it for administration. Without
+       it, the patient's open encounter is looked up. */
+    encounterNo?: string | null;
+  }
 ): Promise<{ planId: string | null; error?: string; courseClosed?: boolean }> => {
-  const { encounter, scopeError } = await findActiveEncounter(patientId);
+  const { encounter, scopeError } = await resolveVisitEncounter(patientId, options?.encounterNo);
   if (!encounter) {
     return {
       planId: null,
@@ -776,6 +857,7 @@ export const createChemotherapyPlanForPatient = async (
         ...(target.additionalNotes !== undefined
           ? { additional_notes: target.additionalNotes }
           : {}),
+        ...(target.plannedDate ? { planned_date: target.plannedDate } : {}),
       });
       return undefined;
     } catch (orderError: any) {

@@ -915,10 +915,10 @@ export default function SampleVerification() {
                 <div className="space-y-6">
                   {/* Card 1: Sample Collected Successfully Banner */}
                   <div
-                    className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm"
+                    className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm md:max-lg:p-4"
                     data-purpose="success-status-card"
                   >
-                    <div className="flex items-start gap-4 mb-6">
+                    <div className="flex items-start gap-4 mb-6 md:max-lg:gap-3 md:max-lg:mb-4">
                       {/* Green Check Circle Badge */}
                       <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
                         <svg

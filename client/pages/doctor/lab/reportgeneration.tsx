@@ -1755,7 +1755,7 @@ export default function ReportGeneration() {
             data-purpose="quality-check-view"
           >
             {/* Top Header Banner */}
-            <header className="px-8 py-6 border-b border-slate-200 bg-white">
+            <header className="px-8 py-6 border-b border-slate-200 bg-white md:max-lg:px-4 md:max-lg:py-4">
               {/* Back to Reports navigation link */}
               <div className="mb-2">
                 <button
@@ -1780,7 +1780,7 @@ export default function ReportGeneration() {
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight md:max-lg:text-xl">
                     Quality Check - Review Results
                   </h1>
                   <p className="text-sm text-slate-500 mt-1 font-normal">

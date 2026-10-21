@@ -17,11 +17,19 @@ export interface ConsultationState {
    it on each lab_order_item. */
 export type InvestigationPriority = "Normal" | "Urgent";
 
+/* Testing method, only offered for Molecular-category investigations. */
+export type InvestigationMethod =
+  | "Germline Testing"
+  | "Tissue Biopsy Testing"
+  | "Liquid Biopsy Testing";
+
 export interface InvestigationOrderDetail {
   notes: string;
   priority: InvestigationPriority;
   /* DD-MM-YYYY, as typed or picked; may be empty. */
   targetDate: string;
+  /* Molecular tests only; empty for other categories. */
+  method: InvestigationMethod | "";
 }
 
 export interface MeasurementValues {

@@ -1,11 +1,5 @@
-import React, { useState } from "react";
+﻿import React from "react";
 import VoiceToText from "@/components/ui/voicetotext";
-import { Calendar } from "../../../components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "../../../components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -13,26 +7,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select";
-import {
-  formatPickedDate,
-  maskDmyInput,
-  parsePickedDate,
-  targetDateError,
-} from "./helpers";
-import { CalendarIcon } from "./icons";
-import type { InvestigationOrderDetail, InvestigationPriority } from "./types";
+import { targetDateError } from "./helpers";
+import DateInputField from "./DateInputField";
+import type {
+  InvestigationMethod,
+  InvestigationOrderDetail,
+  InvestigationPriority,
+} from "./types";
 
 /* ============================================================
    INVESTIGATION ORDER CARD
    One selected investigation in the Consultation step: clinical
-   notes, Priority and Target Date. Lab Review sends these on the
-   test's lab_order_item when it places the order.
+   notes, testing Method (Molecular tests only), Priority and
+   Target Date. Lab Review sends these on the test's
+   lab_order_item when it places the order.
    ============================================================ */
 
 export const EMPTY_INVESTIGATION_DETAIL: InvestigationOrderDetail = {
   notes: "",
   priority: "Normal",
   targetDate: "",
+  method: "",
 };
 
 const PRIORITY_OPTIONS: { value: InvestigationPriority; dot: string }[] = [
@@ -40,76 +35,15 @@ const PRIORITY_OPTIONS: { value: InvestigationPriority; dot: string }[] = [
   { value: "Urgent", dot: "bg-red-500" },
 ];
 
+/* Testing methods offered for Molecular-category investigations only. */
+export const METHOD_OPTIONS: InvestigationMethod[] = [
+  "Germline Testing",
+  "Tissue Biopsy Testing",
+  "Liquid Biopsy Testing",
+];
+
 const FIELD_LABEL =
   "text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400";
-
-/* Target Date: type it (DD-MM-YYYY, auto-formatted) or pick it from the
-   calendar. Past days are disabled - it is when the result is needed. */
-const TargetDateField: React.FC<{
-  id: string;
-  value: string;
-  onChange: (value: string) => void;
-}> = ({ id, value, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const picked = parsePickedDate(value);
-  const error = targetDateError(value);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <Popover open={open} onOpenChange={setOpen}>
-        <div className="relative">
-          <input
-            id={id}
-            type="text"
-            inputMode="numeric"
-            value={value}
-            onChange={(event) => onChange(maskDmyInput(event.target.value, value))}
-            placeholder="DD-MM-YYYY"
-            aria-invalid={Boolean(error)}
-            className={`h-[38px] w-full rounded-md border bg-white pl-3 pr-9 text-sm leading-5 text-slate-700 outline-none placeholder:text-slate-400 ${
-              error
-                ? "border-red-300 focus:border-red-400"
-                : "border-slate-200 focus:border-slate-400"
-            }`}
-          />
-
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              aria-label="Pick target date"
-              className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-400 transition-colors hover:text-blue-600 focus:outline-none [&_svg]:h-4 [&_svg]:w-4"
-            >
-              <CalendarIcon />
-            </button>
-          </PopoverTrigger>
-        </div>
-
-        <PopoverContent className="w-auto p-0" align="end">
-          <Calendar
-            mode="single"
-            selected={picked}
-            defaultMonth={picked}
-            disabled={(date) => {
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              return date < today;
-            }}
-            onSelect={(date) => {
-              if (date instanceof Date) {
-                onChange(formatPickedDate(date));
-                setOpen(false);
-              }
-            }}
-          />
-        </PopoverContent>
-      </Popover>
-
-      {error && (
-        <span className="text-[10px] leading-[14px] text-red-500">{error}</span>
-      )}
-    </div>
-  );
-};
 
 interface InvestigationOrderCardProps {
   index: number;
@@ -117,6 +51,8 @@ interface InvestigationOrderCardProps {
   detail: InvestigationOrderDetail;
   onChange: (patch: Partial<InvestigationOrderDetail>) => void;
   onRemove: () => void;
+  /* Molecular-category tests show the testing Method dropdown. */
+  showMethod?: boolean;
 }
 
 const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
@@ -125,9 +61,22 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
   detail,
   onChange,
   onRemove,
+  showMethod = false,
 }) => {
   const urgent = detail.priority === "Urgent";
   const fieldId = `investigation-${index}`;
+
+  /* Three fields normally; Molecular adds the Method field, so the grid
+     widens on large screens and reflows to two columns below that. */
+  const gridClass = showMethod
+    ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,170px)_140px_160px]"
+    : "grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_140px_170px]";
+  const notesClass = `flex flex-col gap-1.5 sm:col-span-2 ${
+    showMethod ? "lg:col-span-1" : "md:col-span-1"
+  }`;
+  const targetClass = `flex flex-col gap-1.5 ${
+    showMethod ? "sm:col-span-2 lg:col-span-1" : ""
+  }`;
 
   return (
     <div
@@ -140,9 +89,14 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
           {index + 1}
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-slate-700">
+        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold leading-5 text-slate-700">
           {name}
         </span>
+        {showMethod && (
+          <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.5px] text-blue-600 ring-1 ring-blue-200">
+            Molecular
+          </span>
+        )}
         {urgent && (
           <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.5px] text-red-600 ring-1 ring-red-200">
             Urgent
@@ -161,9 +115,9 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
         </button>
       </div>
 
-      {/* Notes | Priority | Target Date */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_140px_170px]">
-        <div className="flex flex-col gap-1.5 sm:col-span-2 md:col-span-1">
+      {/* Notes | Method | Priority | Target Date */}
+      <div className={gridClass}>
+        <div className={notesClass}>
           <span className={FIELD_LABEL}>Clinical Notes</span>
           <VoiceToText
             rows={2}
@@ -172,6 +126,36 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
             placeholder={`Clinical notes for ${name}`}
           />
         </div>
+
+        {showMethod && (
+          <div className="flex flex-col gap-1.5">
+            <span className={FIELD_LABEL}>Method</span>
+            <Select
+              value={detail.method || undefined}
+              onValueChange={(value) =>
+                onChange({ method: value as InvestigationMethod })
+              }
+            >
+              <SelectTrigger
+                aria-label={`Method for ${name}`}
+                className={`h-[38px] rounded-md text-sm shadow-none focus:ring-0 focus:ring-offset-0 ${
+                  detail.method
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-500"
+                }`}
+              >
+                <SelectValue placeholder="Select method" />
+              </SelectTrigger>
+              <SelectContent>
+                {METHOD_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <span className={FIELD_LABEL}>Priority</span>
@@ -183,7 +167,7 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
           >
             <SelectTrigger
               aria-label={`Priority for ${name}`}
-              className={`h-[38px] rounded-md text-sm shadow-none focus:ring-0 focus:ring-offset-0 ${
+              className={`h-[38px] rounded-md text-[10px] shadow-none focus:ring-0 focus:ring-offset-0 ${
                 urgent
                   ? "border-red-200 bg-red-50 text-red-700"
                   : "border-slate-200 bg-white text-slate-700"
@@ -204,14 +188,17 @@ const InvestigationOrderCard: React.FC<InvestigationOrderCardProps> = ({
           </Select>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className={targetClass}>
           <label htmlFor={`${fieldId}-target-date`} className={FIELD_LABEL}>
             Target Date
           </label>
-          <TargetDateField
+          {/* Past days are disabled - it is when the result is needed. */}
+          <DateInputField
             id={`${fieldId}-target-date`}
             value={detail.targetDate}
             onChange={(value) => onChange({ targetDate: value })}
+            error={targetDateError(detail.targetDate)}
+            ariaLabel="Pick target date"
           />
         </div>
       </div>

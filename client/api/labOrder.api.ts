@@ -46,10 +46,12 @@ export interface LabOrderItemRecord {
   net_amount?: number | string | null;
   item_status?: string | null;
   remarks?: string | null;
-  /* Doctor's per-test order details (Consultation > Investigations). */
+  /* Doctor's per-test order details (Consultation > Investigations).
+     `method` is the testing method for Molecular-category tests. */
   clinical_notes?: string | null;
   priority?: string | null;
   target_date?: string | null;
+  method?: string | null;
   barcode?: string | null;
   sample_id?: string | null;
   specimen_type?: string | null;
@@ -122,6 +124,8 @@ export const labOrderItemApi = {
     priority?: "Normal" | "Urgent" | "Stat";
     /* ISO date, YYYY-MM-DD. */
     target_date?: string;
+    /* Molecular-category tests only: the testing method. */
+    method?: string;
     branch_id?: string;
     user_id?: string;
   }) =>

@@ -1971,12 +1971,12 @@ export default function TestingSamples() {
 
             {/* BEGIN: Completion Card Container */}
             <section
-              className="max-w-[920px] rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]"
+              className="max-w-[920px] rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)] md:max-lg:p-4"
               data-purpose="completion-form-card"
             >
               {/* Status Banner: Tests Completed */}
               <div
-                className="flex items-start gap-3.5 rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3.5 mb-6"
+                className="flex items-start gap-3.5 rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3.5 mb-6 md:max-lg:px-3 md:max-lg:py-3"
                 role="alert"
               >
                 {/* Success Checkmark Icon */}
