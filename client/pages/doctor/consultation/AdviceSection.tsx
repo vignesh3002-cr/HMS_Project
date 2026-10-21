@@ -1762,61 +1762,70 @@ const AdviceSection = forwardRef<
         </table>
       )}
 
-      {/* FOLLOW-UP DATE */}
+      {/* FOLLOW-UP DATE + DISCUSSION
+          The Follow-up Date keeps a narrow track on the left and the
+          Discussion takes the rest of the row, so both are visible
+          together. Below the lg breakpoint they stack (date first). */}
 
-      <div className="flex w-full flex-col gap-2 sm:max-w-xs">
+      <div className="grid w-full grid-cols-1 items-start gap-x-8 gap-y-5 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
 
-        <div className="flex items-center justify-between gap-2">
-          <label
-            htmlFor="advice-follow-up-date"
-            className="text-[10px] font-bold leading-4 text-slate-500"
-          >
-            Follow-up Date
-          </label>
-          {followUpDate && (
-            <button
-              type="button"
-              onClick={() => setFollowUpDate("")}
-              className="text-[10px] font-medium text-slate-400 transition-colors hover:text-red-500"
+        {/* FOLLOW-UP DATE */}
+
+        <div className="flex w-full flex-col gap-2">
+
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="advice-follow-up-date"
+              className="text-[10px] font-bold leading-4 text-slate-500"
             >
-              Clear
-            </button>
+              Follow-up Date
+            </label>
+            {followUpDate && (
+              <button
+                type="button"
+                onClick={() => setFollowUpDate("")}
+                className="text-[10px] font-medium text-slate-400 transition-colors hover:text-red-500"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <DateInputField
+            id="advice-follow-up-date"
+            value={followUpDate}
+            onChange={setFollowUpDate}
+            error={followUpError}
+            ariaLabel="Pick follow-up date"
+          />
+
+          {!followUpError && (
+            <span className="text-[10px] leading-[14px] text-slate-400">
+              {followUpDirty
+                ? "Unsaved change - saved when you click Proceed to Next"
+                : savedFollowUpDate
+                  ? "Saved for this visit"
+                  : "Type DD-MM-YYYY or pick from the calendar"}
+            </span>
           )}
+
         </div>
 
-        <DateInputField
-          id="advice-follow-up-date"
-          value={followUpDate}
-          onChange={setFollowUpDate}
-          error={followUpError}
-          ariaLabel="Pick follow-up date"
-        />
+        {/* DISCUSSION */}
 
-        {!followUpError && (
-          <span className="text-[10px] leading-[14px] text-slate-400">
-            {followUpDirty
-              ? "Unsaved change - saved when you click Proceed to Next"
-              : savedFollowUpDate
-                ? "Saved for this visit"
-                : "Type DD-MM-YYYY or pick from the calendar"}
-          </span>
-        )}
+        <div className="flex w-full flex-col gap-2">
 
-      </div>
+          <label className="text-[10px] font-bold leading-4 text-slate-800">
+            Discussion
+          </label>
 
-      {/* DISCUSSION */}
+          <VoiceToText
+            value={discussion}
+            onChange={(text) => setDiscussion(text)}
+            placeholder="Type the discussion with the patient..."
+          />
 
-      <div className="flex w-full flex-col gap-2">
-
-        <label className="text-[10px] font-bold leading-4 text-slate-800">
-          Discussion
-        </label>
-
-        <VoiceToText
-          value={discussion}
-          onChange={(text) => setDiscussion(text)}
-          placeholder="Type the discussion with the patient..."
-        />
+        </div>
 
       </div>
 
