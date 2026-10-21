@@ -1570,7 +1570,7 @@ const stopVoiceRecognition = () => {
 
   const handleIpdDone = () => {
     setIpdResult(null);
-    navigate(isDoctorBooking ? "/doctor/appointments" : "/appointments");
+    navigate("/inpatient/admissions");
   };
 
   const handleCancel = () => {
