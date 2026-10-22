@@ -19,6 +19,7 @@ import {
   type DosingInputs,
 } from "./doseCalculation";
 import {
+  adviceBlockPattern,
   createChemotherapyPlanForPatient,
   findActiveEncounter,
     toIsoDate,
@@ -1026,8 +1027,10 @@ const DischargeMedication: React.FC<{
         targetEncounterNo
       );
       const existingAdvice = encounterResponse.data.data?.advice ?? "";
+      /* Only this step's block is replaced - a Follow Up block saved after
+         it is kept. */
       const cleanedAdvice = existingAdvice
-        .replace(/\n*\[Discharge Medication\][\s\S]*$/, "")
+        .replace(adviceBlockPattern("Discharge Medication"), "")
         .trimEnd();
 
       const adviceParts = [cleanedAdvice];

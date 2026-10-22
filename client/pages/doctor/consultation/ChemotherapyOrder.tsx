@@ -43,6 +43,7 @@ import {
   toIsoDate,
 } from "./helpers";
 import { BackIcon, BellIcon, CheckIcon } from "./icons";
+import { CircleCheck, ClipboardList, Syringe } from "lucide-react";
 import { SingleSelectDropdown } from "../../../components/ui/single-select-dropdown";
 import type { MultiSelectOption } from "../../../components/ui/multi-select-dropdown";
 import {
@@ -207,6 +208,46 @@ const isClosedCycleOrder = (order: ChemoPlanOrderHeader) =>
   ["COMPLETED", "CANCELLED"].includes(
     String(order.chemotherapy_cycle?.cycle_status ?? "").toUpperCase()
   );
+
+/* The status of a cycle day / cycle, as an icon next to its check box.
+   The status name is carried by the icon's tooltip and its aria-label
+   instead of a text pill; the colours are the ones the pills used. */
+const STATUS_TAGS = {
+  COMPLETED: {
+    label: "Completed",
+    cls: "bg-emerald-50 text-emerald-700",
+    Icon: CircleCheck,
+  },
+  IN_ADMINISTRATION: {
+    label: "In administration",
+    cls: "bg-amber-50 text-amber-700",
+    Icon: Syringe,
+  },
+  ORDERED: {
+    label: "Ordered",
+    cls: "bg-blue-50 text-blue-700",
+    Icon: ClipboardList,
+  },
+} as const;
+
+type StatusTag = (typeof STATUS_TAGS)[keyof typeof STATUS_TAGS];
+
+/* The status chip of a cycle or a cycle day. */
+const StatusTagIcon: React.FC<{
+  tag: StatusTag;
+  /* What the status belongs to, e.g. "Cycle 2 / Day 3". */
+  subject: string;
+  className?: string;
+}> = ({ tag, subject, className = "h-5 w-5" }) => (
+  <span
+    className={`inline-flex shrink-0 items-center justify-center rounded ${tag.cls} ${className}`}
+    title={`${subject}: ${tag.label}`}
+    role="img"
+    aria-label={`${subject}: ${tag.label}`}
+  >
+    <tag.Icon className="h-3.5 w-3.5" aria-hidden="true" />
+  </span>
+);
 
 /* The Hydration tab rows as saved on a cycle day order. */
 const hydrationPayload = (rows: HydrationRow[]) =>
@@ -1865,6 +1906,36 @@ const ChemotherapyOrder: React.FC<{
   const isDaySelectable = (cycle: number, day: number) =>
     !isCycleCompleted(cycle) && !isDayCompleted(cycle, day);
 
+  /* ---------------- Status indicators ----------------
+     The status of a cycle day is shown as a small icon next to its
+     check box: the words are carried by the icon's tooltip and its
+     aria-label. The colours are the ones the text pills used. */
+  const statusTag = (status?: string | null): StatusTag | null => {
+    const key = String(status ?? "").toUpperCase();
+    if (key === "COMPLETED") return STATUS_TAGS.COMPLETED;
+    if (key === "IN_ADMINISTRATION") return STATUS_TAGS.IN_ADMINISTRATION;
+    if (key === "ORDERED") return STATUS_TAGS.ORDERED;
+    return null;
+  };
+
+  /* The cycle's own status: completed when the cycle is closed or every
+     medication day of it is done, else the status of the day it is
+     waiting on (sent for administration, else ordered). */
+  const cycleStatusTag = (cycle: number, completed: boolean): StatusTag | null => {
+    if (completed) return STATUS_TAGS.COMPLETED;
+    const cycleOrders = planOrders.filter(
+      (order) => order.cycle_number === cycle
+    );
+    return (
+      statusTag(
+        cycleOrders.find((order) => order.order_status === "IN_ADMINISTRATION")
+          ?.order_status ??
+          cycleOrders.find((order) => order.order_status === "ORDERED")
+            ?.order_status
+      )
+    );
+  };
+
   /* ---------------- Start Date limits ----------------
      A cycle day's date can't be in the past, before the previous cycle
      day's date, or on a date another (completed or planned) cycle day
@@ -2478,30 +2549,30 @@ const ChemotherapyOrder: React.FC<{
                       {availableCycles.map((cycle) => {
                         const isChecked = getCycleNumber(cycleDay) === cycle;
                         const completed = isCycleCompleted(cycle);
+                        const tag = cycleStatusTag(cycle, completed);
                         return (
-                          <label
-                            key={cycle}
-                            title={completed ? `Cycle ${cycle} is completed` : undefined}
-                            className={`flex items-center gap-2 text-sm ${completed ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-700"}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              disabled={completed}
-                              onChange={() => {
-                                userTouched.current.cycleDay = true;
-                                setCycleDayOpen(false);
-                                selectCycle(cycle);
-                              }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                            <span>Cycle {cycle}</span>
-                            {completed && (
-                              <span className="ml-auto rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                Completed
-                              </span>
+                          <div key={cycle} className="flex items-center gap-2">
+                            <label
+                              title={completed ? `Cycle ${cycle} is completed` : undefined}
+                              className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${completed ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-700"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={completed}
+                                onChange={() => {
+                                  userTouched.current.cycleDay = true;
+                                  setCycleDayOpen(false);
+                                  selectCycle(cycle);
+                                }}
+                                className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                              />
+                              <span>Cycle {cycle}</span>
+                            </label>
+                            {tag && (
+                              <StatusTagIcon tag={tag} subject={`Cycle ${cycle}`} />
                             )}
-                          </label>
+                          </div>
                         );
                       })}
                     </div>
@@ -2518,41 +2589,57 @@ const ChemotherapyOrder: React.FC<{
                         const cycle = getCycleNumber(cycleDay) ?? 1;
                         const selectable = isDaySelectable(cycle, day);
                         const status = orderOfDay(cycle, day)?.order_status;
+                        /* A day that can't be picked is a completed one;
+                           else the order's own status. */
                         const tag = !selectable
-                          ? { label: "Completed", cls: "bg-emerald-50 text-emerald-700" }
-                          : status === "IN_ADMINISTRATION"
-                            ? { label: "In administration", cls: "bg-amber-50 text-amber-700" }
-                            : status === "ORDERED"
-                              ? { label: "Ordered", cls: "bg-blue-50 text-blue-700" }
-                              : null;
+                          ? STATUS_TAGS.COMPLETED
+                          : statusTag(status);
                         return (
-                          <label
-                            key={day}
-                            title={!selectable ? `Cycle ${cycle} / Day ${day} is completed` : undefined}
-                            className={`flex items-center gap-2 text-sm ${selectable ? "cursor-pointer text-gray-700" : "cursor-not-allowed text-gray-400"}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              disabled={!selectable}
-                              onChange={() => {
-                                userTouched.current.cycleDay = true;
-                                setCycleDayOpen(false);
-                                selectDay(day);
-                              }}
-                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                            <span>Day {day}</span>
+                          <div key={day} className="flex items-center gap-2">
+                            <label
+                              title={!selectable ? `Cycle ${cycle} / Day ${day} is completed` : undefined}
+                              className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${selectable ? "cursor-pointer text-gray-700" : "cursor-not-allowed text-gray-400"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={!selectable}
+                                onChange={() => {
+                                  userTouched.current.cycleDay = true;
+                                  setCycleDayOpen(false);
+                                  selectDay(day);
+                                }}
+                                className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                              />
+                              <span>Day {day}</span>
+                            </label>
                             {tag && (
-                              <span className={`ml-auto whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold ${tag.cls}`}>
-                                {tag.label}
-                              </span>
+                              <StatusTagIcon
+                                tag={tag}
+                                subject={`Cycle ${cycle} / Day ${day}`}
+                              />
                             )}
-                          </label>
+                          </div>
                         );
                       })}
                     </div>
                   </div>
+                </div>
+
+                {/* What the status icons mean. */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-2 text-[9px] text-gray-500">
+                  <span className="inline-flex items-center gap-1">
+                    <CircleCheck className="h-3 w-3 text-emerald-600" aria-hidden="true" />
+                    Completed
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Syringe className="h-3 w-3 text-amber-600" aria-hidden="true" />
+                    In administration
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <ClipboardList className="h-3 w-3 text-blue-600" aria-hidden="true" />
+                    Ordered
+                  </span>
                 </div>
               </div>
             )}
@@ -2745,12 +2832,26 @@ const ChemotherapyOrder: React.FC<{
                           <span>
                             Copy as Cycle {source.cycle_number} / Day {source.cycle_day}
                           </span>
-                          <span className="text-[10px] text-gray-400">
-                            {source.order_status === "COMPLETED"
-                              ? `Completed ${formatDateDMY(source.completed_at)}`
-                              : source.order_status === "IN_ADMINISTRATION"
-                                ? "In administration"
-                                : "Ordered"}
+                          <span className="inline-flex items-center gap-1.5 text-[10px] text-gray-400">
+                            {source.order_status === "COMPLETED" ? (
+                              <>
+                                <StatusTagIcon
+                                  tag={STATUS_TAGS.COMPLETED}
+                                  subject={`Cycle ${source.cycle_number} / Day ${source.cycle_day}`}
+                                />
+                                {formatDateDMY(source.completed_at)}
+                              </>
+                            ) : source.order_status === "IN_ADMINISTRATION" ? (
+                              <StatusTagIcon
+                                tag={STATUS_TAGS.IN_ADMINISTRATION}
+                                subject={`Cycle ${source.cycle_number} / Day ${source.cycle_day}`}
+                              />
+                            ) : (
+                              <StatusTagIcon
+                                tag={STATUS_TAGS.ORDERED}
+                                subject={`Cycle ${source.cycle_number} / Day ${source.cycle_day}`}
+                              />
+                            )}
                           </span>
                         </button>
                       ))}

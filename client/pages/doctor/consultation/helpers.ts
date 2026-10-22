@@ -97,6 +97,62 @@ export const dateOnlyDMY = (value?: string | null) => {
   return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : "";
 };
 
+/* ---------------- Follow Up block on the encounter advice ----------------
+   The Follow Up step saves its values as a "[Follow Up]" block at the end
+   of the visit encounter's advice ("Next Visit: ...", "Next Cycle: ...",
+   "Plan: ...", "New Visit: ...", "Notes: ..."). */
+export type FollowUpValues = {
+  nextVisit: string;
+  nextCycle: string;
+  plan: string;
+  newVisit: string;
+  notes: string;
+};
+
+const FOLLOW_UP_KEYS: [string, keyof FollowUpValues][] = [
+  ["Next Visit", "nextVisit"],
+  ["Next Cycle", "nextCycle"],
+  ["Plan", "plan"],
+  ["New Visit", "newVisit"],
+  ["Notes", "notes"],
+];
+
+/* One "[Name]" block of the advice - up to the next block, so re-saving a
+   step never drops another step's block (e.g. Discharge Medication saved
+   after Follow Up). */
+export const adviceBlockPattern = (name: string) =>
+  new RegExp(`\\n*\\[${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*?(?=\\n*\\[[A-Z][^\\]\\n]*\\]\\s*(?:\\n|$)|$)`);
+
+export const FOLLOW_UP_BLOCK_PATTERN = adviceBlockPattern("Follow Up");
+
+/* The saved Follow Up values (empty strings when there is no block). A line
+   without a known key continues the value above it (multi-line notes). */
+export const parseFollowUpAdvice = (advice?: string | null): FollowUpValues => {
+  const values: FollowUpValues = { nextVisit: "", nextCycle: "", plan: "", newVisit: "", notes: "" };
+  const start = (advice ?? "").indexOf("[Follow Up]");
+  if (start === -1) return values;
+  let current: keyof FollowUpValues | null = null;
+  const lines = (advice ?? "").slice(start + "[Follow Up]".length).split("\n");
+  for (const line of lines) {
+    /* The next step's block (e.g. "[Discharge Medication]") ends this one. */
+    if (/^\[[A-Z][^\]]*\]$/.test(line.trim())) break;
+    const known = FOLLOW_UP_KEYS.find(([label]) => line.startsWith(`${label}:`));
+    if (known) {
+      current = known[1];
+      values[current] = line.slice(known[0].length + 1).trim();
+    } else if (current && line.trim()) {
+      values[current] = `${values[current]}\n${line}`.trim();
+    }
+  }
+  return values;
+};
+
+/* The block's lines for the values that are set. */
+export const followUpAdviceLines = (values: FollowUpValues): string[] =>
+  FOLLOW_UP_KEYS.filter(([, key]) => values[key].trim()).map(
+    ([label, key]) => `${label}: ${values[key].trim()}`
+  );
+
 /* Whole days since the epoch of a "YYYY-MM-DD..." value (UTC-safe). */
 const isoDayNumber = (value?: string | null) => {
   const iso = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);

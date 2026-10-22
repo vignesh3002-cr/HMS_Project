@@ -47,6 +47,8 @@ import {
   protocolDayDilutions,
   resolveEffectiveStartDate,
   fetchScheduledDate,
+  parseFollowUpAdvice,
+  type FollowUpValues,
 } from "./helpers";
 
 /* ============================================================
@@ -354,20 +356,27 @@ const Summary: React.FC<{
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
-  const [nextVisitDate, setNextVisitDate] = useState(() =>
+  /* Fallbacks for a visit whose Follow Up wasn't saved yet: the next cycle
+     kept by the Chemo Order / Follow Up steps and its scheduled date. */
+  const [fallbackVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
       ? (localStorage.getItem(
           `hms_next_cycle_date_${resolvedPatientId}`
         ) ?? "")
       : ""
   );
-  const [nextCycle] = useState(() =>
+  const [fallbackCycle] = useState(() =>
     resolvedPatientId
       ? (localStorage.getItem(
           `hms_next_cycle_${resolvedPatientId}`
         ) ?? "")
       : ""
   );
+  /* What the Follow Up step saved on this visit's encounter (its
+     follow_up_date and the [Follow Up] advice block) - shown as entered. */
+  const [savedFollowUp, setSavedFollowUp] = useState<FollowUpValues | null>(null);
+  const nextVisitDate = savedFollowUp?.nextVisit || fallbackVisitDate;
+  const nextCycle = savedFollowUp?.nextCycle || fallbackCycle;
 
   const [plan, setPlan] = useState<SummaryPlan | null>(null);
   /* The cycle day order(s) saved in this visit's encounter. */
@@ -552,6 +561,11 @@ const Summary: React.FC<{
           ].filter(Boolean)
         );
         setSummaryPreviousReports(enc?.previous_reports ?? "");
+        const followUp = parseFollowUpAdvice(enc?.advice);
+        setSavedFollowUp({
+          ...followUp,
+          nextVisit: dateOnlyDMY(enc?.follow_up_date) || followUp.nextVisit,
+        });
         setResolvedSummaryEncounterNo(enc?.encounter_no ?? "");
         setEncounterCheckIn(enc?.encounter_ts ?? enc?.created_at ?? "");
       } catch (error) {
@@ -1635,6 +1649,9 @@ const Summary: React.FC<{
       nextVisitDate || nextCycle
         ? `Next visit: ${[nextVisitDate, nextCycle].filter(Boolean).join(" - ")}`
         : "",
+      savedFollowUp?.plan ? `Plan: ${savedFollowUp.plan}` : "",
+      savedFollowUp?.newVisit ? `New visit: ${savedFollowUp.newVisit}` : "",
+      savedFollowUp?.notes ? `Follow-up notes: ${savedFollowUp.notes.replace(/\s*\n\s*/g, " ")}` : "",
     ].filter(Boolean);
     if (postLines.length > 0) {
       y += 30;
@@ -3053,24 +3070,44 @@ const Summary: React.FC<{
           {/* =================================================
               FOOTER DATES
           ================================================== */}
-          <section className="grid grid-cols-1 gap-6 border-t border-slate-100 pt-6 sm:grid-cols-2">
-            <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
-                Next Visit Date
-              </p>
+          <section className="border-t border-slate-100 pt-6">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
+                  Next Visit Date
+                </p>
+                <p className="text-slate-600">{nextVisitDate || "—"}</p>
+              </div>
 
-              <p className="text-slate-600">{nextVisitDate}</p>
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
+                  Next Cycle
+                </p>
+                <p className="text-slate-600">{nextCycle || "—"}</p>
+              </div>
+
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
+                  Plan
+                </p>
+                <p className="text-slate-600">{savedFollowUp?.plan || "—"}</p>
+              </div>
+
+              {savedFollowUp?.newVisit && (
+                <div>
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
+                    New Visit
+                  </p>
+                  <p className="text-slate-600">{savedFollowUp.newVisit}</p>
+                </div>
+              )}
             </div>
 
-            <div className="sm:pl-8">
+            <div className="mt-6">
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-900">
-                Next Cycle
+                Follow-up Notes
               </p>
-
-              <p className="flex items-center gap-2 text-slate-600">
-                {nextCycle}
-                <span className="text-slate-400"></span>
-              </p>
+              <p className="whitespace-pre-line text-slate-600">{savedFollowUp?.notes || "—"}</p>
             </div>
           </section>
         </div>
