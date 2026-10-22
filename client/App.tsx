@@ -78,6 +78,7 @@ import Scheduled from "./pages/Scheduled";
 import DayView from "./pages/Day view";
 import TransferDoctor from "./pages/TransferDoctor";
 import RescheduleQueue from "./pages/RescheduleQueue";
+import PendingBookings from "./pages/PendingBookings";
 import WeekView from "./pages/Week view";
 
 // ============================================================
@@ -315,6 +316,18 @@ const protectedRoutes = [
     path: "/appointments/reschedule-queue",
     element: <RescheduleQueue />,
     permission: "doctor.transfer",
+  },
+
+  {
+    path: "/appointments/pending",
+    element: <PendingBookings />,
+    permission: "appointment.read",
+  },
+
+  {
+    path: "/appointments/pending-bookings",
+    element: <PendingBookings />,
+    permission: "appointment.read",
   },
 
   {

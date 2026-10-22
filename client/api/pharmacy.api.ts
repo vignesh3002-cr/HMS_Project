@@ -14,6 +14,7 @@ export interface ResolvedMedicationLine {
   medicine_id?: string | null;
   drug_name?: string | null;
   brand_name?: string | null;
+  patient_dose?: string | null;
   dose?: string | null;
   dose_unit?: string | null;
   quantity?: number | null;
@@ -48,6 +49,7 @@ export interface PharmacySlipItem {
   medicine_id: string | null;
   drug_name: string | null;
   brand_name: string | null;
+  patient_dose?: string | null;
   dose: string | null;
   dose_unit: string | null;
   quantity: number | null;
@@ -56,6 +58,19 @@ export interface PharmacySlipItem {
   frequency: string | null;
   duration: string | null;
   instructions: string | null;
+  pharmacy_item_id?: string | null;
+}
+
+export interface PharmacyMasterItem {
+  pharmacy_item_id: string;
+  medicine_id: string | null;
+  item_name: string;
+  brand_name: string | null;
+  manufacturer_name: string | null;
+  dosage_form: string | null;
+  strength_text: string | null;
+  strength_value: string | number | null;
+  strength_unit: string | null;
 }
 
 export interface PharmacySlipRecord {
@@ -91,8 +106,15 @@ export interface PharmacySlipRecord {
 
 export interface UpdateSlipItemsPayload {
   items: {
-    pharmacy_slip_item_id: string;
+    pharmacy_slip_item_id?: string;
+    medicine_id?: string | null;
+    drug_name?: string | null;
+    brand_name?: string | null;
+    dose?: string | null;
+    dose_unit?: string | null;
     quantity?: number | null;
+    drug_role?: string | null;
+    pharmacy_item_id?: string | null;
   }[];
 }
 
@@ -154,4 +176,13 @@ export const pharmacyApi = {
       `/pharmacy/slips/${pharmacySlipId}/print`,
       data
     ),
+
+  getMasterItems: (params?: { medicine_ids?: string }, config?: AxiosRequestConfig) =>
+    API.get<{ success: boolean; message: string; data: PharmacyMasterItem[] }>("/pharmacy/master-items", {
+      params,
+      ...config,
+    }),
+
+  createMedicine: (data: { medicine_name: string; generic_name?: string; dosage_form?: string }) =>
+    API.post<{ success: boolean; message: string; data: any }>("/pharmacy/medicines", data),
 };

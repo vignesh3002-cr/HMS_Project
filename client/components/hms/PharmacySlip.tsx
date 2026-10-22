@@ -5,6 +5,7 @@ import {
   FilePlus2,
   Loader2,
   Pencil,
+  Plus,
   Printer,
   Save,
   Trash2,
@@ -12,10 +13,13 @@ import {
 } from "lucide-react";
 import {
   pharmacyApi,
+  PharmacyMasterItem,
   PharmacySlipItem,
   PharmacySlipRecord,
   SlipPreview,
 } from "@/api/pharmacy.api";
+import { chemotherapyApi, type MedicineOption } from "@/api/chemotherapy.api";
+import { SingleSelectDropdown } from "@/components/ui/single-select-dropdown";
 import { useToast } from "@/hooks/use-toast";
 import { downloadExportPdf } from "@/lib/exportPdf";
 import { Button } from "@/components/ui/button";
@@ -42,6 +46,23 @@ const DRUG_ROLE_LABELS: Record<string, string> = {
   DISCHARGE: "Discharge",
 };
 
+const DOSE_UNITS = [
+  "mg",
+  "g",
+  "mcg",
+  "mL",
+  "L",
+  "mg/m²",
+  "mg/kg",
+  "AUC",
+  "units",
+  "IU",
+  "tablets",
+  "capsules",
+  "puffs",
+  "drops",
+];
+
 const STATUS_STYLES: Record<string, string> = {
   DRAFT: "bg-[#FFF7E6] text-[#8A6100] border-[#F2D999]",
   ISSUED: "bg-[#E7F6EC] text-[#1B6B3A] border-[#A9DCBB]",
@@ -63,38 +84,54 @@ const formatDateTime = (value: string | null | undefined) => {
 const escapeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// A line as the table renders it. Quantity is the only editable field and it
-// counts whole packs; everything else is read-only clinical data.
+// Decimal columns arrive as strings like "500.0000"; normalise to "500".
+const strengthFromMaster = (row: PharmacyMasterItem) =>
+  row.strength_value != null && String(row.strength_value).trim() !== ""
+    ? String(Number(row.strength_value))
+    : "";
+
+// A line as the table renders it.
 interface SlipLine {
   pharmacy_slip_item_id: string;
+  medicine_id?: string | null;
   medicineName: string;
+  patientDose: string;
   brandName: string;
-  dose: string;
+  strengthValue: string;
+  strengthUnit: string;
   drugRole: string;
   quantity: string;
+  pharmacy_item_id?: string | null;
 }
 
 function toLine(item: PharmacySlipItem): SlipLine {
   return {
     pharmacy_slip_item_id: item.pharmacy_slip_item_id,
+    medicine_id: item.medicine_id ?? null,
     medicineName: display(item.drug_name),
-    brandName: display(item.brand_name),
-    dose: item.dose ? `${item.dose}${item.dose_unit ? ` ${item.dose_unit}` : ""}` : "—",
-    drugRole: DRUG_ROLE_LABELS[item.drug_role ?? ""] ?? display(item.drug_role),
+    patientDose: display(item.patient_dose),
+    brandName: item.brand_name || "",
+    strengthValue: item.dose ?? "",
+    strengthUnit: item.dose_unit ?? "mg",
+    drugRole: item.drug_role ?? "PRIMARY",
     quantity: item.quantity === null || item.quantity === undefined ? "" : String(item.quantity),
+    pharmacy_item_id: item.pharmacy_item_id ?? null,
   };
 }
 
-// A preview line has no persisted item yet, so it gets a placeholder id and
-// cannot be edited - the slip must exist first.
+// A preview line has no persisted item yet, so it gets a placeholder id.
 function fromResolved(line: SlipPreview["lines"][number], index: number): SlipLine {
   return {
     pharmacy_slip_item_id: `pending-${index}`,
+    medicine_id: line.medicine_id ?? null,
     medicineName: display(line.drug_name),
-    brandName: display(line.brand_name),
-    dose: line.dose ? `${line.dose}${line.dose_unit ? ` ${line.dose_unit}` : ""}` : "—",
-    drugRole: DRUG_ROLE_LABELS[line.drug_role ?? ""] ?? display(line.drug_role),
+    patientDose: display(line.patient_dose),
+    brandName: line.brand_name || "",
+    strengthValue: line.dose ?? "",
+    strengthUnit: line.dose_unit ?? "mg",
+    drugRole: line.drug_role ?? "PRIMARY",
     quantity: line.quantity === null || line.quantity === undefined ? "" : String(line.quantity),
+    pharmacy_item_id: null,
   };
 }
 
@@ -105,6 +142,8 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
   const [preview, setPreview] = useState<SlipPreview | null>(null);
   const [slip, setSlip] = useState<PharmacySlipRecord | null>(null);
   const [lines, setLines] = useState<SlipLine[]>([]);
+  const [masterItems, setMasterItems] = useState<PharmacyMasterItem[]>([]);
+  const [medicineOptions, setMedicineOptions] = useState<MedicineOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -113,10 +152,19 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
 
   const status = slip?.slip_status ?? "DRAFT";
   const isPersisted = Boolean(slip);
-  // Quantity is editable only while the slip is still a DRAFT. Printing is
-  // what freezes it, so there is no separate issue step.
   const editable = isPersisted && status === "DRAFT";
   const canPrint = isPersisted && status !== "CANCELLED";
+
+  const masterItemsByMedId = useMemo(() => {
+    const map = new Map<string, PharmacyMasterItem[]>();
+    for (const item of masterItems) {
+      if (!item.medicine_id) continue;
+      const list = map.get(item.medicine_id) ?? [];
+      list.push(item);
+      map.set(item.medicine_id, list);
+    }
+    return map;
+  }, [masterItems]);
 
   const load = useCallback(async () => {
     if (!planId) {
@@ -127,8 +175,15 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     setLoading(true);
 
     try {
-      const res = await pharmacyApi.previewFromPlan(planId);
+      const [res, masterRes, medRes] = await Promise.all([
+        pharmacyApi.previewFromPlan(planId),
+        pharmacyApi.getMasterItems().catch(() => ({ data: { data: [] } })),
+        chemotherapyApi.listMedicines().catch(() => ({ data: { data: [] } })),
+      ]);
+
       const data = res.data?.data;
+      setMasterItems(masterRes.data?.data ?? []);
+      setMedicineOptions(medRes.data?.data ?? []);
 
       if (!data) {
         setPreview(null);
@@ -139,8 +194,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
 
       setPreview(data);
 
-      // A live slip already covering this cycle day wins: the page shows what
-      // was dispensed rather than re-resolving the plan, which may have changed.
       const existing = data.existing_slip;
       setSlip(existing ?? null);
       setLines(existing?.pharmacy_slip_item?.map(toLine) ?? data.lines.map(fromResolved));
@@ -169,7 +222,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
   const protocolName =
     slip?.regimen_name ?? slip?.protocol_name ?? preview?.regimen_name ?? preview?.protocol_name ?? "—";
   const cycleLabel = slip?.cycle_number ? `Cycle ${slip.cycle_number}, Day ${slip.cycle_day ?? "—"}` : null;
-  // The stored print stamp, not the time the page happened to render.
   const printedOn = formatDateTime(slip?.printed_at) ?? "Not printed yet";
 
   const updateLine = (id: string, patch: Partial<SlipLine>) => {
@@ -178,6 +230,56 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
 
   const removeLine = (id: string) => {
     setLines((prev) => prev.filter((line) => line.pharmacy_slip_item_id !== id));
+  };
+
+  // The master row behind a line: matched by pharmacy_item_id when we have one,
+  // otherwise by the selected brand (manufacturer) for the line's medicine.
+  const findMasterRow = (line: SlipLine): PharmacyMasterItem | undefined => {
+    const items = line.medicine_id ? masterItemsByMedId.get(line.medicine_id) ?? [] : [];
+    if (line.pharmacy_item_id) {
+      const byId = items.find((p) => p.pharmacy_item_id === line.pharmacy_item_id);
+      if (byId) return byId;
+    }
+    return items.find((p) => p.manufacturer_name === line.brandName);
+  };
+
+  const onBrandChange = (id: string, brand: string) => {
+    const line = lines.find((l) => l.pharmacy_slip_item_id === id);
+    if (!line) return;
+    const matching = line.medicine_id
+      ? masterItemsByMedId.get(line.medicine_id)?.find((p) => p.manufacturer_name === brand)
+      : undefined;
+
+    // Dose and unit always follow the chosen brand. A custom brand has no master row,
+    // so it keeps whatever dose/unit the line already had and clears the master link.
+    updateLine(id, {
+      brandName: brand,
+      pharmacy_item_id: matching?.pharmacy_item_id ?? null,
+      ...(matching
+        ? {
+            strengthValue: strengthFromMaster(matching),
+            strengthUnit: matching.strength_unit || line.strengthUnit || "mg",
+          }
+        : {}),
+    });
+  };
+
+  const handleAddMedicine = () => {
+    const newId = `new-${Date.now()}`;
+    setLines((prev) => [
+      ...prev,
+      {
+        pharmacy_slip_item_id: newId,
+        medicine_id: null,
+        medicineName: "",
+        patientDose: "—",
+        brandName: "",
+        strengthValue: "",
+        strengthUnit: "mg",
+        drugRole: "PRIMARY",
+        quantity: "1",
+      },
+    ]);
   };
 
   const handleCreate = async () => {
@@ -204,13 +306,50 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     setSaving(true);
 
     try {
-      // Only the lines still on screen are sent; the backend deletes the
-      // omitted ones, which is how the delete button persists.
-      const res = await pharmacyApi.updateItems(slip.pharmacy_slip_id, {
-        items: lines.map((line) => ({
-          pharmacy_slip_item_id: line.pharmacy_slip_item_id,
+      const itemsToSave: any[] = [];
+
+      for (const line of lines) {
+        let medId = line.medicine_id;
+        // If newly added medicine and user entered a custom name not in medicine_master
+        if (!medId && line.medicineName.trim()) {
+          const found = medicineOptions.find(
+            (m) => m.medicine_name.toLowerCase() === line.medicineName.trim().toLowerCase()
+          );
+          if (found) {
+            medId = found.medicine_id;
+          } else {
+            try {
+              const createRes = await pharmacyApi.createMedicine({
+                medicine_name: line.medicineName.trim(),
+              });
+              medId = createRes.data?.data?.medicine_id ?? null;
+              if (createRes.data?.data) {
+                setMedicineOptions((prev) => [...prev, createRes.data.data]);
+              }
+            } catch (err) {
+              console.error("Could not create medicine in medicine master:", err);
+            }
+          }
+        }
+
+        itemsToSave.push({
+          pharmacy_slip_item_id:
+            line.pharmacy_slip_item_id.startsWith("new-") || line.pharmacy_slip_item_id.startsWith("pending-")
+              ? undefined
+              : line.pharmacy_slip_item_id,
+          medicine_id: medId ?? undefined,
+          drug_name: line.medicineName.trim(),
+          brand_name: line.brandName.trim() || null,
+          dose: line.strengthValue.trim() || null,
+          dose_unit: line.strengthUnit.trim() || null,
           quantity: line.quantity.trim() === "" ? null : Number(line.quantity),
-        })),
+          drug_role: line.drugRole,
+          pharmacy_item_id: line.pharmacy_item_id ?? undefined,
+        });
+      }
+
+      const res = await pharmacyApi.updateItems(slip.pharmacy_slip_id, {
+        items: itemsToSave,
       });
 
       toast({ title: res.data?.message ?? "Pharmacy slip updated" });
@@ -248,11 +387,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     }
   };
 
-  /*
-   * Printing is what finalises the slip: the backend moves a DRAFT to ISSUED
-   * and freezes its quantities. The stamp is persisted so reopening the slip
-   * later shows when the last copy actually left the pharmacy.
-   */
   const handlePrint = async () => {
     if (!slip) return;
 
@@ -262,7 +396,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       await pharmacyApi.markPrinted(slip.pharmacy_slip_id);
       await load();
     } catch (e: any) {
-      // A failed stamp must not block the physical print.
       toast({
         title: "Could not record the print",
         description: e?.response?.data?.message ?? e?.message ?? "Please try again.",
@@ -275,9 +408,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     printSlip();
   };
 
-  // Same popup technique as the doctor's clinical note print: build the
-  // document in a new window and let the browser print it, rather than printing
-  // the whole app page.
   const printSlip = () => {
     const printWindow = window.open("", "_blank");
 
@@ -300,12 +430,14 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     const bodyRows = lines
       .map(
         (line) => `<tr>
-          <td>${escapeHtml(line.medicineName)}${
-            line.brandName !== "—" ? `<div class="sub">${escapeHtml(line.brandName)}</div>` : ""
-          }</td>
-          <td>${escapeHtml(line.dose)}</td>
-          <td>${escapeHtml(line.drugRole)}</td>
+          <td>${escapeHtml(line.medicineName)}</td>
+          <td>${escapeHtml(line.patientDose)}</td>
+          <td>${escapeHtml(line.brandName || "—")}</td>
+          <td>${escapeHtml(
+            line.strengthValue ? `${line.strengthValue}${line.strengthUnit ? ` ${line.strengthUnit}` : ""}` : "—"
+          )}</td>
           <td class="qty">${escapeHtml(line.quantity || "—")}</td>
+          <td>${escapeHtml(DRUG_ROLE_LABELS[line.drugRole] ?? line.drugRole)}</td>
         </tr>`
       )
       .join("");
@@ -322,7 +454,6 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       .lines-table th { text-align: left; background: #f1f5f9; padding: 8px; font-size: 11px; border: 1px solid #cbd5e1; }
       .lines-table td { padding: 8px; border: 1px solid #cbd5e1; }
       .lines-table .qty { text-align: right; }
-      .sub { font-size: 10px; color: #64748b; }
       .foot { font-size: 10px; color: #64748b; margin-top: 16px; }
     </style></head><body>
       <h1>Pharmacy Slip</h1>
@@ -331,7 +462,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       )})</div>
       <table class="meta-table">${headerRows}</table>
       <table class="lines-table">
-        <thead><tr><th>Medicine Name</th><th>Dose</th><th>Type</th><th style="text-align:right">Qty</th></tr></thead>
+        <thead><tr><th>Medicine Name</th><th>Patient_dose</th><th>Brand</th><th>Dose</th><th style="text-align:right">Qty</th><th>Type</th></tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
       <div class="foot">Printed ${escapeHtml(formatDateTime(slip?.printed_at) ?? new Date().toLocaleString())}</div>
@@ -349,9 +480,15 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       filename: `pharmacy-slip-${slip?.pharmacy_slip_id ?? planId}.pdf`,
       columns: [
         { header: "Medicine Name", cell: (line: SlipLine) => line.medicineName },
-        { header: "Dose", cell: (line: SlipLine) => line.dose },
-        { header: "Type", cell: (line: SlipLine) => line.drugRole },
+        { header: "Patient_dose", cell: (line: SlipLine) => line.patientDose },
+        { header: "Brand", cell: (line: SlipLine) => line.brandName || "—" },
+        {
+          header: "Dose",
+          cell: (line: SlipLine) =>
+            line.strengthValue ? `${line.strengthValue}${line.strengthUnit ? ` ${line.strengthUnit}` : ""}` : "—",
+        },
         { header: "Qty", cell: (line: SlipLine) => line.quantity || "—" },
+        { header: "Type", cell: (line: SlipLine) => DRUG_ROLE_LABELS[line.drugRole] ?? line.drugRole },
       ],
       rows: lines,
     });
@@ -427,7 +564,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
               className="text-[#374151] border-[#E5E7EB] hover:border-[#00488D]"
             >
               <Pencil className="w-3.5 h-3.5" />
-              Edit Quantity
+              Edit Slip
             </Button>
           )}
 
@@ -516,41 +653,223 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
             <thead>
               <tr className="border-b border-[#E5E7EB] bg-[#F7F9FB]">
                 <th className="px-6 py-3 text-xs font-semibold text-[#6B7280]">Medicine Name</th>
+                <th className="px-6 py-3 text-xs font-semibold text-[#6B7280]">Patient_dose</th>
+                <th className="px-6 py-3 text-xs font-semibold text-[#6B7280]">Brand</th>
                 <th className="px-6 py-3 text-xs font-semibold text-[#6B7280]">Dose</th>
+                <th className="px-6 py-3 text-xs font-semibold text-[#6B7280] w-28">Qty</th>
                 <th className="px-6 py-3 text-xs font-semibold text-[#6B7280]">Type</th>
-                <th className="px-6 py-3 text-xs font-semibold text-[#6B7280] w-32">Qty</th>
-                {editing && (
-                  <th className="px-6 py-3 text-xs font-semibold text-[#6B7280] w-16 print:hidden">Action</th>
-                )}
+                <th className="px-6 py-3 text-xs font-semibold text-[#6B7280] w-16 print:hidden">Action</th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => (
-                <tr key={line.pharmacy_slip_item_id} className="border-b border-[#E5E7EB] last:border-b-0">
-                  <td className="px-6 py-3">
-                    <div className="text-sm font-semibold text-[#191C1E]">{line.medicineName}</div>
-                    {line.brandName !== "—" && (
-                      <div className="text-[11px] text-[#6B7280]">{line.brandName}</div>
-                    )}
-                  </td>
-                  <td className="px-6 py-3 text-sm text-[#374151]">{line.dose}</td>
-                  <td className="px-6 py-3 text-sm text-[#374151]">{line.drugRole}</td>
-                  <td className="px-6 py-3">
-                    {editing ? (
+              {lines.map((line) => {
+                if (!editing) {
+                  return (
+                    <tr key={line.pharmacy_slip_item_id} className="border-b border-[#E5E7EB] last:border-b-0">
+                      <td className="px-6 py-3">
+                        <div className="text-sm font-semibold text-[#191C1E]">{line.medicineName}</div>
+                      </td>
+                      <td className="px-6 py-3 text-sm text-[#374151]">
+                        {line.patientDose || "—"}
+                      </td>
+                      <td className="px-6 py-3 text-sm text-[#374151]">
+                        {line.brandName || "—"}
+                      </td>
+                      <td className="px-6 py-3 text-sm text-[#374151]">
+                        {line.strengthValue
+                          ? `${line.strengthValue}${line.strengthUnit ? ` ${line.strengthUnit}` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="px-6 py-3 text-sm text-[#374151]">
+                        {line.quantity || "—"}
+                      </td>
+                      <td className="px-6 py-3 text-sm text-[#374151]">
+                        {DRUG_ROLE_LABELS[line.drugRole] ?? line.drugRole}
+                      </td>
+                      <td className="px-6 py-3 print:hidden">
+                        {editable ? (
+                          <button
+                            type="button"
+                            onClick={() => removeLine(line.pharmacy_slip_item_id)}
+                            className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md text-red-600 hover:bg-red-50 hover:border-red-200 transition-colors"
+                            aria-label={`Remove ${line.medicineName}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Edit mode row
+                const isNew =
+                  line.pharmacy_slip_item_id.startsWith("new-") ||
+                  line.pharmacy_slip_item_id.startsWith("pending-");
+                const availablePharmItems = line.medicine_id
+                  ? masterItemsByMedId.get(line.medicine_id) ?? []
+                  : [];
+                const mfrs = Array.from(
+                  new Set(availablePharmItems.map((p) => p.manufacturer_name).filter(Boolean))
+                ) as string[];
+
+                return (
+                  <tr
+                    key={line.pharmacy_slip_item_id}
+                    className="border-b border-[#E5E7EB] last:border-b-0 bg-[#FAFAFA]/60"
+                  >
+                    {/* Medicine Name */}
+                    <td className="px-6 py-3 min-w-[220px]">
+                      {isNew ? (
+                        <SingleSelectDropdown
+                          options={medicineOptions.map((m) => ({
+                            label: m.medicine_name,
+                            value: m.medicine_id,
+                            hint: m.dosage_form || undefined,
+                          }))}
+                          value={line.medicine_id ?? ""}
+                          valueLabel={line.medicineName}
+                          onValueChange={(medId) => {
+                            const med = medicineOptions.find((m) => m.medicine_id === medId);
+                            if (!med) return;
+                            const items = masterItemsByMedId.get(medId) ?? [];
+                            // Default to the first brand; its dose and unit fill in from the master row.
+                            const firstPharm = items[0];
+                            updateLine(line.pharmacy_slip_item_id, {
+                              medicine_id: med.medicine_id,
+                              medicineName: med.medicine_name,
+                              brandName: firstPharm?.manufacturer_name || "",
+                              strengthValue: firstPharm ? strengthFromMaster(firstPharm) : "",
+                              strengthUnit: firstPharm?.strength_unit || "mg",
+                              pharmacy_item_id: firstPharm?.pharmacy_item_id || null,
+                            });
+                          }}
+                          onCreateOption={(typed) => {
+                            updateLine(line.pharmacy_slip_item_id, {
+                              medicine_id: null,
+                              medicineName: typed.trim(),
+                              pharmacy_item_id: null,
+                            });
+                          }}
+                          placeholder="Select medicine or type new..."
+                          createLabel="+ Add to master"
+                          className="h-8 text-xs min-w-[200px]"
+                        />
+                      ) : (
+                        <div className="text-sm font-semibold text-[#191C1E]">{line.medicineName}</div>
+                      )}
+                    </td>
+
+                    {/* Patient_dose */}
+                    <td className="px-6 py-3 text-sm text-[#374151]">
+                      {line.patientDose || "—"}
+                    </td>
+
+                    {/* Brand */}
+                    <td className="px-6 py-3 min-w-[170px]">
+                      <SingleSelectDropdown
+                        options={mfrs.map((m) => ({ label: m, value: m }))}
+                        value={line.brandName}
+                        valueLabel={line.brandName}
+                        onValueChange={(selectedBrand) => {
+                          onBrandChange(line.pharmacy_slip_item_id, selectedBrand);
+                        }}
+                        onCreateOption={(typedBrand) => {
+                          updateLine(line.pharmacy_slip_item_id, {
+                            brandName: typedBrand.trim(),
+                            pharmacy_item_id: null,
+                          });
+                        }}
+                        placeholder="Select brand..."
+                        createLabel="Use custom"
+                        className="h-8 text-xs min-w-[150px]"
+                      />
+                    </td>
+
+                    {/* Dose + unit: fetched from the selected brand's master row; typed only when it has none */}
+                    <td className="px-6 py-3">
+                      {(() => {
+                        const master = findMasterRow(line);
+                        const doseFromMaster = master?.strength_value != null;
+                        const unitFromMaster = Boolean(master?.strength_unit);
+                        const readOnlyBox =
+                          "h-8 flex items-center rounded-md border border-[#E5E7EB] bg-[#F2F4F6] px-2 text-xs text-[#374151]";
+                        return (
+                          <div className="flex items-center gap-1.5 min-w-[180px]">
+                            {doseFromMaster ? (
+                              <div className={`${readOnlyBox} w-20`} title="From brand strength">
+                                {line.strengthValue || "—"}
+                              </div>
+                            ) : (
+                              <Input
+                                type="text"
+                                value={line.strengthValue}
+                                onChange={(e) =>
+                                  updateLine(line.pharmacy_slip_item_id, { strengthValue: e.target.value })
+                                }
+                                placeholder="Dose"
+                                className="h-8 w-20 text-xs"
+                              />
+                            )}
+                            {unitFromMaster ? (
+                              <div className={`${readOnlyBox}`} title="From brand strength unit">
+                                {line.strengthUnit}
+                              </div>
+                            ) : (
+                              <select
+                                value={line.strengthUnit}
+                                onChange={(e) =>
+                                  updateLine(line.pharmacy_slip_item_id, { strengthUnit: e.target.value })
+                                }
+                                className="h-8 rounded-md border border-[#E5E7EB] bg-white px-2 text-xs text-[#374151] focus:border-[#00488D] outline-none"
+                              >
+                                {DOSE_UNITS.map((unit) => (
+                                  <option key={unit} value={unit}>
+                                    {unit}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
+
+                    {/* Qty */}
+                    <td className="px-6 py-3">
                       <Input
                         type="number"
                         min={0}
                         step={1}
                         value={line.quantity}
-                        onChange={(e) => updateLine(line.pharmacy_slip_item_id, { quantity: e.target.value })}
+                        onChange={(e) =>
+                          updateLine(line.pharmacy_slip_item_id, { quantity: e.target.value })
+                        }
                         placeholder="—"
-                        className="h-8 w-24 text-xs"
+                        className="h-8 w-20 text-xs"
                       />
-                    ) : (
-                      <span className="text-sm text-[#374151]">{line.quantity || "—"}</span>
-                    )}
-                  </td>
-                  {editing && (
+                    </td>
+
+                    {/* Type */}
+                    <td className="px-6 py-3 min-w-[130px]">
+                      <select
+                        value={line.drugRole}
+                        onChange={(e) =>
+                          updateLine(line.pharmacy_slip_item_id, { drugRole: e.target.value })
+                        }
+                        className="h-8 rounded-md border border-[#E5E7EB] bg-white px-2 text-xs text-[#374151] focus:border-[#00488D] outline-none"
+                      >
+                        {Object.entries(DRUG_ROLE_LABELS).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    {/* Delete Action */}
                     <td className="px-6 py-3 print:hidden">
                       <button
                         type="button"
@@ -561,11 +880,26 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
-                  )}
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+
+          {editing && (
+            <div className="p-4 border-t border-[#E5E7EB] bg-[#F7F9FB] flex items-center justify-start print:hidden">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleAddMedicine}
+                className="inline-flex items-center gap-1.5 border-dashed border-[#004785] text-[#004785] hover:bg-blue-50 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Medicine
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
