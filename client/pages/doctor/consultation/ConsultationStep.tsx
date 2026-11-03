@@ -211,8 +211,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     adviceSectionRef.current?.save(targetEncounter) ??
     Promise.resolve<AdviceSaveResult>("empty");
 
-  const [consultationNotes, setConsultationNotes] = useState("");
-
   const [historyOfPresentIllness, setHistoryOfPresentIllness] = useState("");
 
   const [patientHistory, setPatientHistory] = useState("");
@@ -375,18 +373,18 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
   const [expandedSections, setExpandedSections] = useState<{
     summary: boolean;
+    patientDetails: boolean;
     personalHistory: boolean;
     generalExamination: boolean;
     systemicExamination: boolean;
-    patientDetails: boolean;
     investigations: boolean;
     advice: boolean;
   }>({
     summary: true,
+    patientDetails: false,
     personalHistory: false,
     generalExamination: false,
     systemicExamination: false,
-    patientDetails: false,
     investigations: false,
     advice: false,
   });
@@ -398,10 +396,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const expandAll = () => {
     setExpandedSections({
       summary: true,
+      patientDetails: true,
       personalHistory: true,
       generalExamination: true,
       systemicExamination: true,
-      patientDetails: true,
       investigations: true,
       advice: true,
     });
@@ -410,10 +408,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const collapseAll = () => {
     setExpandedSections({
       summary: false,
+      patientDetails: false,
       personalHistory: false,
       generalExamination: false,
       systemicExamination: false,
-      patientDetails: false,
       investigations: false,
       advice: false,
     });
@@ -454,31 +452,24 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     /* Previous Reports free text. */
     setReportsText(encounter?.previous_reports ?? "");
 
-    /* Consultation Notes and Past History share the encounter's
-       clinical_notes column, separated by a [Past History] marker
-       (see proceedNext). A saved draft takes precedence over the
-       encounter so in-session work is never clobbered. */
+    /* Past History lives on the encounter's clinical_notes column. A saved
+       draft takes precedence over the encounter so in-session work is never
+       clobbered. */
     const draft = readConsultationDraft(encounter?.encounter_no, patientDisplayId);
-    const draftNotes: string = draft.consultationNotes ?? "";
     const draftPast: string = draft.pastHistory ?? "";
 
-    if (draftNotes) {
-      setConsultationNotes(draftNotes);
+    if (draftPast) {
       setPastHistory(draftPast);
       return;
     }
 
     const rawNotes = encounter?.clinical_notes ?? "";
     const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
-    if (markerIndex === -1) {
-      setConsultationNotes(rawNotes);
-      setPastHistory("");
-    } else {
-      setConsultationNotes(rawNotes.slice(0, markerIndex).trim());
-      setPastHistory(
-        rawNotes.slice(markerIndex + PAST_HISTORY_MARKER.length).trim()
-      );
-    }
+    setPastHistory(
+      markerIndex === -1
+        ? rawNotes.trim()
+        : rawNotes.slice(markerIndex + PAST_HISTORY_MARKER.length).trim()
+    );
   }, [encounter?.encounter_no]);
 
   /* ============================================================
@@ -1220,7 +1211,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     const data = {
       patient: patientName,
       patientId: patientDisplayId,
-      consultationNotes,
       pastHistory,
       adviceRows: adviceSectionRef.current?.getDraftRows() ?? [],
       adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
@@ -1278,19 +1268,9 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       previous_reports?: string;
     } = {};
 
-    /* Consultation Notes + Past History are combined into the single
-       clinical_notes column, separated by the [Past History] marker so
-       they can be split back on load. */
-    const combinedNotes = [
-      consultationNotes.trim(),
-      ...(pastHistory.trim()
-        ? [`${PAST_HISTORY_MARKER}\n${pastHistory.trim()}`]
-        : []),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    if (combinedNotes) {
-      payload.clinical_notes = combinedNotes;
+    /* Past History is persisted to the encounter's clinical_notes column. */
+    if (pastHistory.trim()) {
+      payload.clinical_notes = pastHistory.trim();
     }
     if (historyOfPresentIllness.trim()) {
       payload.symptoms = historyOfPresentIllness;
@@ -1571,10 +1551,31 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     <div
         className="relative flex w-full flex-col gap-5"
       >
-      {/* =================================================
+        {/* =================================================
+      EXPAND ALL / COLLAPSE ALL CONTROLS
+    ================================================= 
+    <div className="flex w-full items-center justify-between gap-2 px-2 py-2 border-b border-slate-100">
+      <button
+        type="button"
+        onClick={expandAll}
+        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold leading-4 text-slate-700 transition hover:bg-slate-50"
+      >
+        <ChevronsDownUp className="h-3.5 w-3.5 shrink-0" />
+        <span>Expand All</span>
+      </button>
+      <button
+        type="button"
+        onClick={collapseAll}
+        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold leading-4 text-slate-700 transition hover:bg-slate-50"
+      >
+        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" />
+        <span>Collapse All</span>
+      </button>
+    </div>*/}
+    
+          {/* =================================================
       CONSULTATION SUMMARY
     ================================================= */}
-
     <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
     <button
@@ -1763,21 +1764,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
     <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
 
-      {/* NOTES */}
-
-      <div className="flex flex-col gap-2">
-
-        <label className="text-[10px] uppercase leading-4 text-slate-800">
-          Consultation Notes
-        </label>
-
-        <VoiceToText
-          value={consultationNotes}
-          onChange={(text) => setConsultationNotes(text)}
-          placeholder="Enter consultation notes..."
-        />
-
-        {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
+      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
             Styled like the Symptoms / Allergies sections in
             ClinicalDetailsSection (uppercase tracked label +
             white bordered container). */}
@@ -1800,8 +1787,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
 
           </div>
-
-      </div>
 
       {/* CLINICAL */}
 
@@ -1841,26 +1826,342 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     </section>
 
     {/* =================================================
-      EXPAND ALL / COLLAPSE ALL CONTROLS
+      PATIENT DETAILS
     ================================================= */}
-    <div className="flex w-full items-center justify-between gap-2 px-2 py-2 border-b border-slate-100">
-      <button
-        type="button"
-        onClick={expandAll}
-        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold leading-4 text-slate-700 transition hover:bg-slate-50"
-      >
-        <ChevronsDownUp className="h-3.5 w-3.5 shrink-0" />
-        <span>Expand All</span>
-      </button>
-      <button
-        type="button"
-        onClick={collapseAll}
-        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold leading-4 text-slate-700 transition hover:bg-slate-50"
-      >
-        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" />
-        <span>Collapse All</span>
-      </button>
+
+    <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+    <button
+      type="button"
+      onClick={() => toggleSection("patientDetails")}
+      className="flex w-full items-center justify-between gap-2 px-2 py-1.5 border-b border-slate-100"
+    >
+      <div className="flex items-center gap-2">
+        <div className="text-[14px] font-bold uppercase leading-7 text-slate-800 tracking-wide">
+          Patient Details
+        </div>
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 transition-transform duration-200",
+            expandedSections.patientDetails && "rotate-180",
+          )}
+        />
+      </div>
+    </button>
+    {expandedSections.patientDetails && (
+      <div className="pt-4">
+
+    {/* PATIENT DETAILS GRID */}
+
+    <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
+
+      {/* LEFT COLUMN: HOPI + REPORTS */}
+
+      <div className="flex w-full flex-col gap-4">
+
+      {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
+          History of Present Illness(HOPI)
+        </label>
+
+        <VoiceToText
+          value={historyOfPresentIllness}
+          onChange={(text) => setHistoryOfPresentIllness(text)}
+          placeholder="Type the history of present illness..."
+        />
+
+      </div>
+
+      {/* REPORTS (PREVIOUS) */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
+          Reports (Previous)
+        </label>
+
+        {/* Not in the list: the typed name is used for this patient's
+            report only (lab_test_master is unchanged). */}
+        <MultiSelectDropdown
+          options={[
+            ...labTests.map((test) => ({
+              label: test.test_name,
+              value: String(test.lab_test_id),
+            })),
+            ...selectedReports
+              .filter(
+                (key) =>
+                  !labTests.some((test) => String(test.lab_test_id) === key)
+              )
+              .map((key) => ({ label: key, value: key, hint: "Custom" })),
+          ]}
+          value={selectedReports}
+          onValueChange={handleReportsChange}
+          onCreateOption={selectReportTest}
+          createLabel="Use"
+          placeholder="Select or type test(s)"
+        />
+
+        {/* DATE / RESULT / IMPRESSION per selected test (encounter_report). */}
+
+        {selectedReports.length > 0 && (
+          <div className="flex w-full flex-col gap-3 pt-1">
+
+            {selectedReports.map((key) => (
+              <div
+                key={key}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+              >
+
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                  {reportTestName(key)}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={reportDetails[key]?.date ?? ""}
+                    onChange={(event) =>
+                      updateReportDetail(key, { date: event.target.value })
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Enter Result
+                  </label>
+                  <VoiceToText
+                    value={reportDetails[key]?.result ?? ""}
+                    onChange={(text) => updateReportDetail(key, { result: text })}
+                    placeholder="Type the result..."
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Enter Impression
+                  </label>
+                  <VoiceToText
+                    value={reportDetails[key]?.impression ?? ""}
+                    onChange={(text) =>
+                      updateReportDetail(key, { impression: text })
+                    }
+                    placeholder="Type the impression..."
+                  />
+                </div>
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
+        <VoiceToText
+          value={reportsText}
+          onChange={(text) => setReportsText(text)}
+          placeholder="Type previous reports..."
+        />
+
+      </div>
+
+      </div>
+
+      {/* RIGHT COLUMN: PAST HISTORY */}
+
+      <div className="flex w-full flex-col gap-4">
+
+      {/* PAST HISTORY */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
+          Past History
+        </label>
+
+        {/* treatment_type_master; "+ Add" adds a new type to it. */}
+        <MultiSelectDropdown
+          options={withSelected(
+            treatmentTypeOptions.map((option) => option.name),
+            selectedTreatmentTypes
+          )}
+          value={selectedTreatmentTypes}
+          onValueChange={handleTreatmentTypesChange}
+          onCreateOption={(typed) =>
+            addMasterOption(
+              () => consultationApi.createCustomTreatmentType({ name: typed }),
+              setTreatmentTypeOptions,
+              selectTreatmentType,
+              "treatment type"
+            )
+          }
+          placeholder="Select treatment(s)"
+        />
+
+        {/* DATE / BRIEF NOTE / TREATMENT RESPONSE per selected treatment
+            (encounter_past_treatment). */}
+
+        {selectedTreatmentTypes.length > 0 && (
+          <div className="flex w-full flex-col gap-3 pt-1">
+
+            {selectedTreatmentTypes.map((name) => (
+              <div
+                key={name}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+              >
+
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                  {name}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={treatmentDetails[name]?.date ?? ""}
+                    onChange={(event) =>
+                      updateTreatmentDetail(name, { date: event.target.value })
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Enter Brief Note
+                  </label>
+                  <VoiceToText
+                    value={treatmentDetails[name]?.note ?? ""}
+                    onChange={(text) => updateTreatmentDetail(name, { note: text })}
+                    placeholder="Type a brief note..."
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Treatment Response
+                  </label>
+                  <VoiceToText
+                    value={treatmentDetails[name]?.response ?? ""}
+                    onChange={(text) =>
+                      updateTreatmentDetail(name, { response: text })
+                    }
+                    placeholder="Type the treatment response..."
+                  />
+                </div>
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
+        <VoiceToText
+          value={pastHistory}
+          onChange={(text) => setPastHistory(text)}
+          placeholder="Type the patient's past history..."
+        />
+
+      </div>
+
+      {/* MOLECULAR TESTING */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-[10px] uppercase leading-4 text-slate-800">
+          Molecular Testing
+        </label>
+
+        {/* Not in the list: the typed name is used for this patient only. */}
+        <MultiSelectDropdown
+          options={withSelected(molecularTestOptions, selectedMolecularTests)}
+          value={selectedMolecularTests}
+          onValueChange={handleMolecularTestsChange}
+          onCreateOption={selectMolecularTest}
+          createLabel="Use"
+          placeholder="Select or type test(s)"
+        />
+
+        {/* DATE / RESULT / IMPRESSION per selected test
+            (encounter_molecular_test). */}
+
+        {selectedMolecularTests.length > 0 && (
+          <div className="flex w-full flex-col gap-3 pt-1">
+
+            {selectedMolecularTests.map((name) => (
+              <div
+                key={name}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+              >
+
+                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
+                  {name}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={molecularTestDetails[name]?.date ?? ""}
+                    onChange={(event) =>
+                      updateMolecularTestDetail(name, { date: event.target.value })
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Enter Result
+                  </label>
+                  <VoiceToText
+                    value={molecularTestDetails[name]?.result ?? ""}
+                    onChange={(text) =>
+                      updateMolecularTestDetail(name, { result: text })
+                    }
+                    placeholder="Type the result..."
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
+                    Enter Impression
+                  </label>
+                  <VoiceToText
+                    value={molecularTestDetails[name]?.impression ?? ""}
+                    onChange={(text) =>
+                      updateMolecularTestDetail(name, { impression: text })
+                    }
+                    placeholder="Type the impression..."
+                  />
+                </div>
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
+      </div>
+
+      </div>
+
     </div>
+    </div>
+    )}
+    </section>
+
 
     {/* =================================================
       PERSONAL HISTORY
@@ -2394,11 +2695,13 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
             setGeneralExamOptions,
             addToSelection(setGeneralExamOthers),
             "finding"
-          )
-        }
-        placeholder="Search or add other findings"
+        )
+      }
+      placeholder="Search or add other findings"
       />
-    </div>
+
+      </div>
+
     </div>
     )}
     </section>
@@ -2496,342 +2799,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     )}
     </section>
 
-    {/* =================================================
-      PATIENT DETAILS
-    ================================================= */}
 
-    <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
-
-    <button
-      type="button"
-      onClick={() => toggleSection("patientDetails")}
-      className="flex w-full items-center justify-between gap-2 px-2 py-1.5 border-b border-slate-100"
-    >
-      <div className="flex items-center gap-2">
-        <div className="text-[14px] font-bold uppercase leading-7 text-slate-800 tracking-wide">
-          Patient Details
-        </div>
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 shrink-0 transition-transform duration-200",
-            expandedSections.patientDetails && "rotate-180",
-          )}
-        />
-      </div>
-    </button>
-    {expandedSections.patientDetails && (
-      <div className="pt-4">
-
-    {/* PATIENT DETAILS GRID */}
-
-    <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
-
-      {/* LEFT COLUMN: HOPI + REPORTS */}
-
-      <div className="flex w-full flex-col gap-4">
-
-      {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
-
-      <div className="flex flex-col gap-2">
-
-        <label className="text-[10px] uppercase leading-4 text-slate-800">
-          History of Present Illness(HOPI)
-        </label>
-
-        <VoiceToText
-          value={historyOfPresentIllness}
-          onChange={(text) => setHistoryOfPresentIllness(text)}
-          placeholder="Type the history of present illness..."
-        />
-
-      </div>
-
-      {/* REPORTS (PREVIOUS) */}
-
-      <div className="flex flex-col gap-2">
-
-        <label className="text-[10px] uppercase leading-4 text-slate-800">
-          Reports (Previous)
-        </label>
-
-        {/* Not in the list: the typed name is used for this patient's
-            report only (lab_test_master is unchanged). */}
-        <MultiSelectDropdown
-          options={[
-            ...labTests.map((test) => ({
-              label: test.test_name,
-              value: String(test.lab_test_id),
-            })),
-            ...selectedReports
-              .filter(
-                (key) =>
-                  !labTests.some((test) => String(test.lab_test_id) === key)
-              )
-              .map((key) => ({ label: key, value: key, hint: "Custom" })),
-          ]}
-          value={selectedReports}
-          onValueChange={handleReportsChange}
-          onCreateOption={selectReportTest}
-          createLabel="Use"
-          placeholder="Select or type test(s)"
-        />
-
-        {/* DATE / RESULT / IMPRESSION per selected test (encounter_report). */}
-
-        {selectedReports.length > 0 && (
-          <div className="flex w-full flex-col gap-3 pt-1">
-
-            {selectedReports.map((key) => (
-              <div
-                key={key}
-                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
-              >
-
-                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
-                  {reportTestName(key)}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={reportDetails[key]?.date ?? ""}
-                    onChange={(event) =>
-                      updateReportDetail(key, { date: event.target.value })
-                    }
-                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Enter Result
-                  </label>
-                  <VoiceToText
-                    value={reportDetails[key]?.result ?? ""}
-                    onChange={(text) => updateReportDetail(key, { result: text })}
-                    placeholder="Type the result..."
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Enter Impression
-                  </label>
-                  <VoiceToText
-                    value={reportDetails[key]?.impression ?? ""}
-                    onChange={(text) =>
-                      updateReportDetail(key, { impression: text })
-                    }
-                    placeholder="Type the impression..."
-                  />
-                </div>
-
-              </div>
-            ))}
-
-          </div>
-        )}
-
-        <VoiceToText
-          value={reportsText}
-          onChange={(text) => setReportsText(text)}
-          placeholder="Type previous reports..."
-        />
-
-      </div>
-
-      </div>
-
-      {/* RIGHT COLUMN: PAST HISTORY */}
-
-      <div className="flex w-full flex-col gap-4">
-
-      {/* PAST HISTORY */}
-
-      <div className="flex flex-col gap-2">
-
-        <label className="text-[10px] uppercase leading-4 text-slate-800">
-          Past History
-        </label>
-
-        {/* treatment_type_master; "+ Add" adds a new type to it. */}
-        <MultiSelectDropdown
-          options={withSelected(
-            treatmentTypeOptions.map((option) => option.name),
-            selectedTreatmentTypes
-          )}
-          value={selectedTreatmentTypes}
-          onValueChange={handleTreatmentTypesChange}
-          onCreateOption={(typed) =>
-            addMasterOption(
-              () => consultationApi.createCustomTreatmentType({ name: typed }),
-              setTreatmentTypeOptions,
-              selectTreatmentType,
-              "treatment type"
-            )
-          }
-          placeholder="Select treatment(s)"
-        />
-
-        {/* DATE / BRIEF NOTE / TREATMENT RESPONSE per selected treatment
-            (encounter_past_treatment). */}
-
-        {selectedTreatmentTypes.length > 0 && (
-          <div className="flex w-full flex-col gap-3 pt-1">
-
-            {selectedTreatmentTypes.map((name) => (
-              <div
-                key={name}
-                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
-              >
-
-                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
-                  {name}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={treatmentDetails[name]?.date ?? ""}
-                    onChange={(event) =>
-                      updateTreatmentDetail(name, { date: event.target.value })
-                    }
-                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Enter Brief Note
-                  </label>
-                  <VoiceToText
-                    value={treatmentDetails[name]?.note ?? ""}
-                    onChange={(text) => updateTreatmentDetail(name, { note: text })}
-                    placeholder="Type a brief note..."
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Treatment Response
-                  </label>
-                  <VoiceToText
-                    value={treatmentDetails[name]?.response ?? ""}
-                    onChange={(text) =>
-                      updateTreatmentDetail(name, { response: text })
-                    }
-                    placeholder="Type the treatment response..."
-                  />
-                </div>
-
-              </div>
-            ))}
-
-          </div>
-        )}
-
-        <VoiceToText
-          value={pastHistory}
-          onChange={(text) => setPastHistory(text)}
-          placeholder="Type the patient's past history..."
-        />
-
-      </div>
-
-      {/* MOLECULAR TESTING */}
-
-      <div className="flex flex-col gap-2">
-
-        <label className="text-[10px] uppercase leading-4 text-slate-800">
-          Molecular Testing
-        </label>
-
-        {/* Not in the list: the typed name is used for this patient only. */}
-        <MultiSelectDropdown
-          options={withSelected(molecularTestOptions, selectedMolecularTests)}
-          value={selectedMolecularTests}
-          onValueChange={handleMolecularTestsChange}
-          onCreateOption={selectMolecularTest}
-          createLabel="Use"
-          placeholder="Select or type test(s)"
-        />
-
-        {/* DATE / RESULT / IMPRESSION per selected test
-            (encounter_molecular_test). */}
-
-        {selectedMolecularTests.length > 0 && (
-          <div className="flex w-full flex-col gap-3 pt-1">
-
-            {selectedMolecularTests.map((name) => (
-              <div
-                key={name}
-                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3"
-              >
-
-                <div className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-500">
-                  {name}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={molecularTestDetails[name]?.date ?? ""}
-                    onChange={(event) =>
-                      updateMolecularTestDetail(name, { date: event.target.value })
-                    }
-                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-[10px] leading-5 text-slate-700 outline-none focus:border-slate-400"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Enter Result
-                  </label>
-                  <VoiceToText
-                    value={molecularTestDetails[name]?.result ?? ""}
-                    onChange={(text) =>
-                      updateMolecularTestDetail(name, { result: text })
-                    }
-                    placeholder="Type the result..."
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase leading-[15px] tracking-[0.5px] text-slate-800">
-                    Enter Impression
-                  </label>
-                  <VoiceToText
-                    value={molecularTestDetails[name]?.impression ?? ""}
-                    onChange={(text) =>
-                      updateMolecularTestDetail(name, { impression: text })
-                    }
-                    placeholder="Type the impression..."
-                  />
-                </div>
-
-              </div>
-            ))}
-
-          </div>
-        )}
-
-      </div>
-
-      </div>
-
-    </div>
-    </div>
-    )}
-    </section>
 
     {/* =================================================
       INVESTIGATIONS
