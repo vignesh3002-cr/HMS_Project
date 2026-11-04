@@ -7,6 +7,7 @@ import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 import { labReportApi, LabReportRecord, parseReportComment } from "@/api/labReport.api";
+import { buildLabReportPdfDataUri } from "@/utils/labReportPdf";
 import {
   INITIAL_TESTING_SAMPLES,
   TestingSampleItem,
@@ -1027,38 +1028,79 @@ export default function ReportGeneration() {
         localStorage.setItem(`report_approved_smp_${selectedReport.sampleId}`, "GENERATED");
       }
 
-      // If it corresponds to a real backend lab order, call the backend API
-      if (
-        selectedReport.requestId &&
-        !selectedReport.requestId.startsWith("TRF") &&
-        !selectedReport.requestId.startsWith("REQ") &&
-        !selectedReport.requestId.startsWith("BC")
-      ) {
-        labReportApi
-          .create({
-            lab_order_id: selectedReport.requestId,
-            report_number: selectedReport.reportId,
-            report_status: "Generated",
-            digital_signature: digitalSignature || undefined,
-            report_comment: JSON.stringify({
-              text: approvalRemarks,
+      /* Save the report row (with its PDF) before flipping item_status.
+         The doctor's "View Report" is enabled by that status and reads the
+         report row, so the report must exist first. */
+      void (async () => {
+        // If it corresponds to a real backend lab order, call the backend API
+        if (
+          selectedReport.requestId &&
+          !selectedReport.requestId.startsWith("TRF") &&
+          !selectedReport.requestId.startsWith("REQ") &&
+          !selectedReport.requestId.startsWith("BC")
+        ) {
+          let reportFile: string | undefined;
+          try {
+            reportFile = await buildLabReportPdfDataUri({
+              reportNumber: selectedReport.reportId,
+              orderId: selectedReport.requestId,
+              generatedAt: new Date(),
+              testName: selectedReport.testPanel,
+              patientName: selectedReport.patientName,
+              patientAgeGender: selectedReport.patientAgeGender,
+              doctor: selectedReport.doctorName,
+              parameters: selectedReport.parameters.map((parameter) => ({
+                name: parameter.parameter,
+                value: parameter.result,
+                unit: parameter.unit,
+                referenceRange: parameter.referenceRange,
+                status: parameter.status,
+              })),
+              notes: approvalRemarks,
               clinicalCorrelation,
-              overallDecision: "Approved",
-              parameters: selectedReport.parameters,
-            }),
-          })
-          .catch((e) => console.warn("Could not save report to backend:", e));
-      }
+              approvedBy: approverName,
+            });
+          } catch (error) {
+            console.warn("Could not generate the report PDF:", error);
+          }
 
-      const realItemId = selectedReport.id.replace("item-", "").replace("rep-", "");
-      if (realItemId && !realItemId.startsWith("s") && !realItemId.startsWith("ts-")) {
-        labOrderItemApi
-          .update(realItemId, {
-            item_status: "Report Generated",
-            remarks: approvalRemarks || "Report Approved & Digitally Signed",
-          })
-          .catch((e) => console.warn("Could not update lab order item status:", e));
-      }
+          try {
+            await labReportApi.create({
+              lab_order_id: selectedReport.requestId,
+              report_number: selectedReport.reportId,
+              report_status: "Generated",
+              report_file: reportFile,
+              digital_signature: digitalSignature || undefined,
+              report_comment: JSON.stringify({
+                text: approvalRemarks,
+                clinicalCorrelation,
+                overallDecision: "Approved",
+                parameters: selectedReport.parameters,
+              }),
+            });
+          } catch (e) {
+            console.warn("Could not save report to backend:", e);
+          }
+        }
+
+        const realItemId = selectedReport.id
+          .replace("item-", "")
+          .replace("rep-", "");
+        if (
+          realItemId &&
+          !realItemId.startsWith("s") &&
+          !realItemId.startsWith("ts-")
+        ) {
+          try {
+            await labOrderItemApi.update(realItemId, {
+              item_status: "Report Generated",
+              remarks: approvalRemarks || "Report Approved & Digitally Signed",
+            });
+          } catch (e) {
+            console.warn("Could not update lab order item status:", e);
+          }
+        }
+      })();
     } catch (err) {
       console.warn("Could not persist approval state:", err);
     }
