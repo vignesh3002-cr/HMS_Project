@@ -8,6 +8,14 @@ export interface ImmunizationRecord {
   is_active: boolean;
 }
 
+export interface LineOfTherapyRecord {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+}
+
 export interface DrugConsumptionRecord {
   id: number;
   code: string;
@@ -171,6 +179,18 @@ export const consultationApi = {
   createCustomImmunization: (data: { name: string; description?: string }) =>
     API.post<{ success: boolean; message: string; data: ImmunizationRecord }>(
       "/consultation/masters/immunizations/custom",
+      data,
+    ),
+
+  getLineOfTherapies: (search?: string) =>
+    API.get<{ success: boolean; data: LineOfTherapyRecord[] }>(
+      "/consultation/masters/line-of-therapies",
+      { params: search ? { search } : undefined },
+    ),
+
+  createCustomLineOfTherapy: (data: { name: string; description?: string }) =>
+    API.post<{ success: boolean; message: string; data: LineOfTherapyRecord }>(
+      "/consultation/masters/line-of-therapies/custom",
       data,
     ),
 
