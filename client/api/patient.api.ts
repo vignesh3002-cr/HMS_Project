@@ -103,9 +103,11 @@ export interface UpdatePatientPayload {
 
 // Shape actually returned by GET /patients — matches the real `patient_bio_data`
 // columns plus the `branch`/`user_table` relations the repository includes
-// (see Backend/HMS_Backend patient.repository.ts getPatients). Note this does
-// NOT include diagnosis or assigned-doctor info — getPatients doesn't join
-// patient_history/appointment_history, so that data isn't available yet.
+// (see Backend/HMS_Backend patient.repository.ts getPatients). It does NOT
+// carry diagnosis or assigned-doctor info directly: `diagnosis_name` is derived
+// server-side in patient.service.ts as the cancer type of the patient's OPEN
+// treatment plan (ACTIVE / PLANNED) only — COMPLETED treatment or no plan at
+// all yields null, which the UI renders as "Not recorded".
 export interface PatientRecord {
   patient_id: string;
   user_id: string | null;
@@ -140,6 +142,9 @@ export interface PatientRecord {
   referral_address?: string | null;
   referral_mail?: string | null;
   referral_branch_name?: string | null;
+  // Derived server-side (see comment above): cancer type of an OPEN treatment
+  // plan (ACTIVE / PLANNED) only; null for COMPLETED or no plan.
+  diagnosis_name?: string | null;
   branch: { branch_name: string | null } | null;
   user_table: { role_type: string | null; user_status: number | null; created_at?: string | null } | null;
 }
