@@ -1060,8 +1060,8 @@ const Summary: React.FC<{
         setDischargeMedications(
           records.map((item) => ({
             drug:
-              item.medicine_master?.medicine_name ||
               item.medicine_master?.generic_name ||
+              item.medicine_master?.medicine_name ||
               "",
             form: item.drug_from || item.medicine_master?.dosage_form || "",
             dose:
@@ -1299,11 +1299,11 @@ const Summary: React.FC<{
           })
           .map(({ dilution, item }) => ({
             drug:
-              dilution.medicine_master?.medicine_name ||
+              dilution.medicine_master?.generic_name ||
               dilution.drug_brand_name ||
               (!dilution.medicine_id || dilution.medicine_id === item?.medicine_id
-                ? item?.medicine_master?.medicine_name ||
-                  item?.medicine_master?.generic_name
+                ? item?.medicine_master?.generic_name ||
+                  item?.medicine_master?.medicine_name
                 : "") ||
               "",
             form: dilution.form ?? "",
@@ -1381,9 +1381,9 @@ const Summary: React.FC<{
     slipItems.length > 0
       ? slipItems.map((item) => ({
           drug:
-            item.drug_name ||
-            item.medicine_master?.medicine_name ||
             item.medicine_master?.generic_name ||
+            item.medicine_master?.medicine_name ||
+            item.drug_name ||
             "",
           form:
             item.dosage_form ||

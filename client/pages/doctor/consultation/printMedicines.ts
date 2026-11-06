@@ -86,8 +86,8 @@ const escapeRegExp = (value: string) =>
 
 /* The medicine the plan names, else the generic, else the typed name. */
 export const medicineName = (item: PrintableMedicine): string =>
-  item.medicine_master?.medicine_name ||
   item.medicine_master?.generic_name ||
+  item.medicine_master?.medicine_name ||
   item.drug_name ||
   "";
 

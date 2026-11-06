@@ -391,6 +391,7 @@ export function buildSlipSourceRows({
         medicineId: text(item.medicine_id),
         genericId: text(medicine?.generic_id),
         drugName:
+          text(medicine?.generic_name) ||
           text(medicine?.medicine_name) ||
           text(item.drug_name) ||
           "",

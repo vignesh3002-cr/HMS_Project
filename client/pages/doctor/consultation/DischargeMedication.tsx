@@ -451,8 +451,8 @@ const DischargeMedication: React.FC<{
       planItemId: "",
       drugSequence: item.drug_sequence ?? 0,
       drugName:
-        item.medicine_master?.medicine_name ||
         item.medicine_master?.generic_name ||
+        item.medicine_master?.medicine_name ||
         item.drug_name ||
         "",
       drugForm: item.medicine_master?.dosage_form || "",
