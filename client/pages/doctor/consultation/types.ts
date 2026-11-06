@@ -94,6 +94,8 @@ export type DischargeMedicineRecord = {
   frequency?: string | null;
   composition?: string | null;
   duration?: string | null;
+  /* The duration's unit code (D / Wk / Mo), stored separately. */
+  duration_days?: string | null;
   patient_dose?: number | string | null;
   patient_dose_unit?: string | null;
   administration_detail?: string | null;

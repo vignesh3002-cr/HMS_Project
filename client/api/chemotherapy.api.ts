@@ -245,6 +245,10 @@ export interface ChemoPlanItem {
   minimum_dose?: string | number | null;
   remarks?: string | null;
   duration?: string | null;
+  /* Unit code from the source discharge instruction (D / Wk / Mo). Plan
+     items have no duration unit column, so this is only set when the API
+     returns it. */
+  duration_days?: string | null;
   medicine_master?: {
     medicine_id?: string;
     medicine_name?: string | null;
@@ -265,6 +269,9 @@ export interface ChemoDischargeMedicinePayload {
   drug_name?: string | null;
   drug_sequence: number;
   drug_type?: string | null;
+  /* The discharge form (chemotherapy_discharge_instructions.drug_from), kept
+     on the plan item so an edited protocol row keeps its slip form. */
+  formulation?: string | null;
   dosage?: number | null;
   dosage_unit?: string | null;
   frequency?: string | null;
@@ -341,6 +348,10 @@ export interface PharmacySlipItemRecord {
   dose_unit: string | null;
   quantity: number | null;
   drug_role: string | null;
+  route?: string | null;
+  frequency?: string | null;
+  duration?: string | null;
+  instructions?: string | null;
   medicine_master: {
     medicine_name: string | null;
     generic_name: string | null;

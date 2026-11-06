@@ -58,6 +58,10 @@ import {
   parseFollowUpAdvice,
   type FollowUpValues,
 } from "./helpers";
+import {
+  formatSlipDuration,
+  slipFrequencyDuration,
+} from "./pharmacySlip";
 import { adviceMedicinesOf, findAdvicePrescription } from "./AdviceSection";
 import {
   buildMedicineSentence,
@@ -145,6 +149,8 @@ type SummaryPlanItem = {
   infusion_duration_minutes?: number | null;
   timing_relative_to_primary?: string | null;
   administration_detail?: string | null;
+  duration?: string | null;
+  duration_days?: string | null;
   medicine_master: {
     medicine_id?: string | null;
     medicine_name: string;
@@ -273,6 +279,10 @@ type PharmacySlipRow = {
   brand: string;
   dosage: string;
   quantity: string;
+  /* Discharge-only "1-0-2 / 4 D". */
+  frequencyDuration: string;
+  /* Printed on a second line under the drug name. */
+  instructions: string;
   type: string;
 };
 
@@ -1076,7 +1086,9 @@ const Summary: React.FC<{
               item.comment ||
               item.composition ||
               "",
-            duration: item.duration || "",
+            duration: item.duration
+              ? formatSlipDuration(item.duration, item.duration_days)
+              : "",
             /* Shown separately only when not already used as the instruction. */
             comment:
               item.comment && item.administration_detail ? item.comment : "",
@@ -1377,6 +1389,52 @@ const Summary: React.FC<{
       )
     )
     .flatMap((slip) => slip.pharmacy_slip_item ?? []);
+  /* The order's own medicines, used only when no slip was saved yet. The
+     protocol's discharge rows are appended so the printed fallback still
+     carries the take-home medicines and their directions. */
+  const planSlipRows: PharmacySlipRow[] = sortedPlanItems.map((item) => ({
+    drug: medicineName(item),
+    form: item.formulation || item.medicine_master?.dosage_form || "",
+    patientDose: [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit]
+      .filter(Boolean)
+      .join(" "),
+    brand: "",
+    dosage: "",
+    quantity: "",
+    frequencyDuration: slipFrequencyDuration(
+      item.drug_role,
+      item.frequency,
+      item.duration,
+      item.duration_days
+    ),
+    instructions: item.administration_detail || "",
+    type: slipTypeLabel(item.drug_role),
+  }));
+  const dischargeSlipRows: PharmacySlipRow[] = dischargeMedications.map((row) => ({
+    drug: row.drug,
+    form: row.form,
+    patientDose: row.dose,
+    brand: "",
+    dosage: "",
+    quantity: "",
+    frequencyDuration: slipFrequencyDuration(
+      "DISCHARGE",
+      row.frequency,
+      row.duration
+    ),
+    instructions: row.instruction,
+    type: slipTypeLabel("DISCHARGE"),
+  }));
+  const seenFallbackRows = new Set<string>();
+  const fallbackSlipRows = [...planSlipRows, ...dischargeSlipRows].filter(
+    (row) => {
+      const key = `${row.drug.trim().toLowerCase()}|${row.type}`;
+      if (!row.drug.trim() || seenFallbackRows.has(key)) return false;
+      seenFallbackRows.add(key);
+      return true;
+    }
+  );
+
   const pharmacySlipRows: PharmacySlipRow[] =
     slipItems.length > 0
       ? slipItems.map((item) => ({
@@ -1393,19 +1451,16 @@ const Summary: React.FC<{
           brand: item.brand_name || item.medicine_master?.brand_name || "",
           dosage: [item.dose, item.dose_unit].filter(Boolean).join(" "),
           quantity: item.quantity != null ? String(item.quantity) : "",
+          /* Saved duration already carries its unit ("30 D"). */
+          frequencyDuration: slipFrequencyDuration(
+            item.drug_role,
+            item.frequency,
+            item.duration
+          ),
+          instructions: item.instructions || "",
           type: slipTypeLabel(item.drug_role),
         }))
-      : sortedPlanItems.map((item) => ({
-          drug: medicineName(item),
-          form: item.medicine_master?.dosage_form || item.formulation || "",
-          patientDose: [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit]
-            .filter(Boolean)
-            .join(" "),
-          brand: "",
-          dosage: "",
-          quantity: "",
-          type: slipTypeLabel(item.drug_role),
-        }));
+      : fallbackSlipRows;
 
   const diagnosisSelectionFromStorage = (() => {
     try {
@@ -2225,20 +2280,23 @@ const Summary: React.FC<{
         "Brand Name",
         "Dosage",
         "Quantity",
+        "F/D",
         "Type",
       ],
       pharmacySlipRows.length > 0
         ? pharmacySlipRows.map((row, index) => [
             String(index + 1),
-            row.drug,
+            /* The discharge instruction sits on a second line under the name. */
+            row.instructions ? `${row.drug}\n${row.instructions}` : row.drug,
             row.form,
             row.patientDose,
             row.brand,
             row.dosage,
             row.quantity,
+            row.frequencyDuration,
             row.type,
           ])
-        : [["", "No medicines ordered for this visit", "", "", "", "", "", ""]],
+        : [["", "No medicines ordered for this visit", "", "", "", "", "", "", ""]],
       { 0: { cellWidth: 32 } },
       /* No slip yet: only the order's names and types, other cells blank. */
       slipItems.length > 0 ? "-" : ""
