@@ -1032,6 +1032,74 @@ export const chemotherapyApi = {
       message: string;
       data: Array<{ subtype_id: string; subtype_name: string; cancer_type_id: string }>;
     }>(`/oncology/reference/cancer-types/${cancerTypeId}/subtypes`),
+  listScoreVariables: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: Array<{
+        score_variable_id: string;
+        score_id: string;
+        variable_name: string;
+        criterion: string | null;
+        points: string | null;
+        source: string;
+        auto_filled: boolean;
+        source_field: string | null;
+        display_order: number;
+      }>;
+    }>(`/oncology/reference/scores/${scoreId}/variables`),
+  listScoreGroups: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: Array<{
+        score_group_id: string;
+        score_id: string;
+        group_range: string;
+        meaning: string | null;
+        sort_order: number;
+      }>;
+    }>(`/oncology/reference/scores/${scoreId}/groups`),
+  getScoreDetail: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: {
+        score_id: string;
+        score_name: string | null;
+        cancer_type_id: string | null;
+        applies_to: string | null;
+        purpose: string | null;
+        when_to_record: string | null;
+        method: string | null;
+        range: string | null;
+        risk_groups: string | null;
+        status: string | null;
+        reference: string | null;
+        developer_note: string | null;
+        variables: number;
+        auto_filled: number;
+        auto_fill_percent: string | null;
+        variables_list: Array<{
+          score_variable_id: string;
+          score_id: string;
+          variable_name: string;
+          criterion: string | null;
+          points: string | null;
+          source: string;
+          auto_filled: boolean;
+          source_field: string | null;
+          display_order: number;
+        }>;
+        groups: Array<{
+          score_group_id: string;
+          score_id: string;
+          group_range: string;
+          meaning: string | null;
+          sort_order: number;
+        }>;
+      };
+    }>(`/oncology/reference/scores/${scoreId}`),
   listMedicines: () =>
     API.get<{ success: boolean; message: string; data: MedicineOption[] }>(
       "/chemotherapy/medicines"

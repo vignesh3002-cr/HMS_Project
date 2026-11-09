@@ -2,6 +2,7 @@
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
+import { chemotherapyApi } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
@@ -13,7 +14,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../../components/ui/popover";
-import type { ConsultationState, FormData } from "./types";
+import type {
+  ConsultationState,
+  FormData,
+  ScoreVariable,
+  ScoreGroup,
+  ScoreCatalogueDetail,
+  ScoreSelection,
+} from "./types";
 import {
   findActiveEncounter,
   findLatestStagingDetailId,
@@ -1649,6 +1657,13 @@ const Diagnosis: React.FC<{
 
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM_DATA);
 
+  /* The currently opened score and its variables / groups / computed result.
+   * Set when a score is toggled ON in the Score field; cleared when toggled
+   * OFF or changed. */
+  const [selectedScore, setSelectedScore] = useState<ScoreSelection | null>(null);
+  const [scoreDetailsLoading, setScoreDetailsLoading] = useState<boolean>(false);
+  const scoreDetailsRequestRef = useRef(0);
+
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
 
   useEffect(() => {
@@ -2957,6 +2972,217 @@ const Diagnosis: React.FC<{
     )?.score_system;
   };
 
+  /* Split a criterion like "<2 1; 2-3 2; >3 3" into {label, points} options.
+   * Returns null for free-text / range criteria (e.g. "1–3", "From IHC"). */
+  const parseCriterionOptions = (criterion: string | null) => {
+    if (!criterion) return null;
+    const options: { label: string; points: number }[] = [];
+    for (const part of criterion.split(";")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const m = trimmed.match(/^(.*?)\s+(\d+(?:\.\d+)?)\s*$/);
+      if (m) options.push({ label: m[1].trim(), points: Number(m[2]) });
+    }
+    return options.length > 0 ? options : null;
+  };
+
+  const parsePoints = (points: string | null): number | null => {
+    if (!points) return null;
+    const m = String(points).match(/(\d+(?:\.\d+)?)/);
+    return m ? Number(m[1]) : null;
+  };
+
+  /* Match a total against the score's group ranges (best-effort). */
+  const matchGroupMeaning = (groups: ScoreGroup[], total: number | null) => {
+    if (total == null || groups.length === 0) return null;
+    for (const group of groups) {
+      const range = (group.group_range ?? "").trim();
+      const ge = range.match(/^(?:>=|>|≥)\s*(\d+(?:\.\d+)?)/);
+      if (ge && total >= Number(ge[1])) return group.meaning ?? null;
+      const le = range.match(/^(?:<=|<|≤)\s*(\d+(?:\.\d+)?)/);
+      if (le && total <= Number(le[1])) return group.meaning ?? null;
+      const loHi = range.split(/[–-]\s*/).map((s) => Number(s));
+      if (
+        loHi.length === 2 &&
+        Number.isFinite(loHi[0]) &&
+        Number.isFinite(loHi[1]) &&
+        total >= loHi[0] &&
+        total <= loHi[1]
+      )
+        return group.meaning ?? null;
+      const single = Number(range);
+      if (Number.isFinite(single) && total === single) return group.meaning ?? null;
+    }
+    return null;
+  };
+
+  const loadScoreDetails = async (scoreId: string) => {
+    const requestId = ++scoreDetailsRequestRef.current;
+    setScoreDetailsLoading(true);
+    setSelectedScore(null);
+    try {
+      const [detailRes, variablesRes, groupsRes] = await Promise.all([
+        chemotherapyApi.getScoreDetail(scoreId),
+        chemotherapyApi.listScoreVariables(scoreId),
+        chemotherapyApi.listScoreGroups(scoreId),
+      ]);
+      if (requestId !== scoreDetailsRequestRef.current) return;
+      const detail = detailRes.data.data;
+      const variables: ScoreVariable[] = (variablesRes.data.data ?? []).map(
+        (v: any) => ({
+          ...v,
+          selected_criterion: null,
+          selected_points: null,
+          source_value: null,
+          resolved_meaning: null,
+        })
+      );
+      const groups: ScoreGroup[] = groupsRes.data.data ?? [];
+      setSelectedScore({
+        score_id: scoreId,
+        score_system: (detail?.score_name ?? ""),
+        score_value: (detail?.score_name ?? ""),
+        catalogue: detail,
+        variables,
+        groups,
+        total_points: null,
+        risk_group: null,
+      });
+    } catch (error) {
+      console.error("Failed to load score details:", error);
+      if (requestId === scoreDetailsRequestRef.current) setSelectedScore(null);
+    } finally {
+      if (requestId === scoreDetailsRequestRef.current) setScoreDetailsLoading(false);
+    }
+  };
+
+  /* Update one variable's runtime selection and recompute total / risk group. */
+  const setVariableSelection = (
+    index: number,
+    criterion: string | null,
+    points: number | null,
+    sourceValue: string | null
+  ) => {
+    setSelectedScore((previous) => {
+      if (!previous) return previous;
+      const variables = [...previous.variables];
+      const v = variables[index];
+      v.selected_criterion = criterion;
+      v.selected_points = points;
+      v.source_value = sourceValue;
+      const total =
+        variables.reduce(
+          (sum, item) => sum + (item.selected_points != null ? item.selected_points : 0),
+          0
+        ) || null;
+      const risk_group = matchGroupMeaning(previous.groups, total);
+      return {
+        ...previous,
+        variables,
+        total_points: total,
+        risk_group,
+      };
+    });
+  };
+
+  const SOURCE_BADGE: Record<string, string> = {
+    REG: "bg-blue-50 text-blue-700 border-blue-100",
+    VIT: "bg-indigo-50 text-indigo-700 border-indigo-100",
+    LAB: "bg-emerald-50 text-emerald-700 border-emerald-100",
+    STG: "bg-amber-50 text-amber-700 border-amber-100",
+    IHC: "bg-rose-50 text-rose-700 border-rose-100",
+    GEN: "bg-purple-50 text-purple-700 border-purple-100",
+    DER: "bg-orange-50 text-orange-700 border-orange-100",
+    PATH: "bg-gray-50 text-gray-700 border-gray-200",
+    CLIN: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+
+  const renderScoreVariable = (variable: ScoreVariable, index: number) => {
+    const discrete = parseCriterionOptions(variable.criterion);
+    const selectedPoints = variable.selected_points != null ? variable.selected_points : null;
+    const pointsText =
+      selectedPoints != null
+        ? `+${selectedPoints}`
+        : variable.points != null
+          ? `pts ${variable.points}`
+          : "";
+    const isAuto = variable.auto_filled;
+    const sourceLabel = variable.source || "CLIN";
+    const manual = sourceLabel === "PATH" || sourceLabel === "CLIN";
+
+    return (
+      <div
+        key={variable.score_variable_id}
+        className="border border-gray-200 rounded-lg p-2.5 mb-2"
+      >
+        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+          <span className="text-[9px] font-semibold text-gray-700">
+            {variable.variable_name}
+          </span>
+          <span className={`text-[8px] rounded border px-1.5 py-0.5 ${SOURCE_BADGE[sourceLabel] || SOURCE_BADGE.CLIN}`}>
+            {sourceLabel}
+          </span>
+          {isAuto && (
+            <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+              auto-fill
+            </span>
+          )}
+          {manual && (
+            <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+              enter manually
+            </span>
+          )}
+        </div>
+        <div className="text-[9px] text-gray-500 mb-1.5">
+          {variable.criterion ? `Criterion: ${variable.criterion}` : "Free text"}
+        </div>
+        {discrete ? (
+          <div className="flex flex-wrap gap-1">
+            {discrete.map((option) => {
+              const active = variable.selected_criterion === option.label;
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() =>
+                    setVariableSelection(index, option.label, option.points, null)
+                  }
+                  className={`text-[9px] rounded border px-2 py-1 ${active ? "bg-[#1d4ed8] border-[#1d4ed8] text-white" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"}`}
+                >
+                  {option.label} {option.points > 0 ? `+${option.points}` : option.points}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex items-end gap-1.5">
+            <input
+              type="text"
+              defaultValue={variable.source_value ?? ""}
+              onChange={(event) => {
+                const value = event.target.value.trim();
+                const points = parsePoints(value);
+                setVariableSelection(index, value, points, value);
+              }}
+              className="w-20 border border-gray-300 rounded text-[9px] px-1.5 py-1 focus:border-[#1d4ed8] focus:outline-none"
+              placeholder={variable.points ? `pts ${variable.points}` : "value"}
+            />
+            {selectedPoints != null && (
+              <span className="text-[9px] font-semibold text-[#1d4ed8]">
+                {selectedPoints > 0 ? `+${selectedPoints}` : selectedPoints} pts
+              </span>
+            )}
+          </div>
+        )}
+        {selectedPoints != null && !discrete && (
+          <div className="text-[9px] text-gray-500 mt-1">
+            Points: {selectedPoints > 0 ? `+${selectedPoints}` : selectedPoints}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   /* Multiple scores may be picked, but only one value per score system per
      cancer type (e.g. one IPI value), mirroring the T/N/M one-per-type rule. */
   const handleScoreToggle = (
@@ -2965,31 +3191,36 @@ const Diagnosis: React.FC<{
     /* The system of a score just added, not yet in scoreMasterOptions. */
     knownSystem?: string
   ) => {
-    setFormData((previous) => {
-      const present = previous.score.includes(value);
-      const adding = select ?? !present;
-      if (!adding) {
-        return {
-          ...previous,
-          score: previous.score.filter((item) => item !== value),
-        };
-      }
-      if (present) return previous;
-      const system = knownSystem ?? scoreSystemOf(value);
-      const { cancerType } = splitQualified(value);
-      return {
+    const present = formData.score.includes(value);
+    const adding = select ?? !present;
+
+    if (!adding) {
+      setFormData((previous) => ({
         ...previous,
-        score: [
-          ...previous.score.filter(
-            (item) =>
-              !system ||
-              splitQualified(item).cancerType !== cancerType ||
-              scoreSystemOf(item) !== system
-          ),
-          value,
-        ],
-      };
-    });
+        score: previous.score.filter((item) => item !== value),
+      }));
+      setSelectedScore(null);
+      return;
+    }
+    if (present) return;
+    const system = knownSystem ?? scoreSystemOf(value);
+    const { cancerType } = splitQualified(value);
+    setFormData((previous) => ({
+      ...previous,
+      score: [
+        ...previous.score.filter(
+          (item) =>
+            !system ||
+            splitQualified(item).cancerType !== cancerType ||
+            scoreSystemOf(item) !== system
+        ),
+        value,
+      ],
+    }));
+    const item = scoreMasterOptions.find(
+      (s) => s.cancerType === cancerType && s.score_value === splitQualified(value).raw
+    );
+    if (item) loadScoreDetails(item.score_id);
   };
 
   /* ---- Values the doctor adds from a dropdown ----
@@ -3411,6 +3642,26 @@ const Diagnosis: React.FC<{
         orderByType(formData.score).map(scoreSystemOf)
       );
 
+      const scoreVariablesJson = selectedScore
+        ? Object.fromEntries(
+            selectedScore.variables.map((v) => [
+              v.score_variable_id,
+              {
+                selected_criterion: v.selected_criterion ?? null,
+                selected_points: v.selected_points ?? null,
+                source_value: v.source_value ?? null,
+              },
+            ])
+          )
+        : null;
+      const scoreResultText = selectedScore
+        ? selectedScore.total_points != null
+          ? `${selectedScore.total_points}${
+              selectedScore.risk_group ? ` - ${selectedScore.risk_group}` : ""
+            }`
+          : selectedScore.risk_group ?? null
+        : null;
+
       const visitDateIso = toIsoDate(visitDate);
       const formState = buildFormState();
 
@@ -3442,6 +3693,10 @@ const Diagnosis: React.FC<{
         grade_system: gradeSystems || null,
         score: scoreText || null,
         score_system: scoreSystems || null,
+        score_variables: scoreVariablesJson ?? null,
+        score_result: scoreResultText,
+        risk_group: selectedScore?.risk_group ?? null,
+        score_points: selectedScore?.total_points ?? null,
         diagnosis_date: diagnosisDateIso || null,
         progression_date: progressionDateIso || null,
         relapse_date: relapseDateIso || null,
@@ -3604,6 +3859,80 @@ const Diagnosis: React.FC<{
 
   const handleBack = () => {
     window.history.back();
+  };
+
+  const renderScoreDetails = () => {
+    const score = selectedScore;
+    if (!score) return null;
+    const cat = score.catalogue;
+    const total = score.total_points ?? 0;
+    return (
+      <div className="mt-6 border border-gray-200 rounded-lg bg-gray-50 p-3">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-gray-900">
+                {cat?.score_name ?? score.score_system}
+              </span>
+              {cat?.status && (
+                <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+                  {cat.status}
+                </span>
+              )}
+            </div>
+            <div className="text-[9px] text-gray-500">
+              {score.score_system} · {cat?.applies_to ?? ""}
+            </div>
+          </div>
+          {scoreDetailsLoading && (
+            <span className="text-[9px] text-gray-400">Loading…</span>
+          )}
+        </div>
+        {cat && (
+          <div className="flex flex-wrap gap-2.5 mb-2.5 text-[8px]">
+            <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+              Purpose: {cat.purpose ?? "—"}
+            </span>
+            {cat.method && (
+              <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+                Method: {cat.method}
+              </span>
+            )}
+            {cat.range && (
+              <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+                Range: {cat.range}
+              </span>
+            )}
+            <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
+              Variables: {cat.variables} · Auto-filled: {cat.auto_filled}
+            </span>
+          </div>
+        )}
+        <div className="text-[9px] font-bold text-gray-800 mb-1">
+          Variables
+        </div>
+        <div className="space-y-0">
+          {score.variables.map((variable, index) => renderScoreVariable(variable, index))}
+        </div>
+        <div className="mt-3 pt-2 border-t border-gray-200">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-bold text-gray-900">Total points</span>
+            <span className="font-mono text-[#1d4ed8]">{total}</span>
+          </div>
+          {score.risk_group && (
+            <div className="flex items-center justify-between text-[10px] mt-0.5">
+              <span className="font-bold text-gray-900">Risk group</span>
+              <span className="font-semibold text-[#1d4ed8]">{score.risk_group}</span>
+            </div>
+          )}
+          {!score.risk_group && score.variables.length > 0 && score.total_points == null && (
+            <p className="text-[9px] text-gray-500 mt-1">
+              Select a criterion for each variable to compute the total.
+            </p>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const content = (
@@ -3831,6 +4160,7 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             {...editProps("score")}
           />
+          {renderScoreDetails()}
 
           {/* TNM Staging */}
           <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
