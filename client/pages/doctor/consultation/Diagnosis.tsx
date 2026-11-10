@@ -19,9 +19,27 @@ import type {
   FormData,
   ScoreVariable,
   ScoreGroup,
-  ScoreCatalogueDetail,
-  ScoreSelection,
 } from "./types";
+import {
+  buildScoreDefinition,
+  emptyAssessment,
+  evaluateScore,
+  hydrateAssessment,
+  resolveVariableValue,
+  serializeAssessment,
+  type ScoreAssessment,
+  type ScoreDefinition,
+} from "./scoreEngine";
+import {
+  labKeyFor,
+  stageNumberFromText,
+  suggestVariableValues,
+  type AutoFillContext,
+  type LabValue,
+} from "./scoreAutofill";
+import { ScoreWorkspace } from "./ScoreWorkspace";
+import { patientApi, type PatientRecord } from "../../../api/patient.api";
+import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import {
   findActiveEncounter,
   findLatestStagingDetailId,
@@ -1398,6 +1416,10 @@ type StagingDetailRecord = {
   icd10_code?: string | null;
   metastasis_sites?: unknown;
   form_state?: unknown;
+  score_variables?: unknown;
+  score_result?: string | null;
+  risk_group?: string | null;
+  score_points?: number | null;
   cancer_types?: { cancer_type: string } | null;
   cancer_subtypes?: { subtype_name: string } | null;
   oncology_staging_additional_cancers?: {
@@ -1657,12 +1679,78 @@ const Diagnosis: React.FC<{
 
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM_DATA);
 
-  /* The currently opened score and its variables / groups / computed result.
-   * Set when a score is toggled ON in the Score field; cleared when toggled
-   * OFF or changed. */
-  const [selectedScore, setSelectedScore] = useState<ScoreSelection | null>(null);
-  const [scoreDetailsLoading, setScoreDetailsLoading] = useState<boolean>(false);
-  const scoreDetailsRequestRef = useRef(0);
+  /* Every selected score keeps its own typed definition and assessment, so
+     several scores can be recorded at once and each uses its own method. */
+  const [scoreDefinitions, setScoreDefinitions] = useState<
+    Record<string, ScoreDefinition>
+  >({});
+  const [scoreAssessments, setScoreAssessments] = useState<
+    Record<string, ScoreAssessment>
+  >({});
+  const [scoreDetailsLoading, setScoreDetailsLoading] = useState<
+    Record<string, boolean>
+  >({});
+  /* Guard concurrent loads and hydrate the saved values only once. */
+  const scoreDefinitionRequestsRef = useRef<Set<string>>(new Set());
+  const hydratedScoreIdsRef = useRef<Set<string>>(new Set());
+  const pendingScoreVariablesRef = useRef<unknown>(null);
+
+  /* Auto-fill inputs: the patient's registration data and this visit's
+     encounter (vitals). Both are branch-independent lookups, so they work
+     for multi-branch doctors without an active branch selection. */
+  const [autoFillPatient, setAutoFillPatient] = useState<PatientRecord | null>(
+    null
+  );
+  const [autoFillEncounter, setAutoFillEncounter] =
+    useState<EncounterRecord | null>(null);
+  const [autoFillBusy, setAutoFillBusy] = useState(false);
+  const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setAutoFillPatient(null);
+      return;
+    }
+    let cancelled = false;
+    patientApi
+      .getById(resolvedPatientId)
+      .then((response) => {
+        if (!cancelled) setAutoFillPatient(response.data.data ?? null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Auto-fill: patient lookup failed", error);
+          setAutoFillPatient(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setAutoFillEncounter(null);
+      return;
+    }
+    let cancelled = false;
+    encounterApi
+      .getLatest(resolvedPatientId, 10)
+      .then((response) => {
+        if (cancelled) return;
+        const list = response.data.data?.encounters ?? [];
+        /* Prefer the visit still open; otherwise the newest recorded one. */
+        const current =
+          list.find((item) => item.status === "OPEN") ?? list[0] ?? null;
+        setAutoFillEncounter(current);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoFillEncounter(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
 
@@ -1787,6 +1875,13 @@ const Diagnosis: React.FC<{
             ).data.data
           : null;
         if (cancelled) return;
+
+        /* Keep the saved score values; the workspace hydrates them once the
+           score definitions arrive (the master lists load asynchronously). */
+        if (detail) {
+          pendingScoreVariablesRef.current = detail.score_variables ?? null;
+          hydratedScoreIdsRef.current = new Set();
+        }
 
         const state = detail
           ? parseFormState(detail.form_state) ?? formStateFromColumns(detail)
@@ -2972,61 +3067,27 @@ const Diagnosis: React.FC<{
     )?.score_system;
   };
 
-  /* Split a criterion like "<2 1; 2-3 2; >3 3" into {label, points} options.
-   * Returns null for free-text / range criteria (e.g. "1–3", "From IHC"). */
-  const parseCriterionOptions = (criterion: string | null) => {
-    if (!criterion) return null;
-    const options: { label: string; points: number }[] = [];
-    for (const part of criterion.split(";")) {
-      const trimmed = part.trim();
-      if (!trimmed) continue;
-      const m = trimmed.match(/^(.*?)\s+(\d+(?:\.\d+)?)\s*$/);
-      if (m) options.push({ label: m[1].trim(), points: Number(m[2]) });
-    }
-    return options.length > 0 ? options : null;
+  /* The catalogue row behind a picked score value. */
+  const scoreItemOf = (qualified: string) => {
+    const { cancerType, raw } = splitQualified(qualified);
+    return scoreMasterOptions.find(
+      (score) => score.cancerType === cancerType && score.score_value === raw
+    );
   };
 
-  const parsePoints = (points: string | null): number | null => {
-    if (!points) return null;
-    const m = String(points).match(/(\d+(?:\.\d+)?)/);
-    return m ? Number(m[1]) : null;
-  };
-
-  /* Match a total against the score's group ranges (best-effort). */
-  const matchGroupMeaning = (groups: ScoreGroup[], total: number | null) => {
-    if (total == null || groups.length === 0) return null;
-    for (const group of groups) {
-      const range = (group.group_range ?? "").trim();
-      const ge = range.match(/^(?:>=|>|≥)\s*(\d+(?:\.\d+)?)/);
-      if (ge && total >= Number(ge[1])) return group.meaning ?? null;
-      const le = range.match(/^(?:<=|<|≤)\s*(\d+(?:\.\d+)?)/);
-      if (le && total <= Number(le[1])) return group.meaning ?? null;
-      const loHi = range.split(/[–-]\s*/).map((s) => Number(s));
-      if (
-        loHi.length === 2 &&
-        Number.isFinite(loHi[0]) &&
-        Number.isFinite(loHi[1]) &&
-        total >= loHi[0] &&
-        total <= loHi[1]
-      )
-        return group.meaning ?? null;
-      const single = Number(range);
-      if (Number.isFinite(single) && total === single) return group.meaning ?? null;
-    }
-    return null;
-  };
-
-  const loadScoreDetails = async (scoreId: string) => {
-    const requestId = ++scoreDetailsRequestRef.current;
-    setScoreDetailsLoading(true);
-    setSelectedScore(null);
+  /* Load a score's definition once, then keep it (and its assessment) in
+     state. Several scores may be open at the same time. */
+  const ensureScoreDefinition = async (scoreId: string, name: string) => {
+    if (scoreDefinitions[scoreId]) return;
+    if (scoreDefinitionRequestsRef.current.has(scoreId)) return;
+    scoreDefinitionRequestsRef.current.add(scoreId);
+    setScoreDetailsLoading((previous) => ({ ...previous, [scoreId]: true }));
     try {
       const [detailRes, variablesRes, groupsRes] = await Promise.all([
         chemotherapyApi.getScoreDetail(scoreId),
         chemotherapyApi.listScoreVariables(scoreId),
         chemotherapyApi.listScoreGroups(scoreId),
       ]);
-      if (requestId !== scoreDetailsRequestRef.current) return;
       const detail = detailRes.data.data;
       const variables: ScoreVariable[] = (variablesRes.data.data ?? []).map(
         (v: any) => ({
@@ -3038,149 +3099,282 @@ const Diagnosis: React.FC<{
         })
       );
       const groups: ScoreGroup[] = groupsRes.data.data ?? [];
-      setSelectedScore({
-        score_id: scoreId,
-        score_system: (detail?.score_name ?? ""),
-        score_value: (detail?.score_name ?? ""),
-        catalogue: detail,
+      const definition = buildScoreDefinition({
+        scoreId,
+        name: detail?.score_name ?? name,
+        detail,
         variables,
         groups,
-        total_points: null,
-        risk_group: null,
       });
+      setScoreDefinitions((previous) =>
+        previous[scoreId] ? previous : { ...previous, [scoreId]: definition }
+      );
+      setScoreAssessments((previous) =>
+        previous[scoreId]
+          ? previous
+          : { ...previous, [scoreId]: emptyAssessment(definition) }
+      );
     } catch (error) {
       console.error("Failed to load score details:", error);
-      if (requestId === scoreDetailsRequestRef.current) setSelectedScore(null);
     } finally {
-      if (requestId === scoreDetailsRequestRef.current) setScoreDetailsLoading(false);
+      scoreDefinitionRequestsRef.current.delete(scoreId);
+      setScoreDetailsLoading((previous) => {
+        const next = { ...previous };
+        delete next[scoreId];
+        return next;
+      });
     }
   };
 
-  /* Update one variable's runtime selection and recompute total / risk group. */
-  const setVariableSelection = (
-    index: number,
-    criterion: string | null,
-    points: number | null,
-    sourceValue: string | null
-  ) => {
-    setSelectedScore((previous) => {
-      if (!previous) return previous;
-      const variables = [...previous.variables];
-      const v = variables[index];
-      v.selected_criterion = criterion;
-      v.selected_points = points;
-      v.source_value = sourceValue;
-      const total =
-        variables.reduce(
-          (sum, item) => sum + (item.selected_points != null ? item.selected_points : 0),
-          0
-        ) || null;
-      const risk_group = matchGroupMeaning(previous.groups, total);
-      return {
+  /* Load a definition for every picked score (also after the masters arrive
+     from a restored visit), then hydrate the values saved with the visit. */
+  useEffect(() => {
+    for (const value of orderByType(formData.score)) {
+      const item = scoreItemOf(value);
+      if (item) void ensureScoreDefinition(item.score_id, item.score_value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.score, scoreMasterOptions]);
+
+  useEffect(() => {
+    const raw = pendingScoreVariablesRef.current;
+    if (!raw) return;
+    const items = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+    if (items.length === 0) return;
+
+    let unresolved = 0;
+    for (const item of items) {
+      if (hydratedScoreIdsRef.current.has(item.score_id)) continue;
+      const definition = scoreDefinitions[item.score_id];
+      if (!definition) {
+        unresolved++;
+        continue;
+      }
+      const assessment = hydrateAssessment(raw, definition);
+      setScoreAssessments((previous) => ({
         ...previous,
-        variables,
-        total_points: total,
-        risk_group,
-      };
-    });
+        [item.score_id]: assessment,
+      }));
+      hydratedScoreIdsRef.current.add(item.score_id);
+    }
+    if (unresolved === 0) pendingScoreVariablesRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoreDefinitions, formData.score, scoreMasterOptions]);
+
+  const handleAssessmentChange = (
+    scoreId: string,
+    assessment: ScoreAssessment
+  ) =>
+    setScoreAssessments((previous) => ({
+      ...previous,
+      [scoreId]: assessment,
+    }));
+
+  /* ---- Auto-fill from data the consultation already holds ---- */
+  const toNumberOrNull = (value: unknown): number | null => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   };
 
-  const SOURCE_BADGE: Record<string, string> = {
-    REG: "bg-blue-50 text-blue-700 border-blue-100",
-    VIT: "bg-indigo-50 text-indigo-700 border-indigo-100",
-    LAB: "bg-emerald-50 text-emerald-700 border-emerald-100",
-    STG: "bg-amber-50 text-amber-700 border-amber-100",
-    IHC: "bg-rose-50 text-rose-700 border-rose-100",
-    GEN: "bg-purple-50 text-purple-700 border-purple-100",
-    DER: "bg-orange-50 text-orange-700 border-orange-100",
-    PATH: "bg-gray-50 text-gray-700 border-gray-200",
-    CLIN: "bg-gray-50 text-gray-700 border-gray-200",
+  const patientAge = (patient: PatientRecord | null): number | null => {
+    if (!patient) return null;
+    const recorded = toNumberOrNull(patient.patient_age);
+    if (recorded != null) return recorded;
+    if (patient.patient_dob) {
+      const dob = new Date(patient.patient_dob);
+      if (!Number.isNaN(dob.getTime())) {
+        const now = new Date();
+        let age = now.getFullYear() - dob.getFullYear();
+        const month = now.getMonth() - dob.getMonth();
+        if (month < 0 || (month === 0 && now.getDate() < dob.getDate())) age--;
+        if (age >= 0 && age < 130) return age;
+      }
+    }
+    return null;
   };
 
-  const renderScoreVariable = (variable: ScoreVariable, index: number) => {
-    const discrete = parseCriterionOptions(variable.criterion);
-    const selectedPoints = variable.selected_points != null ? variable.selected_points : null;
-    const pointsText =
-      selectedPoints != null
-        ? `+${selectedPoints}`
-        : variable.points != null
-          ? `pts ${variable.points}`
-          : "";
-    const isAuto = variable.auto_filled;
-    const sourceLabel = variable.source || "CLIN";
-    const manual = sourceLabel === "PATH" || sourceLabel === "CLIN";
-
-    return (
-      <div
-        key={variable.score_variable_id}
-        className="border border-gray-200 rounded-lg p-2.5 mb-2"
-      >
-        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-          <span className="text-[9px] font-semibold text-gray-700">
-            {variable.variable_name}
-          </span>
-          <span className={`text-[8px] rounded border px-1.5 py-0.5 ${SOURCE_BADGE[sourceLabel] || SOURCE_BADGE.CLIN}`}>
-            {sourceLabel}
-          </span>
-          {isAuto && (
-            <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-              auto-fill
-            </span>
-          )}
-          {manual && (
-            <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-              enter manually
-            </span>
-          )}
-        </div>
-        <div className="text-[9px] text-gray-500 mb-1.5">
-          {variable.criterion ? `Criterion: ${variable.criterion}` : "Free text"}
-        </div>
-        {discrete ? (
-          <div className="flex flex-wrap gap-1">
-            {discrete.map((option) => {
-              const active = variable.selected_criterion === option.label;
-              return (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() =>
-                    setVariableSelection(index, option.label, option.points, null)
-                  }
-                  className={`text-[9px] rounded border px-2 py-1 ${active ? "bg-[#1d4ed8] border-[#1d4ed8] text-white" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"}`}
-                >
-                  {option.label} {option.points > 0 ? `+${option.points}` : option.points}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex items-end gap-1.5">
-            <input
-              type="text"
-              defaultValue={variable.source_value ?? ""}
-              onChange={(event) => {
-                const value = event.target.value.trim();
-                const points = parsePoints(value);
-                setVariableSelection(index, value, points, value);
-              }}
-              className="w-20 border border-gray-300 rounded text-[9px] px-1.5 py-1 focus:border-[#1d4ed8] focus:outline-none"
-              placeholder={variable.points ? `pts ${variable.points}` : "value"}
-            />
-            {selectedPoints != null && (
-              <span className="text-[9px] font-semibold text-[#1d4ed8]">
-                {selectedPoints > 0 ? `+${selectedPoints}` : selectedPoints} pts
-              </span>
-            )}
-          </div>
-        )}
-        {selectedPoints != null && !discrete && (
-          <div className="text-[9px] text-gray-500 mt-1">
-            Points: {selectedPoints > 0 ? `+${selectedPoints}` : selectedPoints}
-          </div>
-        )}
-      </div>
+  /* This visit's values (typed in the Investigation Results section) fall
+     back to the newest saved result for each test. */
+  const buildAutoFillLabs = (): Record<string, LabValue> => {
+    const labs: Record<string, LabValue> = {};
+    const parameters = new Map<string, InvestigationParameterItem>();
+    investigationParameters.forEach((parameter) =>
+      parameters.set(parameter.parameter_id, parameter)
     );
+    investigationHistory.forEach((row) => {
+      if (row.investigation_parameter) {
+        parameters.set(row.parameter_id, row.investigation_parameter);
+      }
+    });
+
+    const newest = new Map<string, InvestigationResultRecord>();
+    for (const row of investigationHistory) {
+      const previous = newest.get(row.parameter_id);
+      if (
+        !previous ||
+        String(row.report_date).localeCompare(String(previous.report_date)) > 0
+      ) {
+        newest.set(row.parameter_id, row);
+      }
+    }
+
+    for (const [parameterId, parameter] of parameters) {
+      const typed = String(
+        formData.investigationResults[parameterId] ?? ""
+      ).trim();
+      const row = newest.get(parameterId);
+      const raw = typed || String(row?.value_text ?? "").trim();
+      if (!raw) continue;
+      const value = Number(raw.replace(/[^0-9.+-]/g, ""));
+      if (!Number.isFinite(value)) continue;
+      const key = labKeyFor(parameter.parameter_name);
+      if (!key) continue;
+      const date = row?.report_date ?? null;
+      const existing = labs[key];
+      if (existing?.date && date && existing.date > date) continue;
+      labs[key] = {
+        value,
+        unit: parameter.unit ?? null,
+        normalMin: toNumberOrNull(parameter.normal_min),
+        normalMax: toNumberOrNull(parameter.normal_max),
+        date,
+      };
+    }
+    return labs;
+  };
+
+  const buildAutoFillContext = (): AutoFillContext => {
+    const primaryType = selectedCancerTypes[0] ?? formData.type ?? "";
+    const primaryValue = (values: string[]): string | null => {
+      const ordered = orderByType(values);
+      const match =
+        ordered.find(
+          (value) =>
+            !primaryType || splitQualified(value).cancerType === primaryType
+        ) ?? ordered[0];
+      return match ? splitQualified(match).raw : null;
+    };
+
+    const stageText = primaryValue(formData.cancerStage);
+
+    const derivedScores: AutoFillContext["derivedScores"] = {};
+    for (const [scoreId, definition] of Object.entries(scoreDefinitions)) {
+      const assessment = scoreAssessments[scoreId];
+      if (!assessment || assessment.status === "not_applicable") continue;
+      const evaluation = evaluateScore(definition, assessment);
+      derivedScores[scoreId] = {
+        total: evaluation.total,
+        groupLabel: evaluation.groupLabel ?? null,
+      };
+    }
+
+    return {
+      age: patientAge(autoFillPatient),
+      sex: autoFillPatient?.patient_gender ?? null,
+      heightCm: toNumberOrNull(autoFillEncounter?.height),
+      weightKg: toNumberOrNull(autoFillEncounter?.weight),
+      bmi: toNumberOrNull(autoFillEncounter?.BMI),
+      systolic: toNumberOrNull(autoFillEncounter?.systolic_bp),
+      diastolic: toNumberOrNull(autoFillEncounter?.diastolic_bp),
+      labs: buildAutoFillLabs(),
+      stageNumber: stageNumberFromText(stageText),
+      stageText,
+      tStage: primaryValue(formData.tStage),
+      nStage: primaryValue(formData.nStage),
+      mStage: primaryValue(formData.mStage),
+      derivedScores,
+    };
+  };
+
+  /* Fill the scores' inputs from registration / vitals / labs / stage and
+     the visit's other score results. Values the clinician typed are kept. */
+  const applyAutoFill = (scoreIds?: string[]) => {
+    const targetIds = (scoreIds ?? Object.keys(scoreDefinitions)).filter(
+      (scoreId) => scoreDefinitions[scoreId] && scoreAssessments[scoreId]
+    );
+    if (targetIds.length === 0) {
+      setAutoFillNotice("Pick a score first, then auto-fill its values.");
+      return;
+    }
+
+    setAutoFillBusy(true);
+    setAutoFillNotice(null);
+    try {
+      const context = buildAutoFillContext();
+      const nextAssessments = { ...scoreAssessments };
+      let filled = 0;
+      let kept = 0;
+      let empty = 0;
+
+      for (const scoreId of targetIds) {
+        const definition = scoreDefinitions[scoreId];
+        const assessment = nextAssessments[scoreId];
+        if (assessment.status === "not_applicable") {
+          empty++;
+          continue;
+        }
+        const suggestions = suggestVariableValues(definition, context);
+        if (suggestions.length === 0) {
+          empty++;
+          continue;
+        }
+
+        const values = { ...assessment.values };
+        for (const suggestion of suggestions) {
+          const variable = definition.variables.find(
+            (item) => item.id === suggestion.variableId
+          );
+          if (!variable) continue;
+          const current = values[variable.id];
+          const hasTypedValue =
+            Boolean(current?.raw?.trim()) && current?.source !== "auto";
+          if (hasTypedValue) {
+            kept++;
+            continue;
+          }
+          values[variable.id] = resolveVariableValue(
+            variable,
+            suggestion.raw,
+            "auto"
+          );
+          filled++;
+        }
+
+        nextAssessments[scoreId] = {
+          ...assessment,
+          values,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      setScoreAssessments(nextAssessments);
+      setAutoFillNotice(
+        filled > 0
+          ? `Filled ${filled} value${filled === 1 ? "" : "s"} from patient data${
+              kept > 0
+                ? `, kept ${kept} value${kept === 1 ? "" : "s"} you entered`
+                : ""
+            }.`
+          : "No matching patient data found for this score. Enter the values manually."
+      );
+    } catch (error) {
+      console.error("Auto-fill failed:", error);
+      setAutoFillNotice(
+        "Auto-fill could not read the patient data. Enter the values manually."
+      );
+    } finally {
+      setAutoFillBusy(false);
+    }
+  };
+
+  const handleScoreRemove = (scoreId: string) => {
+    const value = formData.score.find(
+      (item) => scoreItemOf(item)?.score_id === scoreId
+    );
+    if (value) handleScoreToggle(value, false);
   };
 
   /* Multiple scores may be picked, but only one value per score system per
@@ -3199,7 +3393,6 @@ const Diagnosis: React.FC<{
         ...previous,
         score: previous.score.filter((item) => item !== value),
       }));
-      setSelectedScore(null);
       return;
     }
     if (present) return;
@@ -3217,10 +3410,8 @@ const Diagnosis: React.FC<{
         value,
       ],
     }));
-    const item = scoreMasterOptions.find(
-      (s) => s.cancerType === cancerType && s.score_value === splitQualified(value).raw
-    );
-    if (item) loadScoreDetails(item.score_id);
+    const item = scoreItemOf(value);
+    if (item) void ensureScoreDefinition(item.score_id, item.score_value);
   };
 
   /* ---- Values the doctor adds from a dropdown ----
@@ -3642,25 +3833,63 @@ const Diagnosis: React.FC<{
         orderByType(formData.score).map(scoreSystemOf)
       );
 
-      const scoreVariablesJson = selectedScore
-        ? Object.fromEntries(
-            selectedScore.variables.map((v) => [
-              v.score_variable_id,
-              {
-                selected_criterion: v.selected_criterion ?? null,
-                selected_points: v.selected_points ?? null,
-                source_value: v.source_value ?? null,
-              },
-            ])
-          )
-        : null;
-      const scoreResultText = selectedScore
-        ? selectedScore.total_points != null
-          ? `${selectedScore.total_points}${
-              selectedScore.risk_group ? ` - ${selectedScore.risk_group}` : ""
-            }`
-          : selectedScore.risk_group ?? null
-        : null;
+      /* Every picked score keeps its own typed assessment (v2). The first
+         complete one also fills the legacy single-value columns. */
+      const selectedScoreEntries = orderByType(formData.score)
+        .map((value) => {
+          const item = scoreItemOf(value);
+          const definition = item ? scoreDefinitions[item.score_id] : undefined;
+          const assessment = item ? scoreAssessments[item.score_id] : undefined;
+          if (!definition || !assessment) return null;
+          return {
+            definition,
+            assessment,
+            evaluation: evaluateScore(definition, assessment),
+          };
+        })
+        .filter(
+          (
+            entry
+          ): entry is {
+            definition: ScoreDefinition;
+            assessment: ScoreAssessment;
+            evaluation: ReturnType<typeof evaluateScore>;
+          } => Boolean(entry)
+        );
+
+      const primaryScore =
+        selectedScoreEntries.find(
+          (entry) => entry.evaluation.status !== "not_applicable"
+        ) ??
+        selectedScoreEntries[0] ??
+        null;
+
+      const scoreVariablesJson =
+        selectedScoreEntries.length > 0
+          ? {
+              version: 2,
+              scores: selectedScoreEntries.map((entry) => ({
+                ...serializeAssessment(entry.assessment),
+                status: entry.evaluation.status,
+              })),
+            }
+          : null;
+
+      const resultParts: string[] = [];
+      if (primaryScore) {
+        if (primaryScore.evaluation.total != null) {
+          resultParts.push(String(primaryScore.evaluation.total));
+        }
+        if (primaryScore.evaluation.groupLabel) {
+          resultParts.push(primaryScore.evaluation.groupLabel);
+        }
+      }
+      const scoreResultText =
+        resultParts.length > 0
+          ? resultParts.join(" - ")
+          : primaryScore?.evaluation.status === "not_applicable"
+            ? "Not applicable"
+            : null;
 
       const visitDateIso = toIsoDate(visitDate);
       const formState = buildFormState();
@@ -3695,8 +3924,8 @@ const Diagnosis: React.FC<{
         score_system: scoreSystems || null,
         score_variables: scoreVariablesJson ?? null,
         score_result: scoreResultText,
-        risk_group: selectedScore?.risk_group ?? null,
-        score_points: selectedScore?.total_points ?? null,
+        risk_group: primaryScore?.evaluation.groupLabel ?? null,
+        score_points: primaryScore?.evaluation.total ?? null,
         diagnosis_date: diagnosisDateIso || null,
         progression_date: progressionDateIso || null,
         relapse_date: relapseDateIso || null,
@@ -3861,79 +4090,19 @@ const Diagnosis: React.FC<{
     window.history.back();
   };
 
-  const renderScoreDetails = () => {
-    const score = selectedScore;
-    if (!score) return null;
-    const cat = score.catalogue;
-    const total = score.total_points ?? 0;
-    return (
-      <div className="mt-6 border border-gray-200 rounded-lg bg-gray-50 p-3">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-gray-900">
-                {cat?.score_name ?? score.score_system}
-              </span>
-              {cat?.status && (
-                <span className="text-[8px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-                  {cat.status}
-                </span>
-              )}
-            </div>
-            <div className="text-[9px] text-gray-500">
-              {score.score_system} · {cat?.applies_to ?? ""}
-            </div>
-          </div>
-          {scoreDetailsLoading && (
-            <span className="text-[9px] text-gray-400">Loading…</span>
-          )}
-        </div>
-        {cat && (
-          <div className="flex flex-wrap gap-2.5 mb-2.5 text-[8px]">
-            <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-              Purpose: {cat.purpose ?? "—"}
-            </span>
-            {cat.method && (
-              <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-                Method: {cat.method}
-              </span>
-            )}
-            {cat.range && (
-              <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-                Range: {cat.range}
-              </span>
-            )}
-            <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 border border-gray-200">
-              Variables: {cat.variables} · Auto-filled: {cat.auto_filled}
-            </span>
-          </div>
-        )}
-        <div className="text-[9px] font-bold text-gray-800 mb-1">
-          Variables
-        </div>
-        <div className="space-y-0">
-          {score.variables.map((variable, index) => renderScoreVariable(variable, index))}
-        </div>
-        <div className="mt-3 pt-2 border-t border-gray-200">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="font-bold text-gray-900">Total points</span>
-            <span className="font-mono text-[#1d4ed8]">{total}</span>
-          </div>
-          {score.risk_group && (
-            <div className="flex items-center justify-between text-[10px] mt-0.5">
-              <span className="font-bold text-gray-900">Risk group</span>
-              <span className="font-semibold text-[#1d4ed8]">{score.risk_group}</span>
-            </div>
-          )}
-          {!score.risk_group && score.variables.length > 0 && score.total_points == null && (
-            <p className="text-[9px] text-gray-500 mt-1">
-              Select a criterion for each variable to compute the total.
-            </p>
-          )}
-        </div>
-      </div>
+  const scoreWorkspaceEntries = orderByType(formData.score)
+    .map((value) => {
+      const item = scoreItemOf(value);
+      const definition = item ? scoreDefinitions[item.score_id] : undefined;
+      const assessment = item ? scoreAssessments[item.score_id] : undefined;
+      return definition && assessment ? { definition, assessment } : null;
+    })
+    .filter(
+      (
+        entry
+      ): entry is { definition: ScoreDefinition; assessment: ScoreAssessment } =>
+        Boolean(entry)
     );
-  };
 
   const content = (
     <section className="flex w-full flex-1 flex-col">
@@ -4160,7 +4329,16 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             {...editProps("score")}
           />
-          {renderScoreDetails()}
+          <ScoreWorkspace
+            entries={scoreWorkspaceEntries}
+            loading={scoreDetailsLoading}
+            autoFillBusy={autoFillBusy}
+            autoFillNotice={autoFillNotice}
+            onAutoFillAll={() => applyAutoFill()}
+            onAutoFillOne={(scoreId) => applyAutoFill([scoreId])}
+            onAssessmentChange={handleAssessmentChange}
+            onRemove={handleScoreRemove}
+          />
 
           {/* TNM Staging */}
           <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
