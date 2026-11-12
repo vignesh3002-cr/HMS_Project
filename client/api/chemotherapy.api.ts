@@ -1100,6 +1100,35 @@ export const chemotherapyApi = {
         }>;
       };
     }>(`/oncology/reference/scores/${scoreId}`),
+  /* Catalogue metadata (descriptive columns only). Only the keys sent are
+     changed. */
+  updateScore: (
+    scoreId: string,
+    patch: Partial<{
+      purpose: string | null;
+      when_to_record: string | null;
+      score_range: string | null;
+      risk_groups: string | null;
+      score_status: string | null;
+      score_reference: string | null;
+      developer_note: string | null;
+    }>
+  ) =>
+    API.patch<{
+      success: boolean;
+      message: string;
+      data: {
+        score_id: string;
+        score_name: string | null;
+        purpose: string | null;
+        when_to_record: string | null;
+        range: string | null;
+        risk_groups: string | null;
+        status: string | null;
+        reference: string | null;
+        developer_note: string | null;
+      };
+    }>(`/oncology/reference/scores/${scoreId}`, patch),
   listMedicines: () =>
     API.get<{ success: boolean; message: string; data: MedicineOption[] }>(
       "/chemotherapy/medicines"

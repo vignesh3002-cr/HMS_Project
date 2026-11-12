@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  autoSourceSummary,
   labKeyFor,
+  previewAutoFill,
   stageNumberFromText,
   suggestVariableValues,
   type AutoFillContext,
 } from "./scoreAutofill";
-import { parseVariable, type ScoreDefinition } from "./scoreEngine";
+import {
+  parseVariable,
+  type ScoreAssessment,
+  type ScoreDefinition,
+  type VariableValue,
+} from "./scoreEngine";
 import type { ScoreVariable } from "./types";
 
 const variable = (
@@ -243,5 +250,113 @@ describe("suggestVariableValues", () => {
     expect(suggestVariableValues(def, context({ labs: low }))[0].raw).toBe(
       "Yes"
     );
+  });
+});
+
+describe("previewAutoFill", () => {
+  const def = definition("Points sum", [
+    variable("Age >60", { criterion: "Yes", points: "1", source: "REG" }),
+    variable("Male sex", { criterion: "Yes", points: "1", source: "REG" }),
+  ]);
+
+  const assessment = (
+    values: Record<string, VariableValue>
+  ): ScoreAssessment => ({
+    scoreId: "T01",
+    method: "points_sum",
+    values,
+    selectedGroup: null,
+    note: "",
+    status: "incomplete",
+    updatedAt: null,
+  });
+
+  it("marks empty and auto values for replacement but keeps typed ones", () => {
+    const preview = previewAutoFill(
+      def,
+      assessment({
+        "Age >60": {
+          raw: "No",
+          numeric: null,
+          points: null,
+          source: "manual",
+        },
+      }),
+      context({ age: 65, sex: "Male" })
+    );
+
+    expect(preview.filled).toBe(1);
+    expect(preview.kept).toBe(1);
+    expect(preview.rows.find((row) => row.variableName === "Male sex")).toMatchObject({
+      raw: "Yes",
+      willReplace: true,
+      source: "REG",
+    });
+    expect(
+      preview.rows.find((row) => row.variableName === "Age >60")
+    ).toMatchObject({ currentRaw: "No", willReplace: false });
+    expect(preview.counts).toEqual({ REG: 1 });
+  });
+
+  it("replaces a previous auto value", () => {
+    const preview = previewAutoFill(
+      def,
+      assessment({
+        "Age >60": {
+          raw: "No",
+          numeric: null,
+          points: null,
+          source: "auto",
+        },
+      }),
+      context({ age: 65 })
+    );
+    expect(preview.rows[0]).toMatchObject({ willReplace: true, raw: "Yes" });
+  });
+
+  it("summarises the sources already in one assessment", () => {
+    expect(
+      autoSourceSummary({
+        a: {
+          raw: "65",
+          numeric: 65,
+          points: null,
+          source: "auto",
+          autoSource: "REG",
+          reason: "Age from registration",
+        },
+        b: {
+          raw: "4.5",
+          numeric: 4.5,
+          points: null,
+          source: "auto",
+          autoSource: "LAB",
+          reason: "ALBUMIN from lab report",
+        },
+        c: {
+          raw: "3",
+          numeric: 3,
+          points: null,
+          source: "auto",
+          autoSource: "LAB",
+        },
+        d: {
+          raw: "typed",
+          numeric: null,
+          points: null,
+          source: "manual",
+        },
+        e: {
+          raw: "",
+          numeric: null,
+          points: null,
+          source: "auto",
+          autoSource: "REG",
+        },
+      })
+    ).toEqual([
+      { source: "LAB", count: 2 },
+      { source: "REG", count: 1 },
+    ]);
   });
 });

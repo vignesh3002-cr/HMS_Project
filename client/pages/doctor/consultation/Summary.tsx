@@ -44,6 +44,7 @@ import type {
   MeasurementValues,
   RegimenProtocolDetail,
 } from "./types";
+import { readStoredScores } from "./scoreSummary";
 import {
   addDaysToIsoDate,
   COURSE_CLOSED_MESSAGE,
@@ -199,6 +200,12 @@ type StagingDetailRecord = {
   site?: string | null;
   disease_status?: string | null;
   notes?: string | null;
+  /* Persisted score payload (v2) and its legacy result columns. */
+  score?: string | null;
+  score_variables?: unknown;
+  score_result?: string | null;
+  risk_group?: string | null;
+  score_points?: number | null;
 };
 
 type SummaryPlan = {
@@ -1543,6 +1550,15 @@ const Summary: React.FC<{
     visitStaging?.pre_diagnosis ||
     visitStaging?.cancer_types?.cancer_type ||
     "";
+  /* Scores recorded at this visit (v2 payload, with the legacy single-score
+     columns as a fallback for older visits). */
+  const visitScores = readStoredScores(visitStaging?.score_variables ?? null, {
+    scoreId: visitStaging?.score ?? null,
+    name: visitStaging?.score ?? null,
+    total: visitStaging?.score_points ?? null,
+    group: visitStaging?.risk_group ?? null,
+    summary: visitStaging?.score_result ?? null,
+  });
   const ecog = summaryClinical?.performanceStatus
     ? [summaryClinical.performanceStatus.code, summaryClinical.performanceStatus.description].filter(Boolean).join(" - ")
     : "";
@@ -1718,6 +1734,19 @@ const Summary: React.FC<{
         ],
       },
       { kind: "text", label: "Notes", value: visitStaging?.notes ?? "" },
+    ]),
+    visitSection("scores", "Prognostic Scores", [
+      {
+        kind: "table",
+        head: ["Score", "Method", "Result", "Risk group", "Note"],
+        rows: visitScores.map((score) => [
+          score.name,
+          score.methodLabel ?? score.method ?? "",
+          score.summary,
+          score.group ?? "",
+          score.note,
+        ]),
+      },
     ]),
     visitSection("investigations", "Investigations / Scans Advised", [
       {

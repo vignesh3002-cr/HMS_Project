@@ -24,11 +24,14 @@ import {
   buildScoreDefinition,
   emptyAssessment,
   evaluateScore,
+  findGroup,
   hydrateAssessment,
+  methodLabel,
   resolveVariableValue,
   serializeAssessment,
   type ScoreAssessment,
   type ScoreDefinition,
+  type VariableValue,
 } from "./scoreEngine";
 import {
   labKeyFor,
@@ -37,7 +40,15 @@ import {
   type AutoFillContext,
   type LabValue,
 } from "./scoreAutofill";
-import { ScoreWorkspace } from "./ScoreWorkspace";
+import { ScoreWorkspace, type CatalogueEntry, type CataloguePatch } from "./ScoreWorkspace";
+import {
+  readScoreHistory,
+  scoreResultText,
+  scoreWarnings,
+  scoresToCsv,
+  type ScoreHistory,
+  type ScoreHistoryEntry,
+} from "./scoreSummary";
 import { patientApi, type PatientRecord } from "../../../api/patient.api";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import {
@@ -1584,6 +1595,14 @@ type CancerScoreItem = {
   score_value: string;
   input_type: string | null;
   subtype_keywords: string | null;
+  /* Catalogue metadata (present on the list rows, used by the browser). */
+  purpose?: string | null;
+  when_to_record?: string | null;
+  score_range?: string | null;
+  risk_groups?: string | null;
+  score_status?: string | null;
+  score_reference?: string | null;
+  developer_note?: string | null;
 };
 
 /* An Investigation Results test of a cancer type (investigation_parameter):
@@ -1705,6 +1724,32 @@ const Diagnosis: React.FC<{
     useState<EncounterRecord | null>(null);
   const [autoFillBusy, setAutoFillBusy] = useState(false);
   const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
+  /* Snapshot taken before an auto-fill so "Undo auto-fill" restores every
+     assessment exactly as it was. */
+  const [autoFillUndo, setAutoFillUndo] = useState<Record<
+    string,
+    ScoreAssessment
+  > | null>(null);
+
+  /* Cross-visit score history (read-only) for comparison and CSV export. */
+  const [stagingHistoryRows, setStagingHistoryRows] = useState<unknown[]>([]);
+  const [currentStagingDetailId, setCurrentStagingDetailId] = useState<
+    string | null
+  >(null);
+
+  /* Pinned scores, kept per browser (not per patient - a doctor's favourite
+     scores are the same whichever patient is open). */
+  const [favouriteScores, setFavouriteScores] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("hms_score_favourites");
+      const parsed = JSON.parse(raw ?? "[]");
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     if (!resolvedPatientId) {
@@ -1751,6 +1796,11 @@ const Diagnosis: React.FC<{
       cancelled = true;
     };
   }, [resolvedPatientId]);
+
+  const scoreHistory: ScoreHistory = React.useMemo(
+    () => readScoreHistory(stagingHistoryRows),
+    [stagingHistoryRows]
+  );
 
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
 
@@ -1881,6 +1931,10 @@ const Diagnosis: React.FC<{
         if (detail) {
           pendingScoreVariablesRef.current = detail.score_variables ?? null;
           hydratedScoreIdsRef.current = new Set();
+          /* Only this visit's own row is the one to exclude from "previous
+             visit" comparisons; a row borrowed from an earlier visit stays a
+             valid comparison point. */
+          setCurrentStagingDetailId(ownStagingId ? detail.staging_detail_id : null);
         }
 
         const state = detail
@@ -2270,6 +2324,35 @@ const Diagnosis: React.FC<{
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
+
+  /* Every visit that recorded a score, for the comparison and export panels.
+     Refetched after a save so the visit just written appears immediately. */
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setStagingHistoryRows([]);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: unknown[] }>("/oncology/staging-details", {
+      params: { patient_id: resolvedPatientId, page: 1, limit: 50 },
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setStagingHistoryRows(
+            Array.isArray(response.data.data) ? response.data.data : []
+          );
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Failed to load the score history:", error);
+          setStagingHistoryRows([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, savingDiagnosis]);
 
   const diagnosisRequestRef = useRef(0);
   const stagingRequestRef = useRef(0);
@@ -3166,11 +3249,15 @@ const Diagnosis: React.FC<{
   const handleAssessmentChange = (
     scoreId: string,
     assessment: ScoreAssessment
-  ) =>
+  ) => {
+    /* A manual edit invalidates the auto-fill undo snapshot, so "Undo" can
+       never silently revert values typed after the auto-fill. */
+    setAutoFillUndo(null);
     setScoreAssessments((previous) => ({
       ...previous,
       [scoreId]: assessment,
     }));
+  };
 
   /* ---- Auto-fill from data the consultation already holds ---- */
   const toNumberOrNull = (value: unknown): number | null => {
@@ -3289,8 +3376,81 @@ const Diagnosis: React.FC<{
     };
   };
 
-  /* Fill the scores' inputs from registration / vitals / labs / stage and
-     the visit's other score results. Values the clinician typed are kept. */
+  /* Write the exact rows the doctor ticked in the workspace preview. Every
+     selected row is applied (the preview already excluded values the doctor
+     chose to keep) and a snapshot is kept so the change can be undone. */
+  const applyAutoFillSelection = (
+    selection: { scoreId: string; variableIds: string[] }[]
+  ) => {
+    const target = selection.filter(
+      (item) =>
+        item.variableIds.length > 0 &&
+        scoreDefinitions[item.scoreId] &&
+        scoreAssessments[item.scoreId]
+    );
+    if (target.length === 0) {
+      setAutoFillNotice("No values were selected to auto-fill.");
+      return;
+    }
+
+    setAutoFillBusy(true);
+    setAutoFillNotice(null);
+    try {
+      const context = buildAutoFillContext();
+      const nextAssessments = { ...scoreAssessments };
+      let filled = 0;
+
+      for (const item of target) {
+        const definition = scoreDefinitions[item.scoreId];
+        const assessment = nextAssessments[item.scoreId];
+        if (!definition || !assessment || assessment.status === "not_applicable") {
+          continue;
+        }
+        const wanted = new Set(item.variableIds);
+        const suggestions = suggestVariableValues(definition, context).filter(
+          (suggestion) => wanted.has(suggestion.variableId)
+        );
+        if (suggestions.length === 0) continue;
+
+        const values = { ...assessment.values };
+        for (const suggestion of suggestions) {
+          const variable = definition.variables.find(
+            (candidate) => candidate.id === suggestion.variableId
+          );
+          if (!variable) continue;
+          values[variable.id] = {
+            ...resolveVariableValue(variable, suggestion.raw, "auto"),
+            autoSource: suggestion.source,
+            reason: suggestion.reason,
+          };
+          filled++;
+        }
+
+        nextAssessments[item.scoreId] = {
+          ...assessment,
+          values,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      if (filled > 0) setAutoFillUndo({ ...scoreAssessments });
+      setScoreAssessments(nextAssessments);
+      setAutoFillNotice(
+        filled > 0
+          ? `Auto-filled ${filled} value${filled === 1 ? "" : "s"}. Use “Undo auto-fill” to restore the previous values.`
+          : "The selected values were already up to date."
+      );
+    } catch (error) {
+      console.error("Auto-fill failed:", error);
+      setAutoFillNotice(
+        "Auto-fill could not read the patient data. Enter the values manually."
+      );
+    } finally {
+      setAutoFillBusy(false);
+    }
+  };
+
+  /* Fallback for callers without a preview: fill every empty/auto value. */
   const applyAutoFill = (scoreIds?: string[]) => {
     const targetIds = (scoreIds ?? Object.keys(scoreDefinitions)).filter(
       (scoreId) => scoreDefinitions[scoreId] && scoreAssessments[scoreId]
@@ -3335,11 +3495,11 @@ const Diagnosis: React.FC<{
             kept++;
             continue;
           }
-          values[variable.id] = resolveVariableValue(
-            variable,
-            suggestion.raw,
-            "auto"
-          );
+          values[variable.id] = {
+            ...resolveVariableValue(variable, suggestion.raw, "auto"),
+            autoSource: suggestion.source,
+            reason: suggestion.reason,
+          };
           filled++;
         }
 
@@ -3350,6 +3510,7 @@ const Diagnosis: React.FC<{
         };
       }
 
+      if (filled > 0) setAutoFillUndo({ ...scoreAssessments });
       setScoreAssessments(nextAssessments);
       setAutoFillNotice(
         filled > 0
@@ -3368,6 +3529,88 @@ const Diagnosis: React.FC<{
     } finally {
       setAutoFillBusy(false);
     }
+  };
+
+  const handleUndoAutoFill = () => {
+    if (!autoFillUndo) return;
+    setScoreAssessments(autoFillUndo);
+    setAutoFillUndo(null);
+    setAutoFillNotice("Auto-fill undone. Your earlier values are back.");
+  };
+
+  /* Copy the previous visit's values for one score into this visit. */
+  const handleCopyPreviousScore = (
+    scoreId: string,
+    entry: ScoreHistoryEntry
+  ) => {
+    const definition = scoreDefinitions[scoreId];
+    const assessment = scoreAssessments[scoreId];
+    if (!definition || !assessment) return;
+
+    const values: Record<string, VariableValue> = {};
+    for (const variable of definition.variables) {
+      const stored = entry.values[variable.id];
+      if (!stored?.raw?.trim()) continue;
+      values[variable.id] = {
+        ...resolveVariableValue(variable, stored.raw, "manual"),
+        autoSource: undefined,
+        reason: undefined,
+      };
+    }
+    if (Object.keys(values).length === 0) {
+      setAutoFillNotice(
+        `The previous ${definition.name} has no stored values to copy.`
+      );
+      return;
+    }
+
+    const group = entry.group
+      ? findGroup(definition.groups, entry.group)
+      : null;
+
+    setAutoFillUndo({ ...scoreAssessments });
+    setScoreAssessments((previous) => ({
+      ...previous,
+      [scoreId]: {
+        ...assessment,
+        values,
+        selectedGroup: group?.score_group_id ?? assessment.selectedGroup,
+        note: assessment.note.trim() ? assessment.note : entry.note,
+        status:
+          assessment.status === "not_applicable"
+            ? "incomplete"
+            : assessment.status,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+    setAutoFillNotice(
+      `Copied the previous ${definition.name} values from ${entry.date ?? "the last visit"}.`
+    );
+  };
+
+  const handleToggleFavourite = (scoreId: string) => {
+    setFavouriteScores((previous) => {
+      const next = previous.includes(scoreId)
+        ? previous.filter((item) => item !== scoreId)
+        : [...previous, scoreId];
+      localStorage.setItem("hms_score_favourites", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleExportScoresCsv = () => {
+    const csv = scoresToCsv(scoreHistory);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `scores_${resolvedPatientId ?? "patient"}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const handleScoreRemove = (scoreId: string) => {
@@ -3580,6 +3823,49 @@ const Diagnosis: React.FC<{
     if (!hasAnyData) {
       setDiagnosisError(
         "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
+
+    /* Save-time score validation: a range/entry error blocks the save (the
+       doctor sees it inline in the workspace). Incomplete scores are shown as
+       warnings but may still be saved. */
+    const scoreEntriesForValidation = orderByType(formData.score)
+      .map((value) => {
+        const item = scoreItemOf(value);
+        const definition = item ? scoreDefinitions[item.score_id] : undefined;
+        const assessment = item ? scoreAssessments[item.score_id] : undefined;
+        return definition && assessment
+          ? {
+              definition,
+              assessment,
+              evaluation: evaluateScore(definition, assessment),
+            }
+          : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          definition: ScoreDefinition;
+          assessment: ScoreAssessment;
+          evaluation: ReturnType<typeof evaluateScore>;
+        } => Boolean(entry)
+      );
+    const scoreValidation = scoreWarnings(
+      scoreEntriesForValidation.map((entry) => ({
+        definition: entry.definition,
+        evaluation: entry.evaluation,
+      }))
+    );
+    const blockingScoreErrors = scoreValidation.filter(
+      (warning) => warning.severity === "error"
+    );
+    if (blockingScoreErrors.length > 0) {
+      setDiagnosisError(
+        `Please fix the score values before saving. ${blockingScoreErrors
+          .map((warning) => warning.message)
+          .join(" ")}`
       );
       return;
     }
@@ -3871,6 +4157,17 @@ const Diagnosis: React.FC<{
               scores: selectedScoreEntries.map((entry) => ({
                 ...serializeAssessment(entry.assessment),
                 status: entry.evaluation.status,
+                name: entry.definition.name,
+                methodLabel: methodLabel(entry.definition.method),
+                total: entry.evaluation.total,
+                totalLabel: entry.evaluation.totalLabel,
+                group: entry.evaluation.groupLabel,
+                groupReason: entry.evaluation.groupReason,
+                summary: scoreResultText(
+                  entry.evaluation.total,
+                  entry.evaluation.totalLabel,
+                  entry.evaluation.groupLabel
+                ),
               })),
             }
           : null;
@@ -3884,7 +4181,7 @@ const Diagnosis: React.FC<{
           resultParts.push(primaryScore.evaluation.groupLabel);
         }
       }
-      const scoreResultText =
+      const legacyScoreResultText =
         resultParts.length > 0
           ? resultParts.join(" - ")
           : primaryScore?.evaluation.status === "not_applicable"
@@ -3923,7 +4220,7 @@ const Diagnosis: React.FC<{
         score: scoreText || null,
         score_system: scoreSystems || null,
         score_variables: scoreVariablesJson ?? null,
-        score_result: scoreResultText,
+        score_result: legacyScoreResultText,
         risk_group: primaryScore?.evaluation.groupLabel ?? null,
         score_points: primaryScore?.evaluation.total ?? null,
         diagnosis_date: diagnosisDateIso || null,
@@ -3996,6 +4293,7 @@ const Diagnosis: React.FC<{
           ownVisit: unchanged ? baseline.ownVisit : true,
           signature,
         };
+        setCurrentStagingDetailId(stagingDetailId);
       }
 
       if (stagingDetailId) {
@@ -4103,6 +4401,102 @@ const Diagnosis: React.FC<{
       ): entry is { definition: ScoreDefinition; assessment: ScoreAssessment } =>
         Boolean(entry)
     );
+
+  /* The catalogue browser lists the scores available for the picked cancer
+     types, with their metadata, so the doctor can pin or add one. A score
+     shared by several types is listed once. */
+  const catalogueById = new Map<string, CatalogueEntry>();
+  for (const score of scoreMasterOptions) {
+    if (catalogueById.has(score.score_id)) continue;
+    catalogueById.set(score.score_id, {
+      scoreId: score.score_id,
+      name: score.score_value,
+      system: score.score_system,
+      method: score.input_type,
+      purpose: score.purpose ?? null,
+      whenToRecord: score.when_to_record ?? null,
+      range: score.score_range ?? null,
+      riskGroups: score.risk_groups ?? null,
+      status: score.score_status ?? null,
+      reference: score.score_reference ?? null,
+      developerNote: score.developer_note ?? null,
+      cancerType: score.cancerType,
+      selected: orderByType(formData.score).some(
+        (value) => scoreItemOf(value)?.score_id === score.score_id
+      ),
+    });
+  }
+  const scoreCatalogueEntries = Array.from(catalogueById.values());
+
+  const handleAddCatalogueScore = (entry: CatalogueEntry) => {
+    if (!entry.cancerType) {
+      setAutoFillNotice("Pick a cancer type before adding a score.");
+      return;
+    }
+    handleScoreToggle(
+      `${entry.cancerType}|${entry.name}`,
+      true,
+      entry.system ?? undefined
+    );
+  };
+
+  /* Save the catalogue metadata edited in the workspace browser. Returns an
+     error message for the dialog, or null on success. */
+  const handleUpdateCatalogueScore = async (
+    scoreId: string,
+    patch: CataloguePatch
+  ): Promise<string | null> => {
+    try {
+      const response = await chemotherapyApi.updateScore(scoreId, patch);
+      const updated = response.data.data;
+
+      /* The same score is listed under every cancer type that uses it. */
+      setScoreMasterOptions((previous) =>
+        previous.map((item) =>
+          item.score_id === scoreId
+            ? {
+                ...item,
+                score_system: updated.score_name ?? item.score_system,
+                purpose: updated.purpose ?? null,
+                when_to_record: updated.when_to_record ?? null,
+                score_range: updated.range ?? null,
+                risk_groups: updated.risk_groups ?? null,
+                score_status: updated.status ?? null,
+                score_reference: updated.reference ?? null,
+                developer_note: updated.developer_note ?? null,
+              }
+            : item
+        )
+      );
+
+      /* Keep the loaded definition (the score card) in step with the edit. */
+      setScoreDefinitions((previous) => {
+        const current = previous[scoreId];
+        if (!current) return previous;
+        return {
+          ...previous,
+          [scoreId]: {
+            ...current,
+            purpose: updated.purpose ?? null,
+            whenToRecord: updated.when_to_record ?? null,
+            range: updated.range ?? null,
+            riskGroups: updated.risk_groups ?? null,
+            status: updated.status ?? null,
+            reference: updated.reference ?? null,
+            developerNote: updated.developer_note ?? null,
+          },
+        };
+      });
+
+      setAutoFillNotice("Score catalogue metadata saved.");
+      return null;
+    } catch (error) {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? "The catalogue metadata could not be saved.";
+      return message;
+    }
+  };
 
   const content = (
     <section className="flex w-full flex-1 flex-col">
@@ -4334,8 +4728,21 @@ const Diagnosis: React.FC<{
             loading={scoreDetailsLoading}
             autoFillBusy={autoFillBusy}
             autoFillNotice={autoFillNotice}
+            autoFillContext={buildAutoFillContext()}
+            history={scoreHistory}
+            currentStagingDetailId={currentStagingDetailId}
+            autoFillUndoAvailable={Boolean(autoFillUndo)}
+            favourites={favouriteScores}
+            catalogue={scoreCatalogueEntries}
             onAutoFillAll={() => applyAutoFill()}
             onAutoFillOne={(scoreId) => applyAutoFill([scoreId])}
+            onApplyAutoFill={applyAutoFillSelection}
+            onUndoAutoFill={handleUndoAutoFill}
+            onCopyPrevious={handleCopyPreviousScore}
+            onToggleFavourite={handleToggleFavourite}
+            onAddCatalogue={handleAddCatalogueScore}
+            onUpdateCatalogue={handleUpdateCatalogueScore}
+            onExportCsv={handleExportScoresCsv}
             onAssessmentChange={handleAssessmentChange}
             onRemove={handleScoreRemove}
           />

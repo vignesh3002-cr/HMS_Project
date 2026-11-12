@@ -11,7 +11,9 @@ import {
   parseRange,
   rangeIncludes,
   type ParsedVariable,
+  type ScoreAssessment,
   type ScoreDefinition,
+  type VariableValue,
 } from "./scoreEngine";
 
 export type LabValue = {
@@ -527,4 +529,80 @@ export const suggestVariableValues = (
   }
 
   return suggestions;
+};
+
+/* ------------------------------------------------------------------ */
+/* Preview + provenance summary                                        */
+/* ------------------------------------------------------------------ */
+
+export type AutoFillPreviewRow = AutoFillSuggestion & {
+  variableName: string;
+  currentRaw: string;
+  /* False when the clinician typed a value the preview will keep. */
+  willReplace: boolean;
+};
+
+export type AutoFillPreview = {
+  scoreId: string;
+  rows: AutoFillPreviewRow[];
+  /* Only the rows that would actually be written, by data source. */
+  counts: Record<string, number>;
+  filled: number;
+  kept: number;
+};
+
+/* What the auto-fill would change, without touching the assessment. A value
+   the clinician typed is never replaced; an earlier auto value is. */
+export const previewAutoFill = (
+  definition: ScoreDefinition,
+  assessment: ScoreAssessment | null,
+  context: AutoFillContext
+): AutoFillPreview => {
+  const suggestions = suggestVariableValues(definition, context);
+  const rows: AutoFillPreviewRow[] = suggestions.map((suggestion) => {
+    const variable = definition.variables.find(
+      (item) => item.id === suggestion.variableId
+    );
+    const current = assessment?.values[suggestion.variableId];
+    const hasTypedValue =
+      Boolean(current?.raw?.trim()) && current?.source !== "auto";
+    return {
+      ...suggestion,
+      variableName: variable?.name ?? suggestion.variableId,
+      currentRaw: current?.raw ?? "",
+      willReplace: !hasTypedValue,
+    };
+  });
+
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (!row.willReplace) continue;
+    counts[row.source] = (counts[row.source] ?? 0) + 1;
+  }
+
+  return {
+    scoreId: definition.scoreId,
+    rows,
+    counts,
+    filled: rows.filter((row) => row.willReplace).length,
+    kept: rows.filter((row) => !row.willReplace).length,
+  };
+};
+
+export type SourceCount = { source: string; count: number };
+
+/* The data sources already represented in one assessment, for the card's
+   "auto-filled from" line. */
+export const autoSourceSummary = (
+  values: Record<string, VariableValue>
+): SourceCount[] => {
+  const counts: Record<string, number> = {};
+  for (const value of Object.values(values)) {
+    if (value.source !== "auto" || !value.raw?.trim()) continue;
+    const source = value.autoSource ?? "AUTO";
+    counts[source] = (counts[source] ?? 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([source, count]) => ({ source, count }))
+    .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
 };

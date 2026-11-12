@@ -58,6 +58,10 @@ export type VariableValue = {
   numeric: number | null;
   points: number | null;
   source: "auto" | "manual" | null;
+  /* Provenance for an auto-filled value: which data source it came from
+     (REG / VIT / LAB / STG / DER) and the human-readable reason. */
+  autoSource?: string;
+  reason?: string;
 };
 
 export type ScoreDefinition = {
@@ -101,6 +105,8 @@ export type ScoreEvaluation = {
   group: ScoreGroup | null;
   groupLabel: string | null;
   autoGroup: boolean;
+  /* Why the group was assigned (range / rule / clinician). */
+  groupReason: string | null;
   completed: number;
   totalVariables: number;
   missing: string[];
@@ -960,7 +966,12 @@ export const evaluateScore = (
     const numeric = value.numeric;
 
     let error: string | null = null;
-    if (variable.kind !== "text" && stored.raw?.trim() && numeric == null) {
+    if (
+      variable.kind !== "text" &&
+      variable.kind !== "derived" &&
+      stored.raw?.trim() &&
+      numeric == null
+    ) {
       error = "Enter a valid number.";
     }
     if (
@@ -1094,12 +1105,19 @@ export const evaluateScore = (
   }
 
   /* A clinician-picked group always wins, whatever the method. */
-  if (assessment.selectedGroup) {
-    const selected = findGroup(definition.groups, assessment.selectedGroup);
-    if (selected) {
-      group = selected;
-      autoGroup = false;
-    }
+  let groupReason: string | null = null;
+  const clinicianGroup =
+    assessment.selectedGroup != null
+      ? findGroup(definition.groups, assessment.selectedGroup)
+      : null;
+  if (clinicianGroup) {
+    group = clinicianGroup;
+    autoGroup = false;
+    groupReason = "Selected by clinician";
+  } else if (group && autoGroup) {
+    groupReason = group.group_range?.trim()
+      ? `Matched range ${group.group_range.trim()}`
+      : "Matched the score criteria";
   }
 
   breakdown = resolved
@@ -1150,6 +1168,7 @@ export const evaluateScore = (
     group,
     groupLabel: groupLabel(group),
     autoGroup,
+    groupReason,
     completed: resolved.filter((item) => item.value.raw.trim()).length,
     totalVariables: resolved.length,
     missing: Array.from(new Set(missing)),
@@ -1217,6 +1236,9 @@ export const hydrateAssessment = (
             typeof stored.numeric === "number" ? stored.numeric : null,
           points: typeof stored.points === "number" ? stored.points : null,
           source: stored.source === "auto" ? "auto" : stored.source === "manual" ? "manual" : null,
+          autoSource:
+            typeof stored.autoSource === "string" ? stored.autoSource : undefined,
+          reason: typeof stored.reason === "string" ? stored.reason : undefined,
         };
       }
     }
