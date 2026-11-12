@@ -709,6 +709,9 @@ export const ScoreWorkspace: React.FC<{
   autoFillContext?: AutoFillContext | null;
   history?: ScoreHistory;
   currentStagingDetailId?: string | null;
+  /* Visit date the prefilled values came from, when they are a prior visit's
+     row rather than this visit's own saved assessment. */
+  restoredFromVisit?: string | null;
   warnings?: ScoreWarning[];
   autoFillUndoAvailable?: boolean;
   favourites?: string[];
@@ -737,6 +740,7 @@ export const ScoreWorkspace: React.FC<{
   autoFillContext = null,
   history,
   currentStagingDetailId,
+  restoredFromVisit = null,
   warnings,
   autoFillUndoAvailable = false,
   favourites = [],
@@ -941,6 +945,11 @@ export const ScoreWorkspace: React.FC<{
                   ).length
                 }{" "}
                 complete
+              </span>
+            )}
+            {restoredFromVisit && (
+              <span className="rounded-full bg-sky-50 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-100">
+                Restored from visit {restoredFromVisit}
               </span>
             )}
             {autoFilledTotal > 0 && (

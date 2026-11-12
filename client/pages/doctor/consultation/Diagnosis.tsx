@@ -42,6 +42,10 @@ import {
 } from "./scoreAutofill";
 import { ScoreWorkspace, type CatalogueEntry, type CataloguePatch } from "./ScoreWorkspace";
 import {
+  scoreFingerprint,
+  scoreFingerprintFromStored,
+} from "./scoreFingerprint";
+import {
   readScoreHistory,
   scoreResultText,
   scoreWarnings,
@@ -1853,6 +1857,10 @@ const Diagnosis: React.FC<{
     }
   };
   const visitContextReadyRef = useRef(false);
+  /* The encounter the hydrate pass resolved, for the score draft. Starts
+     from the prop so a draft written before the lookup finishes still
+     carries the visit. */
+  const visitEncounterRef = useRef(encounterNo ?? "");
 
   /* The staging detail the form was filled from and its selections: Save
      reuses it when nothing changed, else records this visit's own row. */
@@ -1860,7 +1868,21 @@ const Diagnosis: React.FC<{
     stagingDetailId: string;
     ownVisit: boolean;
     signature: string;
+    /* The score assessments stored on that row, in the same canonical form
+       as scoreFingerprint. null = legacy payload that cannot be compared. */
+    scoreSignature: string | null;
   } | null>(null);
+
+  /* Values typed in the score workspace that are not in formData, kept with
+     the visit so switching steps does not lose them. */
+  const scoreDraftKey = `hms_diagnosis_scores_${resolvedPatientId}`;
+  const pendingDraftScoresRef = useRef<unknown>(null);
+  const scoreDraftReadyRef = useRef(false);
+  const scoreDraftPatientRef = useRef(resolvedPatientId);
+  /* The visit the prefilled score values came from (badge in the workspace). */
+  const [restoredScoreVisit, setRestoredScoreVisit] = useState<string | null>(
+    null
+  );
 
   /* The cancer type catalog, and the types whose options still have to
      load once it arrives (a prefill that landed before it). */
@@ -1906,12 +1928,18 @@ const Diagnosis: React.FC<{
      becomes the baseline Save compares against. */
   useEffect(() => {
     if (!resolvedPatientId) return;
-    /* Read now: the draft-save effect below rewrites it after this render. */
+    /* Read now: the draft-save effects below rewrite them after this render. */
     const rawDraft = localStorage.getItem(diagnosisDraftKey);
+    const rawScoreDraft = localStorage.getItem(scoreDraftKey);
+    if (scoreDraftPatientRef.current !== resolvedPatientId) {
+      scoreDraftPatientRef.current = resolvedPatientId;
+      scoreDraftReadyRef.current = false;
+    }
     let cancelled = false;
     const hydrate = async () => {
       try {
         const visitEncounterNo = await resolveVisitEncounterNo().catch(() => "");
+        visitEncounterRef.current = visitEncounterNo;
         const ownStagingId = visitEncounterNo
           ? await findStagingDetailForEncounter(resolvedPatientId, visitEncounterNo)
           : "";
@@ -1926,17 +1954,6 @@ const Diagnosis: React.FC<{
           : null;
         if (cancelled) return;
 
-        /* Keep the saved score values; the workspace hydrates them once the
-           score definitions arrive (the master lists load asynchronously). */
-        if (detail) {
-          pendingScoreVariablesRef.current = detail.score_variables ?? null;
-          hydratedScoreIdsRef.current = new Set();
-          /* Only this visit's own row is the one to exclude from "previous
-             visit" comparisons; a row borrowed from an earlier visit stays a
-             valid comparison point. */
-          setCurrentStagingDetailId(ownStagingId ? detail.staging_detail_id : null);
-        }
-
         const state = detail
           ? parseFormState(detail.form_state) ?? formStateFromColumns(detail)
           : null;
@@ -1944,6 +1961,48 @@ const Diagnosis: React.FC<{
         const keepDraft = visitEncounterNo
           ? context?.encounterNo === visitEncounterNo && rawDraft !== null
           : Boolean(rawDraft && hasDraftContent(rawDraft));
+
+        /* The doctor's unsaved score values for this same visit win over the
+           saved row (the workspace hydrates them once the definitions
+           arrive). */
+        let scoreDraft: { encounterNo: string; scores: unknown } | null = null;
+        try {
+          const parsed = JSON.parse(rawScoreDraft ?? "null");
+          if (parsed && typeof parsed === "object" && parsed.scores) {
+            scoreDraft = {
+              encounterNo: String((parsed as Record<string, unknown>).encounterNo ?? ""),
+              scores: (parsed as Record<string, unknown>).scores,
+            };
+          }
+        } catch {
+          /* A corrupt draft is ignored. */
+        }
+        const draftBelongsToVisit =
+          scoreDraft !== null &&
+          (visitEncounterNo
+            ? scoreDraft.encounterNo === visitEncounterNo
+            : keepDraft);
+
+        /* Keep the saved score values; the workspace hydrates them once the
+           score definitions arrive (the master lists load asynchronously).
+           A same-visit draft is restored even when the patient has no saved
+           staging detail yet. */
+        pendingDraftScoresRef.current = draftBelongsToVisit
+          ? scoreDraft?.scores ?? null
+          : null;
+        if (detail) {
+          pendingScoreVariablesRef.current = detail.score_variables ?? null;
+          hydratedScoreIdsRef.current = new Set();
+          /* Only this visit's own row is the one to exclude from "previous
+             visit" comparisons; a row borrowed from an earlier visit stays a
+             valid comparison point. */
+          setCurrentStagingDetailId(ownStagingId ? detail.staging_detail_id : null);
+          setRestoredScoreVisit(
+            !ownStagingId && !draftBelongsToVisit && detail.visit_date
+              ? toPickedDateValue(detail.visit_date)
+              : null
+          );
+        }
 
         if (keepDraft) {
           setMetastasisSites(context?.metastasisSites ?? []);
@@ -1974,6 +2033,9 @@ const Diagnosis: React.FC<{
                 stagingDetailId: detail.staging_detail_id,
                 ownVisit: Boolean(ownStagingId),
                 signature: formStateSignature(state),
+                scoreSignature: scoreFingerprintFromStored(
+                  detail.score_variables
+                ),
               }
             : null;
       } catch (error) {
@@ -3221,11 +3283,32 @@ const Diagnosis: React.FC<{
 
   useEffect(() => {
     const raw = pendingScoreVariablesRef.current;
-    if (!raw) return;
+    const draftRaw = pendingDraftScoresRef.current;
+    if (!raw && !draftRaw) {
+      scoreDraftReadyRef.current = true;
+      return;
+    }
     const items = orderByType(formData.score)
       .map((value) => scoreItemOf(value))
       .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
-    if (items.length === 0) return;
+    if (items.length === 0) {
+      scoreDraftReadyRef.current = true;
+      return;
+    }
+
+    /* A draft is the v2 payload of this visit's unsaved work; it restores
+       per score, falling back to the saved row for scores it does not
+       contain. */
+    const draftHasScore = (scoreId: string): boolean => {
+      if (!draftRaw || typeof draftRaw !== "object") return false;
+      const source = draftRaw as Record<string, unknown>;
+      if (Array.isArray(source.scores)) {
+        return source.scores.some(
+          (item) => (item as { scoreId?: string })?.scoreId === scoreId
+        );
+      }
+      return source.scoreId === scoreId;
+    };
 
     let unresolved = 0;
     for (const item of items) {
@@ -3235,16 +3318,72 @@ const Diagnosis: React.FC<{
         unresolved++;
         continue;
       }
-      const assessment = hydrateAssessment(raw, definition);
+      const assessment = hydrateAssessment(
+        draftHasScore(item.score_id) ? draftRaw : raw,
+        definition
+      );
       setScoreAssessments((previous) => ({
         ...previous,
         [item.score_id]: assessment,
       }));
       hydratedScoreIdsRef.current.add(item.score_id);
     }
-    if (unresolved === 0) pendingScoreVariablesRef.current = null;
+    if (unresolved === 0) {
+      pendingScoreVariablesRef.current = null;
+      pendingDraftScoresRef.current = null;
+      scoreDraftReadyRef.current = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoreDefinitions, formData.score, scoreMasterOptions]);
+
+  /* Keep typed score values with the visit, exactly like the form draft, so
+     switching to another step and back does not lose them before Save. */
+  useEffect(() => {
+    if (!resolvedPatientId || !scoreDraftReadyRef.current) return;
+
+    const entries = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+
+    /* Wait until every selected score has loaded its assessment, otherwise
+       an early render would overwrite the stored draft with empty values. */
+    if (entries.some((item) => !scoreAssessments[item.score_id])) return;
+    /* Also wait for the saved/typed values to be hydrated when the hydrate
+       pass has one (pendingScoreVariablesRef/pendingDraftScoresRef). */
+    if (
+      (pendingScoreVariablesRef.current || pendingDraftScoresRef.current) &&
+      entries.some((item) => !hydratedScoreIdsRef.current.has(item.score_id))
+    ) {
+      return;
+    }
+
+    localStorage.setItem(
+      scoreDraftKey,
+      JSON.stringify({
+        encounterNo: visitEncounterRef.current,
+        scores: {
+          version: 2,
+          scores: entries.map((item) => {
+            const assessment = scoreAssessments[item.score_id];
+            const definition = scoreDefinitions[item.score_id];
+            return {
+              ...serializeAssessment(assessment),
+              status: definition
+                ? evaluateScore(definition, assessment).status
+                : assessment.status,
+            };
+          }),
+        },
+      })
+    );
+  }, [
+    scoreAssessments,
+    scoreDefinitions,
+    formData.score,
+    scoreDraftKey,
+    resolvedPatientId,
+    scoreMasterOptions,
+  ]);
 
   const handleAssessmentChange = (
     scoreId: string,
@@ -4119,6 +4258,25 @@ const Diagnosis: React.FC<{
         orderByType(formData.score).map(scoreSystemOf)
       );
 
+      /* Saving while a score's definition is still loading would persist an
+         empty/partial assessment over real data, so wait for all of them. */
+      const pendingScoreValues = orderByType(formData.score).filter((value) => {
+        const item = scoreItemOf(value);
+        /* A score whose master row is gone cannot be loaded or unselected;
+           skip it rather than blocking Save forever. */
+        if (!item) return false;
+        return (
+          !scoreDefinitions[item.score_id] ||
+          !scoreAssessments[item.score_id]
+        );
+      });
+      if (pendingScoreValues.length > 0) {
+        setDiagnosisError(
+          "Score details are still loading. Wait a moment, then save again so every score is recorded."
+        );
+        return;
+      }
+
       /* Every picked score keeps its own typed assessment (v2). The first
          complete one also fills the legacy single-value columns. */
       const selectedScoreEntries = orderByType(formData.score)
@@ -4142,6 +4300,13 @@ const Diagnosis: React.FC<{
             evaluation: ReturnType<typeof evaluateScore>;
           } => Boolean(entry)
         );
+
+      const scoreSignature = scoreFingerprint(
+        selectedScoreEntries.map((entry) => ({
+          assessment: entry.assessment,
+          status: entry.evaluation.status,
+        }))
+      );
 
       const primaryScore =
         selectedScoreEntries.find(
@@ -4251,7 +4416,13 @@ const Diagnosis: React.FC<{
          their diagnosis in the patient's history. */
       const baseline = baselineRef.current;
       const signature = formStateSignature(formState);
-      const unchanged = baseline !== null && baseline.signature === signature;
+      /* The form's selections and the score assessments both count: editing
+         only a criterion (same score picked) is still a change. */
+      const unchanged =
+        baseline !== null &&
+        baseline.signature === signature &&
+        baseline.scoreSignature !== null &&
+        baseline.scoreSignature === scoreSignature;
 
       let stagingDetailId = unchanged
         ? baseline.stagingDetailId
@@ -4292,8 +4463,11 @@ const Diagnosis: React.FC<{
           stagingDetailId,
           ownVisit: unchanged ? baseline.ownVisit : true,
           signature,
+          scoreSignature,
         };
         setCurrentStagingDetailId(stagingDetailId);
+        /* Saved values now come from the row, not the local draft. */
+        localStorage.removeItem(scoreDraftKey);
       }
 
       if (stagingDetailId) {
@@ -4731,6 +4905,7 @@ const Diagnosis: React.FC<{
             autoFillContext={buildAutoFillContext()}
             history={scoreHistory}
             currentStagingDetailId={currentStagingDetailId}
+            restoredFromVisit={restoredScoreVisit}
             autoFillUndoAvailable={Boolean(autoFillUndo)}
             favourites={favouriteScores}
             catalogue={scoreCatalogueEntries}
