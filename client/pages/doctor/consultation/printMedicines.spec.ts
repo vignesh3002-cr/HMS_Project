@@ -143,7 +143,7 @@ describe("buildAdministrationPhrase", () => {
 });
 
 describe("buildMedicineSentence", () => {
-  it("uses the patient dose first and the protocol dose in brackets", () => {
+  it("puts the medicine's own dose in brackets, then the patient dose", () => {
     expect(
       buildMedicineSentence(
         medicine({
@@ -156,7 +156,24 @@ describe("buildMedicineSentence", () => {
         })
       )
     ).toBe(
-      "Inj. Pertuzumab - patient dose 79.6 mg (protocol dose 40 mg), given IV in 250 mL NS over 60 minutes"
+      "Inj. Pertuzumab (40 mg) - 79.6 mg, given IV in 250 mL NS over 60 minutes"
+    );
+  });
+
+  it("drops the per-m² basis from the bracketed dose", () => {
+    expect(
+      buildMedicineSentence(
+        medicine({
+          protocol_dose: 75,
+          protocol_dose_unit: "mg/m²",
+          calculated_dose: 150,
+          calculated_dose_unit: "mg",
+          administration_route: "IV",
+          administration_detail: "in 1 bottle Eco flac bottle over 1 hour",
+        })
+      )
+    ).toBe(
+      "Inj. Pertuzumab (75 mg) - 150 mg, given IV in 1 bottle Eco flac bottle over 1 hour"
     );
   });
 
@@ -170,7 +187,7 @@ describe("buildMedicineSentence", () => {
       })
     );
     expect(sentence).not.toContain("Chemotherapy");
-    expect(sentence).not.toContain("(");
+    expect(sentence).toBe("Inj. Pertuzumab (40 mg), given IV");
   });
 
   it("uses a plain dose for non-chemotherapy medicines", () => {
