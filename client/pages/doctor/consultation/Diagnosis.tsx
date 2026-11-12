@@ -34,6 +34,7 @@ import {
   type VariableValue,
 } from "./scoreEngine";
 import {
+  applyDerivedScores,
   labKeyFor,
   stageNumberFromText,
   suggestVariableValues,
@@ -3487,13 +3488,23 @@ const Diagnosis: React.FC<{
     const stageText = primaryValue(formData.cancerStage);
 
     const derivedScores: AutoFillContext["derivedScores"] = {};
-    for (const [scoreId, definition] of Object.entries(scoreDefinitions)) {
-      const assessment = scoreAssessments[scoreId];
-      if (!assessment || assessment.status === "not_applicable") continue;
+    const selectedScoreItems = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+    for (const item of selectedScoreItems) {
+      const definition = scoreDefinitions[item.score_id];
+      const assessment = scoreAssessments[item.score_id];
+      if (!definition || !assessment || assessment.status === "not_applicable") {
+        continue;
+      }
       const evaluation = evaluateScore(definition, assessment);
-      derivedScores[scoreId] = {
+      /* Partial entries must not feed another score: a half-filled B01 would
+         otherwise suggest a premature NPI grade. */
+      if (evaluation.status !== "complete") continue;
+      derivedScores[item.score_id] = {
         total: evaluation.total,
         groupLabel: evaluation.groupLabel ?? null,
+        groupRange: evaluation.group?.group_range ?? null,
       };
     }
 
@@ -3514,6 +3525,27 @@ const Diagnosis: React.FC<{
       derivedScores,
     };
   };
+
+  /* Live derivation: once a source score is complete (B01 for NPI's Grade,
+     M01 for the IPI scores, ...), fill the linked variable immediately
+     instead of waiting for the preview button. Manual entries stay put and
+     a derived value is dropped when its source becomes incomplete. */
+  useEffect(() => {
+    const definitions = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item))
+      .map((item) => scoreDefinitions[item.score_id])
+      .filter((definition): definition is ScoreDefinition => Boolean(definition));
+    if (definitions.length === 0) return;
+
+    const next = applyDerivedScores(
+      definitions,
+      scoreAssessments,
+      buildAutoFillContext()
+    );
+    if (next) setScoreAssessments(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoreAssessments, scoreDefinitions, formData.score, scoreMasterOptions]);
 
   /* Write the exact rows the doctor ticked in the workspace preview. Every
      selected row is applied (the preview already excluded values the doctor

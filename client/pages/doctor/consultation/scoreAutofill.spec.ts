@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyDerivedScores,
   autoSourceSummary,
+  hasDerivedSource,
   labKeyFor,
   previewAutoFill,
   stageNumberFromText,
@@ -32,10 +34,11 @@ const variable = (
 
 const definition = (
   method: string,
-  variables: ScoreVariable[]
+  variables: ScoreVariable[],
+  scoreId = "T01"
 ): ScoreDefinition =>
   ({
-    scoreId: "T01",
+    scoreId,
     name: "Test",
     method: "points_sum",
     rawMethod: method,
@@ -250,6 +253,144 @@ describe("suggestVariableValues", () => {
     expect(suggestVariableValues(def, context({ labs: low }))[0].raw).toBe(
       "Yes"
     );
+  });
+});
+
+const assessment = (
+  def: ScoreDefinition,
+  values: Record<string, VariableValue> = {}
+): ScoreAssessment => ({
+  scoreId: def.scoreId,
+  method: def.method,
+  values,
+  selectedGroup: null,
+  note: "",
+  status: "incomplete",
+  updatedAt: null,
+});
+
+describe("applyDerivedScores", () => {
+  const npi = definition(
+    "Formula",
+    [
+      variable("Grade", {
+        criterion: "1–3",
+        points: "1–3",
+        source: "DER",
+        source_field: "B01",
+      }),
+    ],
+    "B03"
+  );
+  const b01Context = context({
+    derivedScores: {
+      B01: { total: 6, groupLabel: "Grade 2", groupRange: "6–7" },
+    },
+  });
+
+  it("fills the grade as soon as the source score is complete", () => {
+    const next = applyDerivedScores([npi], { B03: assessment(npi) }, b01Context);
+
+    expect(next).not.toBeNull();
+    expect(next?.B03.values.Grade.raw).toBe("2");
+    expect(next?.B03.values.Grade.source).toBe("auto");
+    expect(next?.B03.values.Grade.autoSource).toBe("DER");
+    expect(next?.B03.values.Grade.reason).toContain("Derived from B01");
+  });
+
+  it("is idempotent so the caller's effect cannot loop", () => {
+    const first = applyDerivedScores([npi], { B03: assessment(npi) }, b01Context);
+    expect(first).not.toBeNull();
+    expect(applyDerivedScores([npi], first!, b01Context)).toBeNull();
+  });
+
+  it("never overwrites a value the clinician typed", () => {
+    const manual = assessment(npi, {
+      Grade: { raw: "3", numeric: 3, points: 3, source: "manual" },
+    });
+    expect(applyDerivedScores([npi], { B03: manual }, b01Context)).toBeNull();
+  });
+
+  it("clears a derived value when the source score disappears", () => {
+    const auto = assessment(npi, {
+      Grade: {
+        raw: "2",
+        numeric: 2,
+        points: 2,
+        source: "auto",
+        autoSource: "DER",
+        reason: "Derived from B01 (Grade 2)",
+      },
+    });
+    const next = applyDerivedScores([npi], { B03: auto }, context());
+    expect(next?.B03.values.Grade.raw).toBe("");
+    expect(next?.B03.values.Grade.source).toBeNull();
+  });
+
+  it("gives IPI-style links the numeric result, not the verbal risk band", () => {
+    const cns = definition(
+      "Points sum",
+      [variable("IPI score", { source: "DER", source_field: "M01" })],
+      "M02"
+    );
+    const next = applyDerivedScores([cns], { M02: assessment(cns) }, context({
+      derivedScores: {
+        M01: {
+          total: 3,
+          groupLabel: "High-intermediate",
+          groupRange: "3",
+        },
+      },
+    }));
+    expect(next?.M02.values["IPI score"].raw).toBe("3");
+  });
+
+  it("keeps the short stage band for an ISS link", () => {
+    const rIss = definition(
+      "Criteria (auto)",
+      [variable("ISS", { source: "DER", source_field: "P01" })],
+      "P02"
+    );
+    const next = applyDerivedScores([rIss], { P02: assessment(rIss) }, context({
+      derivedScores: {
+        P01: {
+          total: null,
+          groupLabel: "Neither I nor III",
+          groupRange: "II",
+        },
+      },
+    }));
+    expect(next?.P02.values.ISS.raw).toBe("II");
+  });
+});
+
+describe("hasDerivedSource", () => {
+  const grade = parseVariable(
+    variable("Grade", {
+      criterion: "1–3",
+      points: "1–3",
+      source: "DER",
+      source_field: "B01",
+    }),
+    "Formula" as any
+  );
+
+  it("is true only when the linked score has a result", () => {
+    expect(
+      hasDerivedSource(
+        grade,
+        context({
+          derivedScores: { B01: { total: null, groupLabel: "Grade 2" } },
+        })
+      )
+    ).toBe(true);
+    expect(
+      hasDerivedSource(
+        grade,
+        context({ derivedScores: { B01: { total: null, groupLabel: null } } })
+      )
+    ).toBe(false);
+    expect(hasDerivedSource(grade, context())).toBe(false);
   });
 });
 

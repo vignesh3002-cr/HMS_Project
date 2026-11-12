@@ -9,6 +9,7 @@ import {
 } from "./scoreEngine";
 import {
   autoSourceSummary,
+  hasDerivedSource,
   previewAutoFill,
   type AutoFillContext,
 } from "./scoreAutofill";
@@ -103,6 +104,7 @@ const ScoreCard: React.FC<{
   history?: ScoreHistory;
   currentStagingDetailId?: string | null;
   favourite?: boolean;
+  autoFillContext?: AutoFillContext | null;
   onChange: (next: ScoreAssessment) => void;
   onRemove: () => void;
   onAutoFill?: () => void;
@@ -115,6 +117,7 @@ const ScoreCard: React.FC<{
   history,
   currentStagingDetailId,
   favourite = false,
+  autoFillContext = null,
   onChange,
   onRemove,
   onAutoFill,
@@ -374,6 +377,11 @@ const ScoreCard: React.FC<{
                         }
                       }
                       onChange={(raw) => setValue(variable.id, raw)}
+                      derivedReady={
+                        autoFillContext
+                          ? hasDerivedSource(variable, autoFillContext)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -1073,6 +1081,7 @@ export const ScoreWorkspace: React.FC<{
             history={history}
             currentStagingDetailId={currentStagingDetailId}
             favourite={favourites.includes(entry.definition.scoreId)}
+            autoFillContext={autoFillContext}
             onChange={(next) =>
               onAssessmentChange(entry.definition.scoreId, next)
             }

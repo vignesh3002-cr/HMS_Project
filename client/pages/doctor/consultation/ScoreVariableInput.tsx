@@ -39,12 +39,17 @@ export const ScoreVariableInput: React.FC<{
   variable: ParsedVariable;
   value: VariableValue;
   onChange: (raw: string) => void;
-}> = ({ variable, value, onChange }) => {
+  /* Derived variables are locked while their source score has a result.
+     False means the source is missing/incomplete, so manual entry is open. */
+  derivedReady?: boolean;
+}> = ({ variable, value, onChange, derivedReady }) => {
   const [derivedOverride, setDerivedOverride] = React.useState(false);
   const source = variable.source || "CLIN";
   const sourceStyle = SOURCE_STYLES[source] ?? SOURCE_STYLES.CLIN;
   const filled = Boolean(value.raw?.trim());
   const isAutofilled = value.source === "auto";
+  const derivedEditable =
+    derivedOverride || derivedReady === false || value.source === "manual";
 
   const pointsBadge =
     variable.kind === "choice"
@@ -79,7 +84,7 @@ export const ScoreVariableInput: React.FC<{
             auto-filled
           </span>
         )}
-        {isAutofilled && (
+        {isAutofilled && variable.kind !== "derived" && (
           <button
             type="button"
             onClick={() => onChange("")}
@@ -201,31 +206,42 @@ export const ScoreVariableInput: React.FC<{
             type="text"
             value={value.raw}
             onChange={(event) => onChange(event.target.value)}
-            readOnly={!derivedOverride}
+            readOnly={!derivedEditable}
             placeholder={
               variable.derivedFrom
-                ? `Waiting for ${variable.derivedFrom}`
+                ? derivedReady === false
+                  ? `Enter ${variable.criterion ?? "value"}`
+                  : `Auto value from ${variable.derivedFrom}`
                 : "Derived value"
             }
             className={
               INPUT_CLASS +
               " max-w-[220px]" +
-              (derivedOverride ? "" : " cursor-not-allowed bg-slate-50 text-slate-600")
+              (derivedEditable ? "" : " cursor-not-allowed bg-slate-50 text-slate-600")
             }
           />
           <span className="text-[9px] font-medium text-orange-600">
             from {variable.derivedFrom ?? "another score"}
           </span>
-          {!derivedOverride && (
-            <button
-              type="button"
-              onClick={() => setDerivedOverride(true)}
-              className="text-[9px] font-medium text-[#004785] underline-offset-2 hover:underline"
-            >
-              enter manually
-            </button>
-          )}
+          {derivedReady !== false &&
+            !derivedOverride &&
+            value.source !== "manual" && (
+              <button
+                type="button"
+                onClick={() => setDerivedOverride(true)}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-semibold text-[#004785] transition hover:border-[#004785]/30 hover:bg-[#f4f8fd]"
+              >
+                Enter manually
+              </button>
+            )}
         </div>
+      )}
+
+      {variable.kind === "derived" && derivedReady === false && variable.derivedFrom && (
+        <p className="mt-1.5 text-[9px] leading-relaxed text-amber-700">
+          {variable.derivedFrom} is not complete — enter{" "}
+          {variable.criterion ?? "the value"} or finish {variable.derivedFrom}.
+        </p>
       )}
 
       {isAutofilled && value.reason && (

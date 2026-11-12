@@ -10,6 +10,7 @@ import {
   normalizeClinicalText,
   parseRange,
   rangeIncludes,
+  resolveVariableValue,
   type ParsedVariable,
   type ScoreAssessment,
   type ScoreDefinition,
@@ -42,7 +43,13 @@ export type AutoFillContext = {
   /* Evaluated results of the other scores recorded this visit, by score id. */
   derivedScores: Record<
     string,
-    { total: number | null; groupLabel: string | null }
+    {
+      total: number | null;
+      groupLabel: string | null;
+      /* Short band text ("II", "Grade 2"); safer than the long meaning when
+         another score needs a stage/grade code. */
+      groupRange?: string | null;
+    }
   >;
 };
 
@@ -347,6 +354,8 @@ const derivedSuggestion = (
   const derived = context.derivedScores[variable.derivedFrom];
   if (!derived) return null;
 
+  /* Grade variables read the digit from the source score's group label
+     ("Grade 2"), so a 6–7 point B01 becomes 2 rather than 6. */
   if (/\bgrade\b/i.test(variable.name) && derived.groupLabel) {
     const match = derived.groupLabel.match(/\b([123])\b/);
     if (match) {
@@ -359,7 +368,9 @@ const derivedSuggestion = (
     }
   }
 
-  if (derived.total != null && (variable.kind === "numeric" || variable.kind === "choice")) {
+  /* Most linked variables want the source score's numeric result (IPI 3,
+     IPSS-R 5.5...), even when the source also has a verbal risk group. */
+  if (derived.total != null) {
     return {
       variableId: variable.id,
       raw: String(derived.total),
@@ -368,10 +379,30 @@ const derivedSuggestion = (
     };
   }
 
+  /* Stage-like links (ISS, stage) keep the short band ("II") instead of the
+     long explanatory meaning ("Neither I nor III"). */
+  if (/\b(iss|stage)\b/i.test(variable.name) && derived.groupRange?.trim()) {
+    return {
+      variableId: variable.id,
+      raw: derived.groupRange.trim(),
+      reason: `Derived from ${variable.derivedFrom} (${derived.groupRange.trim()})`,
+      source: "DER",
+    };
+  }
+
   if (derived.groupLabel) {
     return {
       variableId: variable.id,
       raw: derived.groupLabel,
+      reason: `Derived from ${variable.derivedFrom}`,
+      source: "DER",
+    };
+  }
+
+  if (derived.groupRange?.trim()) {
+    return {
+      variableId: variable.id,
+      raw: derived.groupRange.trim(),
       reason: `Derived from ${variable.derivedFrom}`,
       source: "DER",
     };
@@ -529,6 +560,104 @@ export const suggestVariableValues = (
   }
 
   return suggestions;
+};
+
+/* True when the score linked by a derived variable has a usable result, so
+   the UI knows whether to lock the field or offer manual entry. */
+export const hasDerivedSource = (
+  variable: ParsedVariable,
+  context: AutoFillContext
+): boolean => {
+  if (!variable.derivedFrom) return false;
+  const derived = context.derivedScores[variable.derivedFrom];
+  if (!derived) return false;
+  return (
+    derived.total != null ||
+    Boolean(derived.groupLabel) ||
+    Boolean(derived.groupRange?.trim())
+  );
+};
+
+/* Fill every derived variable from its linked score without waiting for the
+   preview button. Only values this flow wrote are refreshed/cleared; a value
+   the clinician typed is never overwritten. Returns null when nothing
+   changed, so callers can set state without looping. */
+export const applyDerivedScores = (
+  definitions: ScoreDefinition[],
+  assessments: Record<string, ScoreAssessment>,
+  context: AutoFillContext
+): Record<string, ScoreAssessment> | null => {
+  let changed = false;
+  const next: Record<string, ScoreAssessment> = { ...assessments };
+
+  for (const definition of definitions) {
+    const assessment = assessments[definition.scoreId];
+    if (!assessment || assessment.status === "not_applicable") continue;
+
+    let values: Record<string, VariableValue> | null = null;
+    for (const variable of definition.variables) {
+      if (variable.kind !== "derived" || !variable.derivedFrom) continue;
+
+      const current: VariableValue = assessment.values[variable.id] ?? {
+        raw: "",
+        numeric: null,
+        points: null,
+        source: null,
+      };
+      const suggestion = derivedSuggestion(variable, context);
+
+      if (suggestion) {
+        /* A value the clinician typed wins over the source score. */
+        if (current.source === "manual" && current.raw.trim()) continue;
+
+        const resolved: VariableValue = {
+          ...resolveVariableValue(variable, suggestion.raw, "auto"),
+          autoSource: suggestion.source,
+          reason: suggestion.reason,
+        };
+        if (
+          current.raw === resolved.raw &&
+          current.source === "auto" &&
+          current.autoSource === resolved.autoSource &&
+          current.reason === resolved.reason
+        ) {
+          continue;
+        }
+
+        values = values ?? { ...assessment.values };
+        values[variable.id] = resolved;
+        changed = true;
+        continue;
+      }
+
+      /* The source disappeared (deselected or still incomplete): drop a
+         value this flow wrote, but never a manual entry. */
+      if (
+        current.raw.trim() &&
+        current.source === "auto" &&
+        current.autoSource === "DER"
+      ) {
+        values = values ?? { ...assessment.values };
+        values[variable.id] = {
+          raw: "",
+          numeric: null,
+          points: null,
+          source: null,
+        };
+        changed = true;
+      }
+    }
+
+    if (values) {
+      next[definition.scoreId] = {
+        ...assessment,
+        values,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  return changed ? next : null;
 };
 
 /* ------------------------------------------------------------------ */
