@@ -922,7 +922,7 @@ export const ScoreWorkspace: React.FC<{
   return (
     <div className="col-span-full mt-2 space-y-3">
       {/* Sticky result bar: the whole visit at a glance while scrolling. */}
-      <div className="sticky top-1 z-20 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
+      <div className="sticky top-1 z-10 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[10px] font-bold text-[#334155]">
