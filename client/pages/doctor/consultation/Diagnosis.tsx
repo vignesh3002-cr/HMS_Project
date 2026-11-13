@@ -3,6 +3,10 @@ import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
 import { chemotherapyApi } from "../../../api/chemotherapy.api";
+import {
+  labTestMasterApi,
+  type LabTestMasterRecord,
+} from "../../../api/labTestMaster.api";
 import { getUser } from "../../../utils/token";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
@@ -125,6 +129,7 @@ const hasDraftContent = (raw: string): boolean => {
       "tStage",
       "nStage",
       "mStage",
+      "assessmentBased",
     ];
     if (
       arrayKeys.some((key) => {
@@ -1264,6 +1269,7 @@ const EMPTY_FORM_DATA: FormData = {
   secondPrimaryDate: "",
   preDiagnosis: "",
   diseaseStatus: "",
+  assessmentBased: [],
   laterality: [],
   bodySite: [],
   survivor: "",
@@ -1306,6 +1312,7 @@ const normalizeStoredForm = (data: Partial<FormData>): Partial<FormData> => ({
   tStage: asStringArray(data.tStage),
   nStage: asStringArray(data.nStage),
   mStage: asStringArray(data.mStage),
+  assessmentBased: asStringArray(data.assessmentBased),
   valueEdits:
     data.valueEdits &&
     typeof data.valueEdits === "object" &&
@@ -2371,6 +2378,10 @@ const Diagnosis: React.FC<{
   >([]);
   const [investigationVisitNo, setInvestigationVisitNo] = useState("");
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
+  /* Lab-test master names offered as assessment-based options. Loaded once
+     on mount from /lab-test-master (no oncology reference route exists for
+     them); the doctor can also type a value that isn't in the list. */
+  const [labTestOptions, setLabTestOptions] = useState<string[]>([]);
   /* Metastasis Sites aren't in the draft: kept with the visit context so
      they survive switching steps (once the context belongs to this visit). */
   useEffect(() => {
@@ -2828,6 +2839,36 @@ const Diagnosis: React.FC<{
       })
       .catch((error) => {
         console.error("Failed to load disease statuses:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    labTestMasterApi.getAll()
+      .then((response) => {
+        if (cancelled) return;
+        const names = (response.data.data ?? [])
+          .map((record: LabTestMasterRecord) => record.test_name)
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        /* De-duplicate case-insensitively. */
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        for (const name of names) {
+          const key = name.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(name);
+          }
+        }
+        setLabTestOptions(deduped);
+      })
+      .catch((error) => {
+        console.error("Failed to load lab tests:", error);
       });
 
     return () => {
@@ -3945,6 +3986,21 @@ const Diagnosis: React.FC<{
       handleMultiToggle(field)(`${cancerType}|${row.stage_value}`, true);
     };
 
+  const handleCreateAssessmentBased = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const exists = labTestOptions.some(
+      (option) => option.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (exists) return;
+    setFormData((previous) => {
+      const current = previous.assessmentBased ?? [];
+      if (current.some((value) => value.toLowerCase() === trimmed.toLowerCase()))
+        return previous;
+      return { ...previous, assessmentBased: [...current, trimmed] };
+    });
+  };
+
   const handleAddDiseaseStatus = async (text: string) => {
     const row = await addReferenceValue<DiseaseStatusItem>("disease-statuses", {
       value: text,
@@ -4220,12 +4276,14 @@ const Diagnosis: React.FC<{
     const diseaseStatusText = formData.diseaseStatus
       ? labelOf("diseaseStatus", formData.diseaseStatus)
       : "";
+    const assessmentBasedText = formData.assessmentBased.join(", ");
     const tooLong = (
       [
         ["Cancer Stage", clinicalStageText],
         ["Body Site", siteText],
         ["Grade", gradeText],
         ["Disease Status", diseaseStatusText],
+        ["Assessment Based", assessmentBasedText],
       ] as const
     ).find(([, text]) => text.length > 100);
     if (tooLong) {
@@ -4771,7 +4829,7 @@ const Diagnosis: React.FC<{
               htmlFor="preDiagnosis"
               className="mb-2 block text-[10px] font-bold text-gray-900"
             >
-              Pre Diagnosis
+              Provision Diagnosis
             </label>
 
             <div className="relative">
@@ -4783,6 +4841,34 @@ const Diagnosis: React.FC<{
                 onChange={handleChange}
                 placeholder="Type the pre diagnosis..."
                 className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Assessment Based */}
+          <div>
+            <label
+              htmlFor="assessmentBased"
+              className="mb-2 block text-[10px] font-bold text-gray-900"
+            >
+              Assessment Based
+            </label>
+
+            <div className="relative">
+              <MultiSelectDropdown
+                options={labTestOptions.map((name) => ({
+                  label: name,
+                  value: name,
+                }))}
+                value={formData.assessmentBased}
+                onValueChange={(values) =>
+                  setFormData((previous) => ({
+                    ...previous,
+                    assessmentBased: values,
+                  }))
+                }
+                onCreateOption={handleCreateAssessmentBased}
+                placeholder="Select or add a lab test..."
               />
             </div>
           </div>

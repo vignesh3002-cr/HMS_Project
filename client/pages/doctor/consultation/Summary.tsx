@@ -1825,7 +1825,7 @@ const Summary: React.FC<{
     const patientLabel = `${(patientName || resolvedPatientId).toUpperCase()}${
       ageSex ? ` (${ageSex})` : ""
     }`;
-    const bsaLabel = measurements.bsa ? `${measurements.bsa} m²` : "";
+    const bsaLabel = measurements.bsa ? `${measurements.bsa}` : "";
 
     /* Patient header. "full" adds intent / cycle / planned date / BSA /
        cancer type / diagnosis date / protocol duration (the first page of
