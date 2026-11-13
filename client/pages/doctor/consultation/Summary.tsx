@@ -1828,8 +1828,9 @@ const Summary: React.FC<{
     const bsaLabel = measurements.bsa ? `${measurements.bsa} m²` : "";
 
     /* Patient header. "full" adds intent / cycle / planned date / BSA /
-       cancer type / diagnosis date (the first page of a section);
-       continuation pages get name, UHID and the date of admission. */
+       cancer type / diagnosis date / protocol duration (the first page of
+       a section); continuation pages get name, UHID and the date of
+       admission. */
     let visitPages = false;
     const drawHeader = (title: string, full: boolean) => {
       let y = 50;
@@ -1845,7 +1846,7 @@ const Summary: React.FC<{
             ["Intent of Treatment", context, "Date of Admission", doa],
             ["Current Cycle/Day", cycleDay, "Planned Date", visitPlannedDate],
             ["Cancer Type", cancerType, "BSA", bsaLabel],
-            ["Diagnosis Date", diagnosisDate, "", ""],
+            ["Diagnosis Date", diagnosisDate, "Duration", duration],
           ]
         : visitPages
           ? [
@@ -1863,9 +1864,21 @@ const Summary: React.FC<{
         doc.text(leftLabel, marginX, y);
         if (rightLabel) doc.text(rightLabel, 330, y);
         doc.setTextColor(...BLACK);
-        doc.text(`:  ${leftValue || "-"}`, 150, y, { maxWidth: 175 });
-        if (rightLabel) doc.text(`:  ${rightValue || "-"}`, 430, y);
-        y += 18;
+        /* Values wrap inside their column and the row grows with the
+           tallest one, so a long protocol duration never overflows. */
+        const leftLines = doc.splitTextToSize(
+          `:  ${leftValue || "-"}`,
+          175
+        ) as string[];
+        const rightLines = rightLabel
+          ? (doc.splitTextToSize(`:  ${rightValue || "-"}`, 125) as string[])
+          : [];
+        doc.text(leftLines, 150, y);
+        if (rightLabel) doc.text(rightLines, 430, y);
+        y += Math.max(
+          18,
+          Math.max(leftLines.length, rightLines.length) * 12 + 6
+        );
       });
 
       /* Safety line: only when the visit actually recorded allergies. */
@@ -2360,8 +2373,9 @@ const Summary: React.FC<{
       body: [
         ["Patient Name", patientLabel, "UHID", resolvedPatientId || "-"],
         ["Cancer Type", cancerType || "-", "Diagnosis Date", diagnosisDate || "-"],
-        ["Protocol", protocol || "-", "Cycle / Day", visitCycleDay || "-"],
-        ["Date of Admission", doa || "-", "Planned Date", visitPlannedDate || "-"],
+        ["Protocol", protocol || "-", "Duration", duration || "-"],
+        ["Cycle / Day", visitCycleDay || "-", "Planned Date", visitPlannedDate || "-"],
+        ["Date of Admission", doa || "-", "", ""],
       ],
     });
     y = ((doc as any).lastAutoTable?.finalY ?? y) + 16;
