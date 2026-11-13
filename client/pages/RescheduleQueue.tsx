@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  CalendarClock,
   CheckCircle2,
   Loader2,
   Search,
@@ -10,6 +11,12 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
@@ -17,6 +24,7 @@ import {
   doctorTransferApi,
   RescheduleQueueEntry,
 } from "@/api/doctorTransfer.api";
+import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
 import { doctorLeaveApi, DoctorLeaveRecord, LeaveStatus } from "@/api/doctorLeave.api";
 import { useBranches, useDoctors } from "@/hooks/useMasterData";
 import { employeeApi, EmployeeRecord, DoctorScheduleRecord } from "@/api/employee.api";
@@ -80,6 +88,18 @@ function formatTime(iso?: string | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+function parseTimeToMinutes(timeStr?: string | null): number {
+  if (!timeStr) return 0;
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp][Mm]))?$/);
+  if (!match) return 0;
+  let h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === "PM" && h < 12) h += 12;
+  if (meridiem === "AM" && h === 12) h = 0;
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
 function toDateInputValue(iso: string): string {
@@ -182,6 +202,11 @@ export default function RescheduleQueue() {
   const [assignDepartmentId, setAssignDepartmentId] = useState("");
   const [assignDate, setAssignDate] = useState("");
   const [assignTime, setAssignTime] = useState("");
+  const [assignScheduleId, setAssignScheduleId] = useState<string | number | null>(null);
+  const [assignSlots, setAssignSlots] = useState<AvailableSlot[]>([]);
+  const [assignSlotsLoading, setAssignSlotsLoading] = useState(false);
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+  const [useManualTime, setUseManualTime] = useState(false);
   const [assignReason, setAssignReason] = useState("");
   const [assignDone, setAssignDone] = useState(false);
   const [assignDoneMessage, setAssignDoneMessage] = useState("");
@@ -419,14 +444,29 @@ export default function RescheduleQueue() {
   );
 
   const isAssignDoctorEligible = useCallback(
-    (doctorId: string, branchId: string, day: string, targetTime?: string) =>
-      (doctorSchedulesById[doctorId] || []).some(
-        (s) =>
-          s.is_active !== false &&
-          s.branch_id === branchId &&
-          s.day_of_week === day &&
-          (!targetTime || (s.start_time && s.end_time && s.start_time <= targetTime && s.end_time > targetTime)),
-      ),
+    (doctorId: string, branchId: string, day: string, targetTime?: string) => {
+      const schedules = doctorSchedulesById[doctorId] || [];
+      if (!targetTime) {
+        return schedules.some((s) => s.is_active !== false && s.branch_id === branchId && s.day_of_week === day);
+      }
+      const [th, tm] = targetTime.split(":").map(Number);
+      const targetMin = (Number.isFinite(th) ? th : 0) * 60 + (Number.isFinite(tm) ? tm : 0);
+      const bufferMin = Math.max(0, targetMin - 30);
+      const bufferMax = targetMin + 30;
+
+      return schedules.some((s) => {
+        if (s.is_active === false || s.branch_id !== branchId || s.day_of_week !== day) return false;
+        if (!s.start_time || !s.end_time) return false;
+        const [sh, sm] = s.start_time.split(":").map(Number);
+        const [eh, em] = s.end_time.split(":").map(Number);
+        const sStart = (Number.isFinite(sh) ? sh : 0) * 60 + (Number.isFinite(sm) ? sm : 0);
+        let sEnd = (Number.isFinite(eh) ? eh : 0) * 60 + (Number.isFinite(em) ? em : 0);
+        if (sEnd <= sStart) sEnd += 1440; // Overnight
+        let reqMin = targetMin;
+        if (reqMin < sStart && sEnd > 1440) reqMin += 1440;
+        return sStart <= bufferMax && sEnd > bufferMin;
+      });
+    },
     [doctorSchedulesById],
   );
 
@@ -530,40 +570,48 @@ export default function RescheduleQueue() {
       eligible = eligible.filter((d) => d.department_id === assignDepartmentId);
     }
 
-    // Status gate: once branch + date are chosen, only doctors the backend
-    // computed as ACTIVE for that exact branch + date are offered. The
-    // currently selected doctor is always kept visible so a date change can
-    // never blank the dropdown. If the status fetch failed, fall back to
-    // branch + department filtering instead of silently emptying the list.
+    // Status gate: only filter if active status results in at least 1 doctor, so list is never blanked
     if (assignBranchId && assignDate && statusesLoaded) {
-      eligible = eligible.filter(
+      const activeForDate = eligible.filter(
         (d) =>
           doctorStatusMap[d.employee_id] === "ACTIVE" ||
           d.employee_id === assignDoctorId,
       );
+      if (activeForDate.length > 0) {
+        eligible = activeForDate;
+      }
     }
 
-    // Time/schedule filter when branch + department + day are ready
-    if (assignDoctorFiltering) {
-      eligible = eligible.filter((d) =>
-        isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay, assignTimeOfDay || undefined),
-      );
-    }
+    // Rate buffer match vs general day match
+    const withCounts = eligible.map((d) => {
+      const isBufferMatch = isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay, assignTimeOfDay || undefined);
+      const isDayMatch = isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay);
+      return {
+        ...d,
+        isBufferMatch,
+        isDayMatch,
+        queueCount: doctorQueueCounts[d.employee_id] || 0,
+      };
+    });
 
-    // Sort by queue count (ascending) for auto-suggestion
-    const withCounts = eligible.map((d) => ({
-      ...d,
-      queueCount: doctorQueueCounts[d.employee_id] || 0,
-    }));
-    withCounts.sort((a, b) => a.queueCount - b.queueCount);
+    // Sort: buffer matches first, then day matches, then lowest queue count
+    withCounts.sort((a, b) => {
+      if (a.isBufferMatch !== b.isBufferMatch) return a.isBufferMatch ? -1 : 1;
+      if (a.isDayMatch !== b.isDayMatch) return a.isDayMatch ? -1 : 1;
+      return a.queueCount - b.queueCount;
+    });
+
     return withCounts.map((d) => ({
       label: labelOf(d),
       value: d.employee_id,
-      badge: d.queueCount === 0 ? "Lowest load" : `${d.queueCount} queued`,
+      badge: d.isBufferMatch
+        ? (d.queueCount === 0 ? "Buffer match" : `${d.queueCount} queued (match)`)
+        : d.isDayMatch
+        ? (d.queueCount === 0 ? "Active today" : `${d.queueCount} queued`)
+        : "Available",
     }));
   }, [
     doctors,
-    assignDoctorFiltering,
     isAssignDoctorEligible,
     assignBranchId,
     assignDay,
@@ -586,6 +634,10 @@ export default function RescheduleQueue() {
     setAssignDepartmentId(defaultDepartmentId);
     setAssignDate(entry.old_appointment_date ? toDateInputValue(entry.old_appointment_date) : todayISODate());
     setAssignTime(entry.old_appointment_time ? formatTime(entry.old_appointment_time) : "");
+    setAssignScheduleId(null);
+    setAssignSlots([]);
+    setSelectedSlotIndex(null);
+    setUseManualTime(false);
     setAssignReason("");
     setAssignDone(false);
     setAssignDoneMessage("");
@@ -624,6 +676,52 @@ export default function RescheduleQueue() {
     }
   };
 
+  useEffect(() => {
+    if (!assignDoctorId || !assignBranchId || !assignDate) {
+      setAssignSlots([]);
+      return;
+    }
+    let cancelled = false;
+    setAssignSlotsLoading(true);
+    const duration = assignTarget?.appointment_history?.duration_minutes ?? 10;
+    appointmentApi
+      .getAvailableSlots(assignDoctorId, assignBranchId, assignDate, { duration })
+      .then((res) => {
+        if (cancelled) return;
+        const slots = res.data?.data?.slots ?? [];
+        setAssignSlots(slots);
+        if (slots.length > 0 && assignTime) {
+          const targetMin = parseTimeToMinutes(assignTime);
+          let bestIdx = -1;
+          let bestDiff = Infinity;
+          slots.forEach((s: AvailableSlot, idx: number) => {
+            if (s.is_past || s.is_completed || !s.is_available) return;
+            const sMin = parseTimeToMinutes(s.available_from || s.time);
+            const diff = Math.abs(sMin - targetMin);
+            if (diff <= 30 && diff < bestDiff) {
+              bestDiff = diff;
+              bestIdx = idx;
+            }
+          });
+          if (bestIdx >= 0) {
+            setSelectedSlotIndex(bestIdx);
+            setAssignTime(slots[bestIdx].time);
+            setAssignScheduleId(slots[bestIdx].schedule_id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("[RescheduleQueue] Failed to load available slots", err);
+        if (!cancelled) setAssignSlots([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAssignSlotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assignDoctorId, assignBranchId, assignDate, assignTarget]);
+
   const doAssign = async () => {
     if (!assignTarget) return;
     if (assignDoctorFiltering && assignDoctorOptions.length === 0) {
@@ -654,6 +752,7 @@ export default function RescheduleQueue() {
         branch_id: assignBranchId,
         appointment_date: assignDate,
         appointment_time: assignTime,
+        schedule_id: assignScheduleId || undefined,
         reason: assignReason.trim() || undefined,
       });
       setAssignDoneMessage(res.data.message);
@@ -1273,205 +1372,411 @@ export default function RescheduleQueue() {
       </div>
 
       {/* Assign slot dialog */}
-      <ConfirmationDialog
+      <Dialog
         open={!!assignTarget}
-        type={assignDone ? "success" : "info"}
-        title={assignDone ? "Slot assigned" : "Assign a new slot"}
-        description={
-          assignDone
-            ? "The appointment has been reassigned and the queue updated."
-            : "Pick a branch, a doctor and a slot. Only doctors who work at the selected branch on the selected day are listed."
-        }
-        confirmText="Assign slot"
-        loading={processing}
-        hideCancelButton={assignDone}
-        showCloseButton={!assignDone}
-        footer={assignDone ? assignDoneFooter : undefined}
-        onConfirm={doAssign}
-        onCancel={() => {
-          setAssignDone(false);
-          setAssignTarget(null);
+        onOpenChange={(open) => {
+          if (!open) {
+            setAssignDone(false);
+            setAssignTarget(null);
+          }
         }}
       >
-        {assignDone ? (
-          <div className="w-full space-y-3 text-left">
-            <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2.5 text-sm text-green-700">
-              {assignDoneMessage || "The appointment has been reassigned."}
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div>
-                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Patient</div>
-                <div className="text-[#191C1E] font-medium">
-                  {assignTarget ? patientNameOf(assignTarget) : "—"}
-                </div>
+        <DialogContent className="sm:max-w-2xl md:max-w-3xl lg:max-w-4xl w-[95vw] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-2xl shadow-2xl border border-gray-100 bg-white font-[Manrope,sans-serif]">
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50/60 to-white flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#E8F0FE] text-[#00488D] flex items-center justify-center shrink-0">
+                <CalendarClock className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Branch</div>
-                <div className="text-[#191C1E] font-medium">{branchLabelOf(assignBranchId)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Doctor</div>
-                <div className="text-[#191C1E] font-medium">{doctorNameById(assignDoctorId) || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Date · Time</div>
-                <div className="text-[#191C1E] font-medium">
-                  {assignDate} · {assignTime}
-                </div>
+                <DialogTitle className="text-base font-bold text-[#191C1E]">
+                  {assignDone ? "Slot Assigned Successfully" : "Assign Appointment Slot"}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-[#64748B] mt-0.5">
+                  {assignDone
+                    ? "The appointment has been reassigned to the new doctor's schedule."
+                    : "Select a branch, doctor, and an available 1-hour session to reassign this patient."}
+                </DialogDescription>
               </div>
             </div>
           </div>
-        ) : (
-          <div className="w-full space-y-3 text-left">
-            <div>
-              <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                Assign at branch
-              </label>
-              <FormDropdown
-                name="assign_branch"
-                className={
-                  assignTarget && assignBranchId === assignTarget.branch_id
-                    ? "w-full bg-blue-50 border border-blue-500 rounded-xl px-3 py-2 text-sm text-[#00488D] focus:outline-none focus:ring-2 focus:ring-[#00488D]/30"
-                    : inputCls
-                }
-                options={assignBranchOptions}
-                value={assignBranchId}
-                onValueChange={(v) => {
-                  setAssignBranchId(v);
-                  setAssignDepartmentId("");
-                  setAssignDoctorId("");
-                  // Department options will update via branchDepartmentOptions memo
-                }}
-                placeholder="Select branch"
-              />
-              {assignTarget && assignBranchId === assignTarget.branch_id && (
-                <p className="text-[11px] text-blue-600 mt-1">
-                  Defaults to the appointment's branch — changeable.
-                </p>
-              )}
+
+          {/* Patient Context Card */}
+          {assignTarget && !assignDone && (
+            <div className="mx-6 mt-4 p-3.5 bg-blue-50/50 border border-blue-100 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-200/60 text-[#00488D] font-bold flex items-center justify-center text-xs">
+                  {patientNameOf(assignTarget).charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-[#191C1E]">{patientNameOf(assignTarget)}</div>
+                  <div className="text-[11px] text-[#64748B]">{assignTarget.patient_id}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 text-[#64748B] flex-wrap">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Original Schedule</span>
+                  <span className="font-medium text-[#191C1E]">
+                    {formatDate(assignTarget.old_appointment_date)} at {formatTime(assignTarget.old_appointment_time)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Original Doctor</span>
+                  <span className="font-medium text-[#191C1E]">
+                    {doctorNameById(assignTarget.employee_id) || assignTarget.employee_id}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Priority</span>
+                  <span
+                    className={cn(
+                      "text-[10px] font-bold px-2 py-0.5 rounded-full inline-block mt-0.5",
+                      assignTarget.priority === "URGENT"
+                        ? "bg-red-100 text-red-700"
+                        : assignTarget.priority === "HIGH"
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-blue-100 text-[#00488D]",
+                    )}
+                  >
+                    {assignTarget.priority}
+                  </span>
+                </div>
+              </div>
             </div>
-            {/* Department dropdown */}
-            <div>
-              <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                Department
-              </label>
-              <FormDropdown
-                name="assign_department"
-                className={inputCls}
-                options={branchDepartmentOptions.map((d) => ({
-                  label: d.department_name,
-                  value: d.department_id,
-                  highlight: d.department_id === assignTarget?.department_id,
-                  badge: d.department_id === assignTarget?.department_id ? "Appointment's department" : undefined,
-                }))}
-                value={assignDepartmentId}
-                onValueChange={(v) => {
-                  setAssignDepartmentId(v);
-                  setAssignDoctorId("");
-                }}
-                placeholder={branchDepartmentOptions.length ? "Select department" : "No departments at this branch"}
-              />
-              {assignTarget && assignDepartmentId === assignTarget.department_id && assignDepartmentId && (
-                <p className="text-[11px] text-blue-600 mt-1">
-                  Defaults to the appointment's department — changeable.
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                Doctor
-              </label>
-              <FormDropdown
-                name="assign_doctor"
-                className={inputCls}
-                options={assignDoctorOptions}
-                value={assignDoctorId}
-                onValueChange={setAssignDoctorId}
-                disabled={schedulesLoading || statusesLoading}
-                placeholder={
-                  assignDoctorFiltering && assignDoctorOptions.length === 0
-                    ? "No doctors available"
-                    : "Select doctor"
-                }
-                emptyMessage="No doctors available"
-              />
-              {schedulesLoading || statusesLoading ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
-                  Checking doctor availability…
-                </p>
-              ) : statusesFailed && assignBranchId && assignDate ? (
-                <p className="text-[11px] text-amber-600 mt-1">
-                  Couldn't verify doctor availability — showing all doctors at this branch (unfiltered).
-                </p>
-              ) : assignBranchId && assignDate && assignDoctorOptions.length === 0 && !assignDoctorFiltering ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  No doctor is active at {branchLabelOf(assignBranchId)} on {dayLabelOf(assignDay)} for this department.
-                </p>
-              ) : assignDoctorFiltering && assignDoctorOptions.length === 0 ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  No doctor from the same department works at {branchLabelOf(assignBranchId)} on{" "}
-                  {dayLabelOf(assignDay)} at {assignTimeOfDay}.
-                </p>
-              ) : assignDoctorFiltering ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  Showing {assignDoctorOptions.length} doctor(s) active at {branchLabelOf(assignBranchId)} on{" "}
-                  {dayLabelOf(assignDay)}
-                  {assignTimeOfDay ? ` at ${assignTimeOfDay}` : ""} — sorted by queue load (lowest first).
-                </p>
-              ) : assignTarget?.department_id ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  Showing all active doctor(s) — pick a date first to filter to those working that day.
-                </p>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  min={todayISODate()}
-                  className={inputCls}
-                  value={assignDate}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAssignDate(v);
-                    const day = dayOfWeekOf(v);
-                    if (
-                      schedulesLoaded &&
-                      assignDepartmentId &&
-                      day &&
-                      assignDoctorId &&
-                      !isAssignDoctorEligible(assignDoctorId, assignBranchId, day, assignTimeOfDay)
-                    ) {
-                      setAssignDoctorId("");
-                    }
+          )}
+
+          {/* Modal Body */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {assignDone ? (
+              <div className="space-y-4 py-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-[#191C1E]">Reassignment Complete</h3>
+                  <p className="text-xs text-[#64748B]">
+                    {assignDoneMessage || "The appointment has been successfully rescheduled."}
+                  </p>
+                </div>
+                <div className="max-w-md mx-auto grid grid-cols-2 gap-3 p-4 bg-gray-50 border border-gray-200/80 rounded-xl text-left text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block">Patient</span>
+                    <span className="font-semibold text-gray-900">{assignTarget ? patientNameOf(assignTarget) : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block">Assigned Doctor</span>
+                    <span className="font-semibold text-gray-900">{doctorNameById(assignDoctorId) || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block">Branch</span>
+                    <span className="font-semibold text-gray-900">{branchLabelOf(assignBranchId)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block">Date & Time</span>
+                    <span className="font-semibold text-emerald-700">{assignDate} at {assignTime}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* 2-Column Row 1: Branch & Department */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-30">
+                  <div>
+                    <label className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1.5 block">
+                      Assign at branch
+                    </label>
+                    <FormDropdown
+                      portal={false}
+                      name="assign_branch"
+                      className={
+                        assignTarget && assignBranchId === assignTarget.branch_id
+                          ? "w-full bg-blue-50/50 border border-blue-400 rounded-xl px-3 py-2 text-sm text-[#00488D] focus:outline-none focus:ring-2 focus:ring-[#00488D]/30"
+                          : inputCls
+                      }
+                      options={assignBranchOptions}
+                      value={assignBranchId}
+                      onValueChange={(v) => {
+                        setAssignBranchId(v);
+                        setAssignDepartmentId("");
+                        setAssignDoctorId("");
+                      }}
+                      placeholder="Select branch"
+                    />
+                    {assignTarget && assignBranchId === assignTarget.branch_id && (
+                      <p className="text-[11px] text-blue-600 mt-1">
+                        Defaults to the appointment's branch — changeable.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1.5 block">
+                      Department
+                    </label>
+                    <FormDropdown
+                      portal={false}
+                      name="assign_department"
+                      className={inputCls}
+                      options={branchDepartmentOptions.map((d) => ({
+                        label: d.department_name,
+                        value: d.department_id,
+                        highlight: d.department_id === assignTarget?.department_id,
+                        badge: d.department_id === assignTarget?.department_id ? "Appointment's dept" : undefined,
+                      }))}
+                      value={assignDepartmentId}
+                      onValueChange={(v) => {
+                        setAssignDepartmentId(v);
+                        setAssignDoctorId("");
+                      }}
+                      placeholder={branchDepartmentOptions.length ? "Select department" : "No departments at branch"}
+                    />
+                    {assignTarget && assignDepartmentId === assignTarget.department_id && assignDepartmentId && (
+                      <p className="text-[11px] text-blue-600 mt-1">
+                        Defaults to the appointment's department — changeable.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2-Column Row 2: Doctor & Target Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-20">
+                  <div>
+                    <label className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1.5 block">
+                      Doctor
+                    </label>
+                    <FormDropdown
+                      portal={false}
+                      name="assign_doctor"
+                      className={inputCls}
+                      options={assignDoctorOptions}
+                      value={assignDoctorId}
+                      onValueChange={setAssignDoctorId}
+                      disabled={schedulesLoading || statusesLoading}
+                      placeholder={
+                        assignDoctorOptions.length === 0
+                          ? "No doctors in department"
+                          : "Select replacement doctor"
+                      }
+                      emptyMessage="No doctors available"
+                    />
+                    {schedulesLoading || statusesLoading ? (
+                      <p className="text-[11px] text-[#94A3B8] mt-1 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin text-[#00488D]" />
+                        Checking doctor schedules…
+                      </p>
+                    ) : statusesFailed && assignBranchId && assignDate ? (
+                      <p className="text-[11px] text-amber-600 mt-1">
+                        Couldn't verify doctor availability — showing all doctors at this branch.
+                      </p>
+                    ) : assignDoctorOptions.length > 0 ? (
+                      <p className="text-[11px] text-[#64748B] mt-1">
+                        Showing {assignDoctorOptions.length} doctor(s) — buffer matches prioritized at top.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1.5 block">
+                      Target Date
+                    </label>
+                    <input
+                      type="date"
+                      min={todayISODate()}
+                      className={inputCls}
+                      value={assignDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAssignDate(v);
+                        const day = dayOfWeekOf(v);
+                        if (
+                          schedulesLoaded &&
+                          assignDepartmentId &&
+                          day &&
+                          assignDoctorId &&
+                          !isAssignDoctorEligible(assignDoctorId, assignBranchId, day)
+                        ) {
+                          setAssignDoctorId("");
+                        }
+                      }}
+                    />
+                    {assignDate && (
+                      <p className="text-[11px] text-[#64748B] mt-1">
+                        Selected: <span className="font-semibold text-gray-800">{dayLabelOf(assignDay)}</span> ({assignDate})
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Available 1-Hour Session Slots */}
+                <div className="pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider block">
+                        Available 1-Hour Sessions
+                      </span>
+                      <span className="text-[11px] text-[#64748B]">
+                        Session slots for the selected doctor. Slots within ±30m buffer are auto-detected.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUseManualTime(!useManualTime)}
+                      className="text-xs text-[#00488D] hover:underline font-semibold"
+                    >
+                      {useManualTime ? "Pick from 1-hour sessions" : "Manual time"}
+                    </button>
+                  </div>
+
+                  {useManualTime ? (
+                    <div className="pt-1">
+                      <TimepickerWheel value={assignTime} onChange={setAssignTime} />
+                    </div>
+                  ) : assignSlotsLoading ? (
+                    <div className="py-8 text-center text-xs text-gray-500 flex flex-col items-center justify-center gap-2 bg-gray-50/60 rounded-xl border border-gray-100">
+                      <Loader2 className="w-5 h-5 animate-spin text-[#00488D]" />
+                      <span>Loading doctor session slots…</span>
+                    </div>
+                  ) : !assignDoctorId ? (
+                    <div className="p-4 bg-gray-50 border border-gray-200/70 rounded-xl text-xs text-gray-500 text-center">
+                      Select a doctor to view their available 1-hour sessions.
+                    </div>
+                  ) : assignSlots.length === 0 ? (
+                    <div className="p-4 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-800 text-center">
+                      No active sessions found for this doctor on {assignDate}. Pick another date or switch to manual time.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto p-1.5 rounded-xl border border-gray-200/80 bg-gray-50/40">
+                      {assignSlots.map((slot, idx) => {
+                        const isSelected = selectedSlotIndex === idx || assignTime === slot.time;
+                        const isDisabled = slot.is_past || slot.is_completed || !slot.is_available;
+                        const sMin = parseTimeToMinutes(slot.available_from || slot.time);
+                        const targetMin = assignTimeOfDay ? parseTimeToMinutes(assignTimeOfDay) : null;
+                        const delta = targetMin !== null ? sMin - targetMin : null;
+                        const bufferBadge = delta === null
+                          ? null
+                          : Math.abs(delta) === 0
+                          ? "Exact time"
+                          : Math.abs(delta) <= 30
+                          ? (delta > 0 ? `+${delta}m buffer` : `${delta}m buffer`)
+                          : (delta > 0 ? `+${delta}m` : `${delta}m`);
+                        return (
+                          <button
+                            key={`${slot.time}-${idx}`}
+                            type="button"
+                            disabled={isDisabled}
+                            onClick={() => {
+                              setSelectedSlotIndex(idx);
+                              setAssignTime(slot.time);
+                              setAssignScheduleId(slot.schedule_id);
+                            }}
+                            className={`p-3 text-xs rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? "bg-[#00488D] text-white border-[#00488D] shadow-sm ring-1 ring-[#00488D]"
+                                : isDisabled
+                                ? "bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed opacity-60"
+                                : "bg-white text-gray-800 border-gray-200 hover:border-[#00488D] hover:bg-blue-50/40 shadow-2xs"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold truncate text-[12.5px]">{slot.label || slot.time}</span>
+                              {bufferBadge && (
+                                <span
+                                  className={`text-[9.5px] px-1.5 py-0.5 rounded font-bold shrink-0 ${
+                                    Math.abs(delta ?? 999) <= 30
+                                      ? isSelected ? "bg-white/20 text-white" : "bg-blue-100 text-[#00488D]"
+                                      : isSelected ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
+                                  }`}
+                                >
+                                  {bufferBadge}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10.5px] opacity-80 mt-1">
+                              {slot.available_from ? `Starts ${slot.available_from} · ` : ""}
+                              {slot.is_completed ? "Full" : slot.is_past ? "Past" : slot.is_available ? "Available" : "Full"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Reason */}
+                <div>
+                  <label className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1 block">
+                    Reason / Remarks (optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Doctor transferred to another branch"
+                    className={inputCls}
+                    value={assignReason}
+                    onChange={(e) => setAssignReason(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sticky Bottom Actions */}
+          <div className="px-6 py-3.5 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between gap-3">
+            {assignDone ? (
+              <div className="flex justify-end w-full gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate("/dashboard")}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                >
+                  Dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAssignDone(false);
+                    setAssignTarget(null);
                   }}
-                />
+                  className="px-5 py-2 rounded-xl bg-[#00488D] text-xs font-semibold text-white hover:bg-[#003A70] transition-colors"
+                >
+                  Done
+                </button>
               </div>
-              <div>
-                <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                  Time
-                </label>
-                <TimepickerWheel value={assignTime} onChange={setAssignTime} />
-              </div>
-            </div>
-            <div>
-              <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5 block">
-                Reason (optional)
-              </label>
-              <textarea
-                rows={2}
-                className={inputCls}
-                value={assignReason}
-                onChange={(e) => setAssignReason(e.target.value)}
-              />
-            </div>
+            ) : (
+              <>
+                <div className="text-xs">
+                  {assignTime ? (
+                    <div className="flex items-center gap-1.5 text-emerald-700 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Ready: {assignDate} at {assignTime}</span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">Pick a doctor, date, and 1-hour session</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignDone(false);
+                      setAssignTarget(null);
+                    }}
+                    className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={processing || !assignDoctorId || !assignDate || !assignTime}
+                    onClick={doAssign}
+                    className="px-5 py-2 rounded-xl bg-[#00488D] text-xs font-semibold text-white hover:bg-[#003A70] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+                  >
+                    {processing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Assign Slot</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        )}
-      </ConfirmationDialog>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirm reschedule dialog */}
       <ConfirmationDialog

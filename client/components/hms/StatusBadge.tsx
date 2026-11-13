@@ -50,7 +50,6 @@ const statusToneMap: Record<string, StatusTone> = {
   completed: "emerald",
   "no show": "gray",
   "reschedule required": "amber",
-  "transfer review required": "indigo",
   pending: "amber",
   assigned: "blue",
   planned: "amber",

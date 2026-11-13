@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   ChevronLeft,
@@ -20,14 +21,17 @@ import {
 } from "@/utils/chemoCalculations";
 import { ProtocolSelect } from "./ProtocolSelect";
 import {
+  CLEAN_DISCHARGE_UNITS,
+  CLEAN_DOSE_UNITS,
+  CLEAN_VOLUME_UNITS,
   DOSE_CALC_OPTIONS,
+  PROTOCOL_DURATION_DAYS,
   PROTOCOL_FREQUENCY_OPTIONS,
   PROTOCOL_INSTRUCTION_OPTIONS,
   Req,
   drawerInputCls,
   drawerLabelCls,
   drawerTextareaCls,
-  getDoseDropdownOptions,
   getDropdownOptions,
   getDurationUnitCode,
   getDurationUnitOptions,
@@ -79,7 +83,7 @@ export interface ProtocolDrawerProps {
   getPostMedName: (medId?: string) => string;
   allAvailableDilutionMeds: { label: string; value: string }[];
   savingDrawer: boolean;
-  onDone: () => void;
+  onDone: (draftRow?: any) => void;
   onDelete: () => void;
   getActiveSectionItemsCount: () => number;
 }
@@ -119,6 +123,25 @@ export function ProtocolDrawer({
   onDelete,
   getActiveSectionItemsCount,
 }: ProtocolDrawerProps) {
+  // Staging buffer: local copy of active row. Edits stay here until "Done / Save" is clicked.
+  const [draftRow, setDraftRow] = useState<any>(null);
+
+  useEffect(() => {
+    if (!activeDrawer) {
+      setDraftRow(null);
+      return;
+    }
+    const { section, index } = activeDrawer;
+    let original: any = null;
+    if (section === "premeds") original = premeds[index];
+    else if (section === "chemo") original = chemoPlans[index];
+    else if (section === "supportive") original = supportive[index];
+    else if (section === "dilution") original = dilution[index];
+    else if (section === "post") original = post[index];
+
+    setDraftRow(original ? { ...original } : null);
+  }, [activeDrawer?.section, activeDrawer?.index]);
+
   if (!activeDrawer) return null;
 
   return (
@@ -204,9 +227,8 @@ export function ProtocolDrawer({
           {/* Drawer Body - Scrollable Form Fields */}
           <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
             {/* PREMEDS FORM */}
-            {activeDrawer.section === "premeds" && premeds[activeDrawer.index] && (() => {
-              const row = premeds[activeDrawer.index];
-              const idx = activeDrawer.index;
+            {activeDrawer.section === "premeds" && draftRow && (() => {
+              const row = draftRow;
               return (
                 <>
                   <div>
@@ -216,9 +238,7 @@ export function ProtocolDrawer({
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...premeds];
-                        n[idx].form = v;
-                        setPremeds(n);
+                        setDraftRow((prev: any) => ({ ...prev, form: v }));
                       }}
                       placeholder="Select formulation"
                       emptyMessage="No forms found"
@@ -235,33 +255,33 @@ export function ProtocolDrawer({
                       editableChip
                       displayValue={row.medicineName || getMedName(row.medication, premedMeds)}
                       onEditValue={(text) => {
-                        const n = [...premeds];
-                        n[idx].medicineName = text;
-                        if (!n[idx].medication) {
-                          n[idx].medication = text;
-                        }
-                        setPremeds(n);
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          medicineName: text,
+                          medication: prev?.medication || text,
+                        }));
                       }}
                       options={getDropdownOptions(premedMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...premeds];
-                        n[idx].medication = v;
                         const med = premedMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
-                        if (availableForms.length === 1 && !n[idx].form) {
-                          n[idx].form = availableForms[0];
-                        } else if (!n[idx].form && med?.dosage_form) {
-                          n[idx].form = med.dosage_form;
-                        }
-                        if (med) {
-                          n[idx].medicineName = med.generic_name || med.medicine_name;
-                        } else if (v) {
-                          n[idx].medicineName = v;
-                        }
-                        setPremeds(n);
+                        setDraftRow((prev: any) => {
+                          let nextForm = prev?.form;
+                          if (availableForms.length === 1 && !nextForm) {
+                            nextForm = availableForms[0];
+                          } else if (!nextForm && med?.dosage_form) {
+                            nextForm = med.dosage_form;
+                          }
+                          return {
+                            ...prev,
+                            medication: v,
+                            form: nextForm,
+                            medicineName: med ? (med.generic_name || med.medicine_name) : (v || prev?.medicineName),
+                          };
+                        });
                       }}
                       placeholder={
                         loadingPremedMeds
@@ -275,30 +295,27 @@ export function ProtocolDrawer({
                     />
                   </div>
 
-                  {/* Brand Name field cleared from UI per clinical protocol design */}
                   <div>
                     <label className={drawerLabelCls}>Dosage & Unit</label>
                     <div className="grid grid-cols-2 gap-1.5">
-                      <ProtocolSelect
-                        options={getDoseDropdownOptions(premeds, row.dose)}
-                        value={row.dose}
-                        onValueChange={(v) => {
-                          const n = [...premeds];
-                          n[idx].dose = v;
-                          setPremeds(n);
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={row.dose ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({ ...prev, dose: val }));
                         }}
-                        placeholder="Dose"
-                        emptyMessage="No dose options"
+                        placeholder="e.g. 4"
+                        className={drawerInputCls}
                         disabled={disabled}
-                        className="h-9"
                       />
                       <ProtocolSelect
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
-                          const n = [...premeds];
-                          n[idx].unit = v;
-                          setPremeds(n);
+                          setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
                         placeholder="Unit"
                         emptyMessage="No units found"
@@ -312,11 +329,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Admin Notes</label>
                     <textarea
                       rows={3}
-                      value={row.adminNotes}
+                      value={row.adminNotes || ""}
                       onChange={(e) => {
-                        const n = [...premeds];
-                        n[idx].adminNotes = e.target.value;
-                        setPremeds(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, adminNotes: val }));
                       }}
                       placeholder="e.g. Administer slow IV push over 3-5 mins in 50ml NS"
                       className={drawerTextareaCls}
@@ -328,11 +344,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Clinical Remarks</label>
                     <textarea
                       rows={2}
-                      value={row.remarks}
+                      value={row.remarks || ""}
                       onChange={(e) => {
-                        const n = [...premeds];
-                        n[idx].remarks = e.target.value;
-                        setPremeds(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, remarks: val }));
                       }}
                       placeholder="e.g. Pre-chemo antiemetic protocol"
                       className={drawerTextareaCls}
@@ -344,9 +359,25 @@ export function ProtocolDrawer({
             })()}
 
             {/* CHEMOTHERAPY FORM */}
-            {activeDrawer.section === "chemo" && chemoPlans[activeDrawer.index] && (() => {
-              const row = chemoPlans[activeDrawer.index];
-              const idx = activeDrawer.index;
+            {activeDrawer.section === "chemo" && draftRow && (() => {
+              const row = draftRow;
+              const isAUC = row.doseCalc?.includes("AUC");
+              // Extract current AUC target number if present in doseCalc, e.g. "AUC (5)" -> "5"
+              const aucMatch = (row.doseCalc || "").match(/AUC\s*\(?([\d.]+)\)?/i);
+              const currentAucValue = aucMatch ? aucMatch[1] : (isAUC ? row.dose || "" : "");
+
+              // For non-AUC: unit derives from doseCalc; for AUC, protocol dose unit is usually mg or flat
+              const currentUnit = isAUC
+                ? (row.unit === "AUC" ? "mg" : row.unit || "mg")
+                : (row.unit || (row.doseCalc?.includes("mg/m²") ? "mg/m²" : row.doseCalc?.includes("mg/kg") ? "mg/kg" : "mg"));
+
+              const aucDisplayLabel = currentAucValue ? `AUC (${currentAucValue})` : "AUC (Calvert Formula)";
+              const currentDoseCalcDisplay = isAUC ? aucDisplayLabel : row.doseCalc;
+
+              const dynamicDoseCalcOptions = DOSE_CALC_OPTIONS.map((opt) =>
+                opt.includes("AUC") && currentAucValue ? `AUC (${currentAucValue})` : opt
+              );
+
               return (
                 <>
                   <div>
@@ -356,9 +387,7 @@ export function ProtocolDrawer({
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...chemoPlans];
-                        n[idx].form = v;
-                        setChemoPlans(n);
+                        setDraftRow((prev: any) => ({ ...prev, form: v }));
                       }}
                       placeholder="Select form"
                       emptyMessage="No forms found"
@@ -375,39 +404,50 @@ export function ProtocolDrawer({
                       editableChip
                       displayValue={row.medicineName || getMedName(row.medication, chemoMeds)}
                       onEditValue={(text) => {
-                        const n = [...chemoPlans];
-                        n[idx].medicineName = text;
-                        if (!n[idx].medication) {
-                          n[idx].medication = text;
-                        }
-                        setChemoPlans(n);
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          medicineName: text,
+                          medication: prev?.medication || text,
+                        }));
                       }}
                       options={getDropdownOptions(chemoMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...chemoPlans];
-                        n[idx].medication = v;
                         const medObj = chemoMeds.find((m) => m.medicine_id === v);
-                        if (medObj && !n[idx].doseCalc) {
-                          const inferred = inferDosingBasisForMedicine(medObj.medicine_name);
-                          if (inferred === "AUC") n[idx].doseCalc = "AUC (Calvert)";
-                          else if (inferred === "Weight") n[idx].doseCalc = "Weight (mg/kg)";
-                          else n[idx].doseCalc = "BSA (mg/m²)";
-                        }
                         const gid = medObj?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (medObj?.dosage_form ? [medObj.dosage_form] : []);
-                        if (availableForms.length === 1 && !n[idx].form) {
-                          n[idx].form = availableForms[0];
-                        } else if (!n[idx].form && medObj?.dosage_form) {
-                          n[idx].form = medObj.dosage_form;
-                        }
-                        if (medObj) {
-                          n[idx].medicineName = medObj.generic_name || medObj.medicine_name;
-                        } else if (v) {
-                          n[idx].medicineName = v;
-                        }
-                        setChemoPlans(n);
+                        setDraftRow((prev: any) => {
+                          let nextDoseCalc = prev?.doseCalc;
+                          let nextUnit = prev?.unit;
+                          if (medObj && !nextDoseCalc) {
+                            const inferred = inferDosingBasisForMedicine(medObj.medicine_name);
+                            if (inferred === "AUC") {
+                              nextDoseCalc = "AUC (Calvert Formula)";
+                              nextUnit = "mg";
+                            } else if (inferred === "Weight") {
+                              nextDoseCalc = "Weight (mg/kg)";
+                              nextUnit = "mg/kg";
+                            } else {
+                              nextDoseCalc = "BSA (mg/m²)";
+                              nextUnit = "mg/m²";
+                            }
+                          }
+                          let nextForm = prev?.form;
+                          if (availableForms.length === 1 && !nextForm) {
+                            nextForm = availableForms[0];
+                          } else if (!nextForm && medObj?.dosage_form) {
+                            nextForm = medObj.dosage_form;
+                          }
+                          return {
+                            ...prev,
+                            medication: v,
+                            doseCalc: nextDoseCalc,
+                            unit: nextUnit,
+                            form: nextForm,
+                            medicineName: medObj ? (medObj.generic_name || medObj.medicine_name) : (v || prev?.medicineName),
+                          };
+                        });
                       }}
                       placeholder={
                         loadingChemoMeds
@@ -421,20 +461,23 @@ export function ProtocolDrawer({
                     />
                   </div>
 
-                  {/* Brand Name field cleared from UI per clinical protocol design */}
                   <div>
                     <label className={drawerLabelCls}>Dose Calculation Basis</label>
                     <ProtocolSelect
-                      options={DOSE_CALC_OPTIONS}
-                      value={row.doseCalc}
+                      options={dynamicDoseCalcOptions}
+                      value={currentDoseCalcDisplay}
                       onValueChange={(v) => {
-                        const n = [...chemoPlans];
-                        n[idx].doseCalc = v;
                         const recommended = getRecommendedUnitsForDoseCalc(v);
-                        if (!n[idx].unit || v) {
-                          n[idx].unit = recommended.unit;
-                        }
-                        setChemoPlans(n);
+                        const isNewAUC = v.includes("AUC");
+                        const canonicalBasis = isNewAUC
+                          ? (currentAucValue ? `AUC (${currentAucValue})` : "AUC (Calvert Formula)")
+                          : v;
+
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          doseCalc: canonicalBasis,
+                          unit: isNewAUC ? "mg" : (recommended.unit || (v.includes("mg/m²") ? "mg/m²" : v.includes("mg/kg") ? "mg/kg" : "mg")),
+                        }));
                       }}
                       placeholder="Select dose calc"
                       disabled={disabled}
@@ -442,43 +485,70 @@ export function ProtocolDrawer({
                     />
                   </div>
 
+                  {/* Dedicated Target AUC input field when AUC is chosen */}
+                  {isAUC && (
+                    <div>
+                      <label className={drawerLabelCls}>
+                        Target AUC (Calvert Formula Value) <Req />
+                      </label>
+                      <div className="relative flex items-center">
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={currentAucValue}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDraftRow((prev: any) => ({
+                              ...prev,
+                              doseCalc: val ? `AUC (${val})` : "AUC (Calvert Formula)",
+                            }));
+                          }}
+                          placeholder="e.g. 5 (Enter Target AUC)"
+                          className={`${drawerInputCls} pr-16 border-indigo-300 focus:border-indigo-600`}
+                          disabled={disabled}
+                        />
+                        <div className="absolute right-2 px-2.5 py-1 rounded bg-indigo-100 text-indigo-700 text-[11px] font-bold tracking-wide pointer-events-none select-none">
+                          AUC
+                        </div>
+                      </div>
+                      <div className="mt-1.5 p-2 rounded bg-indigo-50/70 border border-indigo-100 text-[11px] text-indigo-900 space-y-0.5">
+                        <p className="font-semibold text-indigo-950">
+                          Formula: Calvert Dose = Target AUC × (GFR + 25) mg
+                        </p>
+                        <p className="text-slate-600">
+                          {currentAucValue
+                            ? `Target AUC = ${currentAucValue}: Patient dose will be dynamically calculated as ${currentAucValue} × (GFR + 25) mg.`
+                            : "Enter a numerical Target AUC (e.g. 2, 4, 5, 6) here."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   <div>
-                    <label className={drawerLabelCls}>Protocol Dose & Unit</label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <ProtocolSelect
-                        options={getDoseDropdownOptions(chemoPlans, row.dose)}
-                        value={row.dose}
-                        onValueChange={(v) => {
-                          const n = [...chemoPlans];
-                          n[idx].dose = v;
-                          setChemoPlans(n);
+                    <label className={drawerLabelCls}>
+                      {isAUC ? "Standard / Protocol Dose (Optional Flat/Ref)" : "Protocol Dose"}
+                    </label>
+                    <div className="relative flex items-center">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={row.dose ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            dose: val,
+                          }));
                         }}
-                        placeholder="Dose"
-                        emptyMessage="No dose options"
+                        placeholder={isAUC ? "e.g. baseline mg (or leave blank)" : "e.g. 85"}
+                        className={`${drawerInputCls} pr-20`}
                         disabled={disabled}
-                        className="h-9"
                       />
-                      <ProtocolSelect
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit, "mg/m²", "mg/kg", "AUC", "mg", "g", "mcg"].filter(Boolean)))}
-                        value={row.unit}
-                        onValueChange={(v) => {
-                          const n = [...chemoPlans];
-                          const oldUnit = n[idx].unit;
-                          n[idx].unit = v;
-                          const numDose = parseFloat(n[idx].dose);
-                          if (!isNaN(numDose) && numDose > 0 && oldUnit && oldUnit !== v) {
-                            const converted = convertUnit(numDose, oldUnit, v);
-                            if (converted != null) {
-                              n[idx].dose = String(converted);
-                            }
-                          }
-                          setChemoPlans(n);
-                        }}
-                        placeholder="Unit"
-                        emptyMessage="No units found"
-                        disabled={disabled}
-                        className="h-9"
-                      />
+                      <div className="absolute right-2 px-2.5 py-1 rounded bg-slate-200/80 text-slate-700 text-[11px] font-semibold tracking-wide pointer-events-none select-none">
+                        {currentUnit}
+                      </div>
                     </div>
                   </div>
 
@@ -486,11 +556,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Admin Notes</label>
                     <textarea
                       rows={3}
-                      value={row.adminNotes}
+                      value={row.adminNotes || ""}
                       onChange={(e) => {
-                        const n = [...chemoPlans];
-                        n[idx].adminNotes = e.target.value;
-                        setChemoPlans(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, adminNotes: val }));
                       }}
                       placeholder="e.g. Infuse over 2 hours in 500ml D5W. Protect from light."
                       className={drawerTextareaCls}
@@ -503,11 +572,10 @@ export function ProtocolDrawer({
                       <label className={drawerLabelCls}>Previous Toxicity</label>
                       <input
                         type="text"
-                        value={row.toxicity}
+                        value={row.toxicity || ""}
                         onChange={(e) => {
-                          const n = [...chemoPlans];
-                          n[idx].toxicity = e.target.value;
-                          setChemoPlans(n);
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({ ...prev, toxicity: val }));
                         }}
                         placeholder="e.g. Neuropathy grade 1"
                         className={drawerInputCls}
@@ -518,11 +586,10 @@ export function ProtocolDrawer({
                       <label className={drawerLabelCls}>Clinical Remarks</label>
                       <input
                         type="text"
-                        value={row.remarks}
+                        value={row.remarks || ""}
                         onChange={(e) => {
-                          const n = [...chemoPlans];
-                          n[idx].remarks = e.target.value;
-                          setChemoPlans(n);
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({ ...prev, remarks: val }));
                         }}
                         placeholder="Remarks"
                         className={drawerInputCls}
@@ -535,9 +602,8 @@ export function ProtocolDrawer({
             })()}
 
             {/* SUPPORTIVE CARE FORM */}
-            {activeDrawer.section === "supportive" && supportive[activeDrawer.index] && (() => {
-              const row = supportive[activeDrawer.index];
-              const idx = activeDrawer.index;
+            {activeDrawer.section === "supportive" && draftRow && (() => {
+              const row = draftRow;
               return (
                 <>
                   <div>
@@ -547,9 +613,7 @@ export function ProtocolDrawer({
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...supportive];
-                        n[idx].form = v;
-                        setSupportive(n);
+                        setDraftRow((prev: any) => ({ ...prev, form: v }));
                       }}
                       placeholder="Select form"
                       emptyMessage="No forms found"
@@ -566,33 +630,33 @@ export function ProtocolDrawer({
                       editableChip
                       displayValue={row.medicineName || getMedName(row.medication, supportiveMeds)}
                       onEditValue={(text) => {
-                        const n = [...supportive];
-                        n[idx].medicineName = text;
-                        if (!n[idx].medication) {
-                          n[idx].medication = text;
-                        }
-                        setSupportive(n);
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          medicineName: text,
+                          medication: prev?.medication || text,
+                        }));
                       }}
                       options={getDropdownOptions(supportiveMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...supportive];
-                        n[idx].medication = v;
                         const med = supportiveMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
-                        if (availableForms.length === 1 && !n[idx].form) {
-                          n[idx].form = availableForms[0];
-                        } else if (!n[idx].form && med?.dosage_form) {
-                          n[idx].form = med.dosage_form;
-                        }
-                        if (med) {
-                          n[idx].medicineName = med.generic_name || med.medicine_name;
-                        } else if (v) {
-                          n[idx].medicineName = v;
-                        }
-                        setSupportive(n);
+                        setDraftRow((prev: any) => {
+                          let nextForm = prev?.form;
+                          if (availableForms.length === 1 && !nextForm) {
+                            nextForm = availableForms[0];
+                          } else if (!nextForm && med?.dosage_form) {
+                            nextForm = med.dosage_form;
+                          }
+                          return {
+                            ...prev,
+                            medication: v,
+                            form: nextForm,
+                            medicineName: med ? (med.generic_name || med.medicine_name) : (v || prev?.medicineName),
+                          };
+                        });
                       }}
                       placeholder={
                         loadingSupportiveMeds
@@ -606,30 +670,27 @@ export function ProtocolDrawer({
                     />
                   </div>
 
-                  {/* Brand Name field cleared from UI per clinical protocol design */}
                   <div>
                     <label className={drawerLabelCls}>Dosage & Unit</label>
                     <div className="grid grid-cols-2 gap-1.5">
-                      <ProtocolSelect
-                        options={getDoseDropdownOptions(supportive, row.dose)}
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
                         value={row.dose ?? ""}
-                        onValueChange={(v) => {
-                          const n = [...supportive];
-                          n[idx].dose = v;
-                          setSupportive(n);
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({ ...prev, dose: val }));
                         }}
-                        placeholder="Dose"
-                        emptyMessage="No dose options"
+                        placeholder="e.g. 4"
+                        className={drawerInputCls}
                         disabled={disabled}
-                        className="h-9"
                       />
                       <ProtocolSelect
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
                         value={row.unit ?? ""}
                         onValueChange={(v) => {
-                          const n = [...supportive];
-                          n[idx].unit = v;
-                          setSupportive(n);
+                          setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
                         placeholder="Unit"
                         emptyMessage="No units found"
@@ -643,11 +704,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Admin Notes</label>
                     <textarea
                       rows={3}
-                      value={row.adminNotes}
+                      value={row.adminNotes || ""}
                       onChange={(e) => {
-                        const n = [...supportive];
-                        n[idx].adminNotes = e.target.value;
-                        setSupportive(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, adminNotes: val }));
                       }}
                       placeholder="e.g. Take with food or as directed"
                       className={drawerTextareaCls}
@@ -659,11 +719,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Clinical Remarks</label>
                     <textarea
                       rows={2}
-                      value={row.remarks}
+                      value={row.remarks || ""}
                       onChange={(e) => {
-                        const n = [...supportive];
-                        n[idx].remarks = e.target.value;
-                        setSupportive(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, remarks: val }));
                       }}
                       placeholder="Clinical remarks"
                       className={drawerTextareaCls}
@@ -675,9 +734,8 @@ export function ProtocolDrawer({
             })()}
 
             {/* DILUTION FORM */}
-            {activeDrawer.section === "dilution" && dilution[activeDrawer.index] && (() => {
-              const row = dilution[activeDrawer.index];
-              const idx = activeDrawer.index;
+            {activeDrawer.section === "dilution" && draftRow && (() => {
+              const row = draftRow;
               return (
                 <>
                   <div>
@@ -687,9 +745,7 @@ export function ProtocolDrawer({
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...dilution];
-                        n[idx].form = v;
-                        setDilution(n);
+                        setDraftRow((prev: any) => ({ ...prev, form: v }));
                       }}
                       placeholder="Select form"
                       emptyMessage="No forms found"
@@ -704,33 +760,33 @@ export function ProtocolDrawer({
                       editableChip
                       displayValue={row.medicineName || getDilutionMedName(row.medication)}
                       onEditValue={(text) => {
-                        const n = [...dilution];
-                        n[idx].medicineName = text;
-                        if (!n[idx].medication) {
-                          n[idx].medication = text;
-                        }
-                        setDilution(n);
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          medicineName: text,
+                          medication: prev?.medication || text,
+                        }));
                       }}
                       options={allAvailableDilutionMeds}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...dilution];
-                        n[idx].medication = v;
                         const med = dilutionMeds.find((m) => m.medicine_id === v) || chemoMeds.find((m) => m.medicine_id === v) || premedMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
-                        if (availableForms.length === 1 && !n[idx].form) {
-                          n[idx].form = availableForms[0];
-                        } else if (!n[idx].form && med?.dosage_form) {
-                          n[idx].form = med.dosage_form;
-                        }
-                        if (med) {
-                          n[idx].medicineName = med.generic_name || med.medicine_name;
-                        } else if (v) {
-                          n[idx].medicineName = v;
-                        }
-                        setDilution(n);
+                        setDraftRow((prev: any) => {
+                          let nextForm = prev?.form;
+                          if (availableForms.length === 1 && !nextForm) {
+                            nextForm = availableForms[0];
+                          } else if (!nextForm && med?.dosage_form) {
+                            nextForm = med.dosage_form;
+                          }
+                          return {
+                            ...prev,
+                            medication: v,
+                            form: nextForm,
+                            medicineName: med ? (med.generic_name || med.medicine_name) : (v || prev?.medicineName),
+                          };
+                        });
                       }}
                       placeholder={loadingDilutionMeds ? "Loading medicines..." : "Select medicine"}
                       emptyMessage="No medicines found"
@@ -740,55 +796,68 @@ export function ProtocolDrawer({
                     />
                   </div>
 
-                  {/* Brand Name field cleared from UI per clinical protocol design */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={drawerLabelCls}>Dose & Unit</label>
                       <div className="grid grid-cols-2 gap-1.5">
-                        <ProtocolSelect
-                          options={getDoseDropdownOptions(dilution, row.dose)}
-                          value={row.dose}
-                          onValueChange={(v) => {
-                            const n = [...dilution];
-                            n[idx].dose = v;
-                            const numDose = parseFloat(v);
-                            if (!isNaN(numDose) && numDose > 0 && n[idx].unit) {
-                              const vol = convertMassToVolume(numDose, n[idx].unit, n[idx].volumeUnit || "CC");
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={row.dose ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const numDose = parseFloat(val);
+                            let calculatedVol = row.volume;
+                            let volUnit = row.volumeUnit || "CC";
+                            if (!isNaN(numDose) && numDose > 0 && row.unit) {
+                              const vol = convertMassToVolume(numDose, row.unit, volUnit);
                               if (vol != null) {
-                                n[idx].volume = String(vol);
-                                if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                                calculatedVol = String(vol);
                               }
                             }
-                            setDilution(n);
+                            setDraftRow((prev: any) => ({
+                              ...prev,
+                              dose: val,
+                              volume: calculatedVol,
+                              volumeUnit: volUnit,
+                            }));
                           }}
-                          placeholder="Dose"
-                          emptyMessage="No dose options"
+                          placeholder="e.g. 100"
+                          className={drawerInputCls}
                           disabled={disabled}
-                          className="h-9"
                         />
                         <ProtocolSelect
-                          options={Array.from(new Set([...fieldOptions.dilution_dose_units, row.unit, "mg", "g", "mcg", "kg"].filter(Boolean)))}
+                          options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
                           value={row.unit}
                           onValueChange={(v) => {
-                            const n = [...dilution];
-                            const oldUnit = n[idx].unit;
-                            n[idx].unit = v;
-                            const numDose = parseFloat(n[idx].dose);
+                            const oldUnit = row.unit;
+                            const numDose = parseFloat(row.dose);
+                            let nextDose = row.dose;
+                            let calculatedVol = row.volume;
+                            let volUnit = row.volumeUnit || "CC";
+
                             if (!isNaN(numDose) && numDose > 0) {
                               if (oldUnit && oldUnit !== v) {
                                 const convertedDose = convertUnit(numDose, oldUnit, v);
                                 if (convertedDose != null) {
-                                  n[idx].dose = String(convertedDose);
+                                  nextDose = String(convertedDose);
                                 }
                               }
-                              const currentDose = parseFloat(n[idx].dose) || numDose;
-                              const vol = convertMassToVolume(currentDose, v, n[idx].volumeUnit || "CC");
+                              const cur = parseFloat(nextDose) || numDose;
+                              const vol = convertMassToVolume(cur, v, volUnit);
                               if (vol != null) {
-                                n[idx].volume = String(vol);
-                                if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                                calculatedVol = String(vol);
                               }
                             }
-                            setDilution(n);
+
+                            setDraftRow((prev: any) => ({
+                              ...prev,
+                              unit: v,
+                              dose: nextDose,
+                              volume: calculatedVol,
+                              volumeUnit: volUnit,
+                            }));
                           }}
                           placeholder="Unit"
                           emptyMessage="No units found"
@@ -802,32 +871,36 @@ export function ProtocolDrawer({
                       <label className={drawerLabelCls}>Dilution Volume & Unit</label>
                       <div className="grid grid-cols-2 gap-1.5">
                         <input
-                          type="text"
-                          value={row.volume}
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={row.volume ?? ""}
                           onChange={(e) => {
-                            const n = [...dilution];
-                            n[idx].volume = e.target.value;
-                            setDilution(n);
+                            const val = e.target.value;
+                            setDraftRow((prev: any) => ({ ...prev, volume: val }));
                           }}
                           placeholder="100"
                           className={drawerInputCls}
                           disabled={disabled}
                         />
                         <ProtocolSelect
-                          options={Array.from(new Set([...fieldOptions.dilution_volume_units, row.volumeUnit, "CC", "mL", "L"].filter(Boolean)))}
+                          options={Array.from(new Set([...CLEAN_VOLUME_UNITS, row.volumeUnit].filter(Boolean)))}
                           value={row.volumeUnit}
                           onValueChange={(v) => {
-                            const n = [...dilution];
-                            const oldVolUnit = n[idx].volumeUnit;
-                            n[idx].volumeUnit = v;
-                            const numVol = parseFloat(n[idx].volume);
+                            const oldVolUnit = row.volumeUnit;
+                            const numVol = parseFloat(row.volume);
+                            let nextVol = row.volume;
                             if (!isNaN(numVol) && numVol > 0 && oldVolUnit && oldVolUnit !== v) {
                               const convertedVol = convertUnit(numVol, oldVolUnit, v);
                               if (convertedVol != null) {
-                                n[idx].volume = String(convertedVol);
+                                nextVol = String(convertedVol);
                               }
                             }
-                            setDilution(n);
+                            setDraftRow((prev: any) => ({
+                              ...prev,
+                              volumeUnit: v,
+                              volume: nextVol,
+                            }));
                           }}
                           placeholder="Unit"
                           emptyMessage="No units found"
@@ -844,9 +917,7 @@ export function ProtocolDrawer({
                       options={fieldOptions.diluents}
                       value={row.diluent}
                       onValueChange={(v) => {
-                        const n = [...dilution];
-                        n[idx].diluent = v;
-                        setDilution(n);
+                        setDraftRow((prev: any) => ({ ...prev, diluent: v }));
                       }}
                       placeholder="Select diluent"
                       emptyMessage="No diluents found"
@@ -859,9 +930,8 @@ export function ProtocolDrawer({
             })()}
 
             {/* POST-TREATMENT (DISCHARGE) FORM */}
-            {activeDrawer.section === "post" && post[activeDrawer.index] && (() => {
-              const row = post[activeDrawer.index];
-              const idx = activeDrawer.index;
+            {activeDrawer.section === "post" && draftRow && (() => {
+              const row = draftRow;
               const isDurationFilledWithNumber = /^\d+(\.\d+)?$/.test(String(row.duration ?? "").trim());
               return (
                 <>
@@ -872,9 +942,7 @@ export function ProtocolDrawer({
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...post];
-                        n[idx].form = v;
-                        setPost(n);
+                        setDraftRow((prev: any) => ({ ...prev, form: v }));
                       }}
                       placeholder="Select form"
                       emptyMessage="No forms found"
@@ -889,34 +957,34 @@ export function ProtocolDrawer({
                       editableChip
                       displayValue={row.medicineName || getPostMedName(row.medication)}
                       onEditValue={(text) => {
-                        const n = [...post];
-                        n[idx].medicineName = text;
-                        if (!n[idx].medication) {
-                          n[idx].medication = text;
-                        }
-                        setPost(n);
+                        setDraftRow((prev: any) => ({
+                          ...prev,
+                          medicineName: text,
+                          medication: prev?.medication || text,
+                        }));
                       }}
                       options={getDropdownOptions(dischargeMeds.length > 0 ? dischargeMeds : premedMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...post];
-                        n[idx].medication = v;
                         const medList = dischargeMeds.length > 0 ? dischargeMeds : premedMeds;
                         const med = medList.find((m) => m.medicine_id === v) || chemoMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
-                        if (availableForms.length === 1 && !n[idx].form) {
-                          n[idx].form = availableForms[0];
-                        } else if (!n[idx].form && med?.dosage_form) {
-                          n[idx].form = med.dosage_form;
-                        }
-                        if (med) {
-                          n[idx].medicineName = med.generic_name || med.medicine_name;
-                        } else if (v) {
-                          n[idx].medicineName = v;
-                        }
-                        setPost(n);
+                        setDraftRow((prev: any) => {
+                          let nextForm = prev?.form;
+                          if (availableForms.length === 1 && !nextForm) {
+                            nextForm = availableForms[0];
+                          } else if (!nextForm && med?.dosage_form) {
+                            nextForm = med.dosage_form;
+                          }
+                          return {
+                            ...prev,
+                            medication: v,
+                            form: nextForm,
+                            medicineName: med ? (med.generic_name || med.medicine_name) : (v || prev?.medicineName),
+                          };
+                        });
                       }}
                       placeholder={
                         loadingDischargeMeds
@@ -930,33 +998,32 @@ export function ProtocolDrawer({
                     />
                   </div>
 
-                  {/* Brand Name field cleared from UI per clinical protocol design */}
                   <div>
                     <label className={drawerLabelCls}>Dose & Unit</label>
                     <div className="grid grid-cols-2 gap-1.5">
                       <input
-                        type="text"
-                        value={row.dose}
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={row.dose ?? ""}
                         onChange={(e) => {
-                          const n = [...post];
-                          n[idx].dose = e.target.value;
-                          setPost(n);
+                          const val = e.target.value;
+                          setDraftRow((prev: any) => ({ ...prev, dose: val }));
                         }}
                         placeholder="e.g. 4"
                         className={drawerInputCls}
                         disabled={disabled}
                       />
-                      <input
-                        type="text"
+                      <ProtocolSelect
+                        options={Array.from(new Set([...CLEAN_DISCHARGE_UNITS, row.unit].filter(Boolean)))}
                         value={row.unit}
-                        onChange={(e) => {
-                          const n = [...post];
-                          n[idx].unit = e.target.value;
-                          setPost(n);
+                        onValueChange={(v) => {
+                          setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
-                        placeholder="e.g. mg"
-                        className={drawerInputCls}
+                        placeholder="Unit"
+                        emptyMessage="No units found"
                         disabled={disabled}
+                        className="h-9"
                       />
                     </div>
                   </div>
@@ -969,9 +1036,7 @@ export function ProtocolDrawer({
                         value={row.frequency}
                         allowCreate
                         onValueChange={(v) => {
-                          const n = [...post];
-                          n[idx].frequency = v;
-                          setPost(n);
+                          setDraftRow((prev: any) => ({ ...prev, frequency: v }));
                         }}
                         placeholder="Select frequency"
                         emptyMessage="No frequency options"
@@ -983,13 +1048,11 @@ export function ProtocolDrawer({
                       <label className={drawerLabelCls}>Duration</label>
                       <div className="grid grid-cols-2 gap-1.5">
                         <ProtocolSelect
-                          options={["1", "2", "3", "5", "7", "10", "14", "21", "28"]}
+                          options={PROTOCOL_DURATION_DAYS}
                           value={row.duration}
                           allowCreate
                           onValueChange={(v) => {
-                            const n = [...post];
-                            n[idx].duration = v;
-                            setPost(n);
+                            setDraftRow((prev: any) => ({ ...prev, duration: v }));
                           }}
                           placeholder="Duration"
                           emptyMessage="No duration options"
@@ -1000,9 +1063,7 @@ export function ProtocolDrawer({
                           options={getDurationUnitOptions(row.duration, row.durationDays)}
                           value={getDurationUnitCode(row.durationDays)}
                           onValueChange={(v) => {
-                            const n = [...post];
-                            n[idx].durationDays = v;
-                            setPost(n);
+                            setDraftRow((prev: any) => ({ ...prev, durationDays: v }));
                           }}
                           placeholder={parseInt(String(row.duration ?? "").trim(), 10) === 1 ? "Day" : "Days"}
                           disabled={disabled || !isDurationFilledWithNumber}
@@ -1019,9 +1080,7 @@ export function ProtocolDrawer({
                       value={row.instructions}
                       allowCreate
                       onValueChange={(v) => {
-                        const n = [...post];
-                        n[idx].instructions = v;
-                        setPost(n);
+                        setDraftRow((prev: any) => ({ ...prev, instructions: v }));
                       }}
                       placeholder="Select or type administration instructions"
                       emptyMessage="No instruction options"
@@ -1034,11 +1093,10 @@ export function ProtocolDrawer({
                     <label className={drawerLabelCls}>Clinical Remarks</label>
                     <textarea
                       rows={2}
-                      value={row.remarks}
+                      value={row.remarks || ""}
                       onChange={(e) => {
-                        const n = [...post];
-                        n[idx].remarks = e.target.value;
-                        setPost(n);
+                        const val = e.target.value;
+                        setDraftRow((prev: any) => ({ ...prev, remarks: val }));
                       }}
                       placeholder="Remarks"
                       className={drawerTextareaCls}
@@ -1075,7 +1133,7 @@ export function ProtocolDrawer({
               <button
                 type="button"
                 disabled={savingDrawer}
-                onClick={onDone}
+                onClick={() => onDone(draftRow)}
                 className="px-4 py-2 bg-[#12335c] text-white rounded-lg text-xs font-semibold hover:bg-[#0e2848] shadow-xs transition disabled:opacity-50 inline-flex items-center gap-1.5"
               >
                 {savingDrawer && <Loader2 className="w-3 h-3 animate-spin" />}

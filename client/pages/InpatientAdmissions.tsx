@@ -11,6 +11,10 @@ import {
   LogOut,
   Users,
   Calendar,
+  BedDouble,
+  Activity,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
@@ -34,6 +38,8 @@ import {
 /* Dropdown value for "Others": the typed text is added to the master on
    submit, so the whole hospital sees it next time. */
 const OTHERS_OPTION = "__OTHERS__";
+import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportPdf } from "@/lib/exportPdf";
 import { EncounterDocuments } from "@/components/hms/EncounterDocuments";
 import { useToast } from "@/hooks/use-toast";
 import { getUser } from "@/utils/token";
@@ -164,6 +170,7 @@ const InpatientAdmissions: React.FC = () => {
   const [careTeamFor, setCareTeamFor] = useState<AdmissionRecord | null>(null);
   const [wardRosterOpen, setWardRosterOpen] = useState(false);
   const [assignedToMe, setAssignedToMe] = useState(false);
+  const [hasTransfersFilter, setHasTransfersFilter] = useState(false);
   const [submittingPlanned, setSubmittingPlanned] = useState(false);
 
   const effectiveBranchId = useMemo(() => {
@@ -184,35 +191,6 @@ const InpatientAdmissions: React.FC = () => {
     handleClear: handleClearIpdFilter,
   } = useFilterPanel();
 
-  // Status lists every admission status (not just ones on the current page)
-  // so it stays complete no matter what's currently loaded.
-  const ipdFilterFields = [
-    {
-      id: "status",
-      label: "Status",
-      type: "multiselect" as const,
-      options: [
-        { label: "Planned", value: "PLANNED" },
-        { label: "Admitted", value: "ADMITTED" },
-        { label: "Discharged", value: "DISCHARGED" },
-        { label: "Transferred", value: "TRANSFERRED" },
-        { label: "Cancelled", value: "CANCELLED" },
-        { label: "No-Show", value: "NO_SHOW" },
-      ],
-    },
-  ];
-
-  const ipdAppliedStatus: string[] = useMemo(
-    () => (Array.isArray(ipdAppliedFilterValues.status) ? ipdAppliedFilterValues.status : []),
-    [ipdAppliedFilterValues.status],
-  );
-
-  // The "All Active" chip only carries a count while the table is the
-  // untouched live roster (no date / search / status narrowing), so the badge
-  // always reads as the current in-hospital census, never a filtered subset.
-  const ipdShowActiveCount =
-    !ipdDateFilter && ipdAppliedStatus.length === 0 && !ipdSearch.trim();
-
   // Load Wards with React Query (cached per branch for 5 min)
   const { data: wards = [] } = useQuery<WardRecord[]>({
     queryKey: ["ipd-wards", effectiveBranchId || "all"],
@@ -226,6 +204,79 @@ const InpatientAdmissions: React.FC = () => {
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  // KPI Overview: Beds occupied, total capacity, admitted today
+  const { data: ipdOverview } = useQuery({
+    queryKey: ["ipd-overview", effectiveBranchId || "all"],
+    queryFn: async () => {
+      try {
+        const res = await ipdApi.getOverview(effectiveBranchId);
+        return res.data?.data;
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 60 * 1000,
+  });
+
+  const { data: admittedTodayData } = useQuery({
+    queryKey: ["ipd-admitted-today", effectiveBranchId || "all"],
+    queryFn: async () => {
+      try {
+        const res = await ipdApi.getAdmittedPatientsToday(effectiveBranchId);
+        return res.data?.data;
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 60 * 1000,
+  });
+
+  // Status lists every admission status (not just ones on the current page)
+  // so it stays complete no matter what's currently loaded.
+  const ipdFilterFields = useMemo(() => [
+    {
+      id: "status",
+      label: "Status",
+      type: "multiselect" as const,
+      options: [
+        { label: "Planned", value: "PLANNED" },
+        { label: "Admitted", value: "ADMITTED" },
+        { label: "Discharged", value: "DISCHARGED" },
+        { label: "Cancelled", value: "CANCELLED" },
+        { label: "No-Show", value: "NO_SHOW" },
+      ],
+    },
+    {
+      id: "wardId",
+      label: "Ward",
+      type: "select" as const,
+      options: [
+        { label: "All Wards", value: "" },
+        ...wards.map((w) => ({ label: w.ward_name, value: w.ward_id })),
+      ],
+    },
+  ], [wards]);
+
+  const ipdAppliedStatus: string[] = useMemo(
+    () => (Array.isArray(ipdAppliedFilterValues.status) ? ipdAppliedFilterValues.status : []),
+    [ipdAppliedFilterValues.status],
+  );
+
+  const ipdAppliedWardId: string = useMemo(
+    () => (typeof ipdAppliedFilterValues.wardId === "string" ? ipdAppliedFilterValues.wardId : ""),
+    [ipdAppliedFilterValues.wardId],
+  );
+
+  // The "All Active" chip only carries a count while the table is the
+  // untouched live roster (no date / search / status / ward / transfer narrowing),
+  // so the badge always reads as the current in-hospital census, never a filtered subset.
+  const ipdShowActiveCount =
+    !ipdDateFilter &&
+    ipdAppliedStatus.length === 0 &&
+    !ipdAppliedWardId &&
+    !hasTransfersFilter &&
+    !ipdSearch.trim();
 
   const statusFilter = useMemo(() => {
     return ipdAppliedStatus.length
@@ -249,9 +300,11 @@ const InpatientAdmissions: React.FC = () => {
       "ipd-admissions",
       effectiveBranchId || "all",
       statusFilter.join(","),
+      ipdAppliedWardId,
       dateFilterStr,
       ipdSearch.trim(),
       assignedToMe ? "mine" : "all",
+      hasTransfersFilter ? "transferred" : "all-transfers",
       ipdPage,
       ipdRowsPerPage,
       ipdSortField,
@@ -262,9 +315,11 @@ const InpatientAdmissions: React.FC = () => {
         const res = await ipdApi.getAll({
           branchId: effectiveBranchId,
           status: statusFilter.length ? statusFilter.join(",") : undefined,
+          wardId: ipdAppliedWardId || undefined,
           date: dateFilterStr || undefined,
           search: ipdSearch.trim() || undefined,
           assignedToMe: assignedToMe || undefined,
+          hasTransfers: hasTransfersFilter || undefined,
           page: ipdPage,
           limit: ipdRowsPerPage,
           sortField: ipdSortField,
@@ -561,6 +616,87 @@ const InpatientAdmissions: React.FC = () => {
   // Edit a planned admission request via the shared AddAppointment form
   const handleEditPlanned = (admission: AdmissionRecord) => {
     navigate("/appointments/add", { state: { admissionEdit: admission } });
+  };
+
+  // Export IPD Census (PDF or CSV)
+  const handleExportCensus = (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Inpatient (IPD) Census Report",
+        subtitle: `${admissions.length} admission record${admissions.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `ipd-census-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "IP Number", cell: (r: AdmissionRecord) => r.ip_number || "—" },
+          {
+            header: "Patient",
+            cell: (r: AdmissionRecord) =>
+              r.patient_bio_data
+                ? [r.patient_bio_data.patient_first_name, r.patient_bio_data.patient_last_name].filter(Boolean).join(" ")
+                : "—",
+          },
+          { header: "Patient ID", cell: (r: AdmissionRecord) => r.patient_id || "—" },
+          {
+            header: "Ward & Bed",
+            cell: (r: AdmissionRecord) =>
+              `${r.ward_master?.ward_name || "—"} / ${r.bed_master?.bed_number || "—"}`,
+          },
+          {
+            header: "Doctor",
+            cell: (r: AdmissionRecord) =>
+              r.employees
+                ? `Dr. ${[r.employees.first_name, r.employees.last_name].filter(Boolean).join(" ")}`
+                : "—",
+          },
+          {
+            header: "Admitted On",
+            cell: (r: AdmissionRecord) =>
+              r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy") : "—",
+          },
+          { header: "Status", cell: (r: AdmissionRecord) => r.status || "—" },
+        ],
+        rows: admissions,
+      });
+      toast({ title: "Export complete", description: "IPD Census PDF file has been downloaded." });
+      return;
+    }
+
+    if (exportFormat === "csv") {
+      const headers = ["IP Number", "Patient Name", "Patient ID", "Ward", "Bed", "Doctor", "Admitted On", "Status"];
+      const csvRows = [
+        headers.join(","),
+        ...admissions.map((r) => {
+          const patientName = r.patient_bio_data
+            ? [r.patient_bio_data.patient_first_name, r.patient_bio_data.patient_last_name].filter(Boolean).join(" ")
+            : "";
+          const doctorName = r.employees
+            ? `Dr. ${[r.employees.first_name, r.employees.last_name].filter(Boolean).join(" ")}`
+            : "";
+          const admittedOn = r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy HH:mm") : "";
+          const ward = r.ward_master?.ward_name || "";
+          const bed = r.bed_master?.bed_number || "";
+          return [
+            `"${r.ip_number || ""}"`,
+            `"${patientName.replace(/"/g, '""')}"`,
+            `"${r.patient_id || ""}"`,
+            `"${ward.replace(/"/g, '""')}"`,
+            `"${bed.replace(/"/g, '""')}"`,
+            `"${doctorName.replace(/"/g, '""')}"`,
+            `"${admittedOn}"`,
+            `"${r.status || ""}"`,
+          ].join(",");
+        }),
+      ];
+      const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ipd-census-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "Export complete", description: "IPD Census CSV file has been downloaded." });
+    }
   };
 
   // IPD columns — same components and text sizes as the OPD table, only the
@@ -861,6 +997,8 @@ const InpatientAdmissions: React.FC = () => {
 
 
             <div className="flex items-center gap-3">
+              <ExportReport onExport={handleExportCensus} />
+
               <button
                 onClick={() => navigate("/inpatient/duty-roster")}
                 className="flex items-center gap-2 px-4 py-2 bg-white border border-[#004785] rounded-lg text-[#004785] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
@@ -894,6 +1032,68 @@ const InpatientAdmissions: React.FC = () => {
 
           </div>
 
+          {/* ==================== IPD SUMMARY KPI CARDS ==================== */}
+          {(() => {
+            const occupiedBeds = ipdOverview?.bedsOccupied ?? 0;
+            const totalBeds = ipdOverview?.totalBeds ?? 0;
+            const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+            const admittedToday = admittedTodayData?.totalAdmittedToday ?? 0;
+            const readyForDischarge = admissions.filter((a) => a.status === "ADMITTED" && Boolean(a.discharge_details_at)).length;
+            const plannedAdmissions = admissions.filter((a) => a.status === "PLANNED").length;
+
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Bed Occupancy Card */}
+                <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs font-medium text-[#6B7280]">Bed Occupancy Rate</p>
+                    <p className="text-xl font-bold text-[#191C1E] mt-1">{occupancyRate}%</p>
+                    <p className="text-[11px] text-[#8C8D8F] mt-0.5">{occupiedBeds} of {totalBeds} beds occupied</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
+                    <BedDouble className="w-5 h-5" />
+                  </div>
+                </div>
+
+                {/* Admitted Today Card */}
+                <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs font-medium text-[#6B7280]">Admitted Today</p>
+                    <p className="text-xl font-bold text-[#191C1E] mt-1">{admittedToday}</p>
+                    <p className="text-[11px] text-emerald-600 font-medium mt-0.5">Fresh admissions</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                    <Activity className="w-5 h-5" />
+                  </div>
+                </div>
+
+                {/* Ready for Discharge Card */}
+                <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs font-medium text-[#6B7280]">Ready for Discharge</p>
+                    <p className="text-xl font-bold text-[#191C1E] mt-1">{readyForDischarge}</p>
+                    <p className="text-[11px] text-purple-600 font-medium mt-0.5">Doctor clearance done</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                </div>
+
+                {/* Planned Admissions Card */}
+                <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs font-medium text-[#6B7280]">Planned Admissions</p>
+                    <p className="text-xl font-bold text-[#191C1E] mt-1">{plannedAdmissions}</p>
+                    <p className="text-[11px] text-amber-600 font-medium mt-0.5">Awaiting bed/check-in</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ==================== MAIN CARD ==================== */}
 
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
@@ -903,12 +1103,37 @@ const InpatientAdmissions: React.FC = () => {
 
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
 
-              {/* Empty left slot -- OPD has its View Mode selector here;
-                  IPD has no equivalent, but the outer toolbar row uses
-                  justify-between across two children, so this keeps the
-                  search/filter/refresh group pinned to the right instead
-                  of collapsing to the left the way a single child would. */}
-              <div />
+              {/* Left slot: All Active & Transferred quick filter pills */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleIpdShowAllActive}
+                  className={`flex items-center h-[27px] px-3 rounded-lg text-xs font-semibold border transition-colors duration-150 ${
+                    !ipdDateFilter
+                      ? "bg-[#D6E3FF] border-[#D6E3FF] text-[#00488D]"
+                      : "bg-white border-[#E5E7EB] text-[#6B7280] hover:bg-[#F2F4F6]"
+                  }`}
+                >
+                  All Active{ipdShowActiveCount ? ` (${ipdTotal})` : ""}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasTransfersFilter((v) => !v);
+                    setIpdPage(1);
+                  }}
+                  title="Filter patients with bed transfer history"
+                  className={`flex items-center gap-1.5 h-[27px] px-3 rounded-lg text-xs font-semibold border transition-colors duration-150 ${
+                    hasTransfersFilter
+                      ? "bg-[#D6E3FF] border-[#D6E3FF] text-[#00488D]"
+                      : "bg-white border-[#E5E7EB] text-[#6B7280] hover:bg-[#F2F4F6]"
+                  }`}
+                >
+                  <ArrowRightLeft className="w-3 h-3" />
+                  Transferred
+                </button>
+              </div>
 
               <div className="flex items-center gap-3 flex-wrap">
                 {/* Search */}
@@ -926,41 +1151,25 @@ const InpatientAdmissions: React.FC = () => {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
 
-                {/* All Active chip + Date Navigator -- "All Active" is the
-                    default live census; stepping or picking a date filters
-                    admissions to that day, mirroring the OPD navigator. */}
-                <div className="flex items-center gap-2">
+                {isClinicianRole && (
                   <button
                     type="button"
-                    onClick={handleIpdShowAllActive}
+                    onClick={() => {
+                      setAssignedToMe((v) => !v);
+                      setIpdPage(1);
+                    }}
+                    title="Only patients where you are the consultant, duty doctor or nurse"
                     className={`flex items-center h-[27px] px-3 rounded-lg text-xs font-semibold border transition-colors duration-150 ${
-                      !ipdDateFilter
+                      assignedToMe
                         ? "bg-[#D6E3FF] border-[#D6E3FF] text-[#00488D]"
                         : "bg-white border-[#E5E7EB] text-[#6B7280] hover:bg-[#F2F4F6]"
                     }`}
                   >
-                    All Active{ipdShowActiveCount ? ` (${ipdTotal})` : ""}
+                    My Patients
                   </button>
+                )}
 
-                  {isClinicianRole && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAssignedToMe((v) => !v);
-                        setIpdPage(1);
-                      }}
-                      title="Only patients where you are the consultant, duty doctor or nurse"
-                      className={`flex items-center h-[27px] px-3 rounded-lg text-xs font-semibold border transition-colors duration-150 ${
-                        assignedToMe
-                          ? "bg-[#D6E3FF] border-[#D6E3FF] text-[#00488D]"
-                          : "bg-white border-[#E5E7EB] text-[#6B7280] hover:bg-[#F2F4F6]"
-                      }`}
-                    >
-                      My Patients
-                    </button>
-                  )}
-
-                  <div className="flex items-center">
+                <div className="flex items-center">
                     <button
                       onClick={() => handleIpdDateSelect(subDays(ipdNavDate, 1))}
                       className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
@@ -1001,7 +1210,6 @@ const InpatientAdmissions: React.FC = () => {
                       <ChevronRight className="w-3 h-3 text-[#424752]" />
                     </button>
                   </div>
-                </div>
 
                 {/* Filters */}
                 <ToolbarFilter
@@ -1212,6 +1420,22 @@ const InpatientAdmissions: React.FC = () => {
                   <span className="font-semibold">{activeAdmission.bed_master?.bed_number || "None"}</span>{" "}
                   (goes to <span className="underline">Cleaning</span> until housekeeping marks it ready)
                 </div>
+              </div>
+
+              {/* Commercial Pre-Discharge Checklist Reminder */}
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-xs text-blue-900 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5 text-blue-800">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+                  Pre-Discharge Checklist
+                </div>
+                <p className="text-[11px] text-blue-700">
+                  Ensure final IP billing clearance, pharmacy return reconciliation, and discharge summary handover are completed before final discharge.
+                </p>
+                {activeAdmission.advance_amount && Number(activeAdmission.advance_amount) > 0 && (
+                  <p className="text-[11px] font-semibold text-blue-800">
+                    Advance Collected: ₹{Number(activeAdmission.advance_amount).toLocaleString("en-IN")}
+                  </p>
+                )}
               </div>
 
               {/* Discharge date & time is not entered here -- the server

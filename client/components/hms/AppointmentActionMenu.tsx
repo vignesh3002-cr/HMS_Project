@@ -11,6 +11,7 @@ interface AppointmentActionMenuProps {
   onCancel: () => void;
   onCheckIn: () => void;
   onCheckOut: () => void;
+  onSandwich?: () => void;
   /** Fired after the vitals popover saved successfully so parents can refresh. */
   onVitalsSaved?: () => void;
   appointmentId?: string;
@@ -26,6 +27,7 @@ export function AppointmentActionMenu({
   onCancel,
   onCheckIn,
   onCheckOut,
+  onSandwich,
   onVitalsSaved,
   appointmentId,
   patientId,
@@ -45,6 +47,9 @@ export function AppointmentActionMenu({
   const isCompleted = normalizedStatus === "completed";
   const isNoShow = normalizedStatus === "no show";
   const isScheduled = normalizedStatus === "scheduled";
+  // Matches "rescheduled" and "reschedule", explicitly excluding "reschedule required"
+  const isRescheduled = normalizedStatus === "rescheduled" || normalizedStatus === "reschedule";
+  const isScheduledLike = isScheduled || isRescheduled;
   
   // Check if appointment date is today (local)
   const isAppointmentToday = (() => {
@@ -62,7 +67,7 @@ export function AppointmentActionMenu({
     }
   })();
 
-  const canCheckIn = (isScheduled || normalizedStatus === "rescheduled") && isAppointmentToday && !isCompleted;
+  const canCheckIn = isScheduledLike && isAppointmentToday && !isCompleted;
   const isCheckIn =
     normalizedStatus === "checked in" ||
     normalizedStatus === "check in" ||
@@ -100,6 +105,14 @@ export function AppointmentActionMenu({
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-[#374151] focus:bg-[#F2F4F6]"
             >
               Edit Appointment
+            </DropdownMenuItem>
+          )}
+          {can("appointment.update") && (isNoShow || isCancelled || isScheduledLike) && !isCompleted && onSandwich && (
+            <DropdownMenuItem
+              onSelect={() => onSandwich()}
+              className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-amber-600 focus:bg-amber-50"
+            >
+              Sandwich into Queue
             </DropdownMenuItem>
           )}
           {can("appointment.update") && canCheckIn && (

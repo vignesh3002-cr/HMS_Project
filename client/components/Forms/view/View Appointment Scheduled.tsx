@@ -50,7 +50,6 @@ const STATUS_LABELS: Record<string, string> = {
   NO_SHOW: "No Show",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
-  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 const STATUS_TONES: Record<string, StatusTone> = {
@@ -62,7 +61,6 @@ const STATUS_TONES: Record<string, StatusTone> = {
   NO_SHOW: "gray",
   RESCHEDULED: "teal",
   RESCHEDULE_REQUIRED: "amber",
-  TRANSFER_REVIEW_REQUIRED: "indigo",
 };
 
 function getInitials(name: string): string {

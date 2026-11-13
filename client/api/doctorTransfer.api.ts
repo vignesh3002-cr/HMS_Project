@@ -39,6 +39,18 @@ export interface InitiateTransferPayload {
   };
 }
 
+export interface TransferReplacementDoctorCandidate {
+  employee_id: string;
+  name: string;
+  shift_start?: string;
+  shift_end?: string;
+  match_type?: "EXACT_SESSION" | "BUFFER_MATCH" | "MISMATCH" | "OFF_DUTY";
+  session_label?: string;
+  mismatch_minutes?: number;
+  mismatch_text?: string;
+  rank?: number;
+}
+
 export interface TransferAppointmentSummary {
   appointment_id: string;
   patient_id: string;
@@ -50,19 +62,32 @@ export interface TransferAppointmentSummary {
   appointment_date: string;
   appointment_time: string;
   status: string | null;
-  eligible_replacement_doctors?: { employee_id: string; name: string }[];
+  eligible_replacement_doctors?: TransferReplacementDoctorCandidate[];
 }
 
 export interface InitiateTransferResult {
   transfer_id: string;
   status: string;
   message: string;
+  old_branch_id?: string;
+  new_branch_id?: string;
+  branch_name?: string;
+  effective_date?: string;
   affected_appointment_count: number;
   appointments?: TransferAppointmentSummary[];
   actions_required?: string[];
 }
 
 export type TransferAction = "TRANSFER" | "RESCHEDULE" | "CANCEL";
+
+export interface ConfirmTransferAppointmentItem {
+  appointment_id: string;
+  action?: TransferAction;
+  replacement_employee_id?: string;
+  replacement_branch_id?: string;
+  custom_time?: string;
+  custom_date?: string;
+}
 
 export interface ConfirmTransferPayload {
   transfer_id: string;
@@ -72,6 +97,7 @@ export interface ConfirmTransferPayload {
   old_branch_id?: string;
   replacement_employee_id?: string;
   replacement_branch_id?: string;
+  appointments?: ConfirmTransferAppointmentItem[];
   confirm?: boolean;
   notify_channels?: string[];
   priority?: string;
@@ -127,6 +153,7 @@ export interface RescheduleQueueEntry {
     appointment_date: string;
     appointment_time: string;
     status: string | null;
+    duration_minutes?: number | null;
   } | null;
   patient_bio_data?: {
     patient_id: string;
@@ -149,6 +176,7 @@ export interface ProcessRescheduleActionPayload {
   branch_id?: string;
   appointment_date?: string;
   appointment_time?: string;
+  schedule_id?: string | number | null;
   reason?: string;
 }
 
@@ -170,6 +198,17 @@ export const doctorTransferApi = {
     API.get<{ success: boolean; data: FutureAppointmentsPreview }>(
       `/doctors/${employeeId}/future-appointments`,
       { params: { effective_date: effectiveDate } }
+    ),
+
+  getPendingTransfer: (employeeId: string) =>
+    API.get<{ success: boolean; message: string; data: (InitiateTransferResult & { new_branch_id?: string; branch_name?: string; effective_date?: string }) | null }>(
+      `/doctors/${employeeId}/pending-transfer`
+    ),
+
+  discardTransfer: (employeeId: string, transferId: string, reason?: string) =>
+    API.post<{ success: boolean; message: string; data: { transfer_id: string; status: string } }>(
+      `/doctors/${employeeId}/transfer/${transferId}/discard`,
+      { reason }
     ),
 
   getRescheduleQueue: (params?: { branchId?: string; patientId?: string; status?: string; priority?: string; page?: number; limit?: number }) =>
