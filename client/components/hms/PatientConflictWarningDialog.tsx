@@ -17,7 +17,7 @@ export interface PatientConflictAppointment {
 export interface PatientConflictWarningDialogProps {
   open: boolean;
   severity?: "warning" | "high" | "critical";
-  conflicts: { type: string; message: string }[];
+  conflicts?: { type: string; message: string }[];
   existingAppointments: PatientConflictAppointment[];
   totalAppointments: number;
   onCancel: () => void;
@@ -86,7 +86,7 @@ export function PatientConflictWarningDialog({
               </DialogPrimitive.Close>
             </div>
 
-            {conflicts.length > 0 && (
+            {(conflicts || []).length > 0 && (
               <div className="space-y-2">
                 {conflicts.map((c, i) => (
                   <div key={i} className="flex items-start gap-2 text-sm">

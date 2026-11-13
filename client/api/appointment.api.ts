@@ -25,18 +25,52 @@ export interface CreateAppointmentPayload {
   expected_stay_days?: number;
   advance_amount?: number;
   provisional_diagnosis?: string;
+  duration_minutes?: number;
+  schedule_id?: string;
 }
 
 export interface AvailableSlot {
   schedule_id: string | number;
   shift_name: string;
   time: string;
+  end_time?: string;
+  label?: string;
+  total_minutes?: number;
+  booked_minutes?: number;
+  remaining_minutes?: number;
+  estimated_start_time?: string;
+  available_from?: string;
   is_available: boolean;
+  phase_number?: number;
+  phase_label?: string;
+  is_phase_open?: boolean;
+  is_past?: boolean;
+  is_completed?: boolean;
+  slot_date?: string;
+  is_next_day?: boolean;
+  status?: string;
+}
+
+export interface SessionPhase {
+  phase_number: number;
+  schedule_id?: string | number;
+  shift_name?: string;
+  start_time: string;
+  end_time: string;
+  label: string;
+  total_minutes: number;
+  booked_minutes: number;
+  remaining_minutes: number;
+  is_completed: boolean;
+  is_open: boolean;
+  status: "ACTIVE" | "COMPLETED" | "LOCKED";
 }
 
 export interface AvailableSlotsResult {
   date: string;
   day_of_week: string;
+  phases?: SessionPhase[];
+  active_phase_number?: number;
   slots: AvailableSlot[];
   is_cancelled?: boolean;
   is_on_leave?: boolean;
@@ -49,6 +83,11 @@ export interface AppointmentResponse {
   appointment_date: string;
   appointment_time: string;
   appointment_status: string;
+  token_number?: number | null;
+  duration_minutes?: number | null;
+  estimated_start_time?: string | null;
+  estimated_end_time?: string | null;
+  slot_window?: string | null;
   patient_visit_type?: string;
   Patient_visit_type?: string;
 }
@@ -64,6 +103,10 @@ export interface AppointmentRecord {
   appointment_date: string;
   appointment_time: string;
   token_number: number | null;
+  duration_minutes?: number | null;
+  estimated_start_time?: string | null;
+  estimated_end_time?: string | null;
+  slot_window?: string | null;
   status: string | null;
   reason_for_visit: string | null;
   Patient_visit_type?: string | null;
@@ -124,6 +167,8 @@ export interface UpdateAppointmentPayload {
   referred_by?: string;
   patient_type?: string;
   patient_visit_type?: string;
+  duration_minutes?: number;
+  schedule_id?: string;
 }
 
 export interface GetAppointmentsParams {
@@ -149,7 +194,7 @@ export const appointmentApi = {
     employeeId: string,
     branchId: string,
     date: string,
-    options?: { includePast?: boolean },
+    options?: { includePast?: boolean; duration?: number },
   ) =>
     API.get<{ success: boolean; data: AvailableSlotsResult }>("/appointments/available-slots", {
       params: { employeeId, branchId, date, ...options },
@@ -211,6 +256,15 @@ export const appointmentApi = {
     API.patch<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}/chemo-fitness`,
       payload
+    ),
+
+  sandwich: (
+    appointmentNo: string,
+    insertAfterAppointmentNo?: string | null
+  ) =>
+    API.post<{ success: boolean; message: string; data: any }>(
+      `/appointments/${appointmentNo}/sandwich`,
+      { insertAfterAppointmentNo }
     ),
 
   getAll: (params?: GetAppointmentsParams, config?: AxiosRequestConfig) =>

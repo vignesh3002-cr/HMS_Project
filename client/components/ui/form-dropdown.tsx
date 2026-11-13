@@ -30,6 +30,7 @@ export interface FormDropdownProps
   emptyMessage?: string;
   leftIcon?: React.ReactNode;
   loading?: boolean;
+  portal?: boolean;
 }
 
 function normalizeOptions(
@@ -53,6 +54,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
       onBlur,
       leftIcon,
       loading = false,
+      portal,
       ...inputProps
     },
     ref,
@@ -74,6 +76,9 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     const containerRef = React.useRef<HTMLDivElement>(null);
     const inputRef = React.useRef<HTMLInputElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
+
+    const isInsideDialog = Boolean(containerRef.current?.closest('[role="dialog"]'));
+    const usePortal = portal !== undefined ? portal : !isInsideDialog;
 
     React.useEffect(() => {
       setSearch(selectedOption?.label ?? "");
@@ -159,7 +164,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     }
 
     return (
-      <div ref={containerRef} className={cn("relative w-full")}>
+      <div ref={containerRef} className={cn("relative w-full", open && !usePortal && "z-30")}>
         <div className="relative">
           {leftIcon ? (
             <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
@@ -216,86 +221,97 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
           )}
         </div>
 
-        {open && !disabled && !loading && coords
-          ? createPortal(
-              <div
-                ref={listRef}
-                style={{
-                  position: "fixed",
-                  top: coords.top,
-                  left: coords.left,
-                  width: coords.width,
-                }}
-                className="z-[9999] mt-1 max-h-64 slim-scrollbar overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-gray-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] origin-top"
-              >
-                {filtered.length === 0 ? (
-                  <p className="px-4 py-3 text-center text-sm text-gray-400">
-                    {emptyMessage}
-                  </p>
-                ) : (
-                  <ul id={listId} role="listbox">
-                    {filtered.map((option) => {
-                      const isSelected = option.value === value;
-                      return (
-                        <li
-                          key={option.value}
-                          role="option"
-                          aria-selected={isSelected}
-                          aria-disabled={option.disabled || undefined}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            handleSelect(option);
-                          }}
+        {open && !disabled && !loading && (() => {
+          const menuContent = (
+            <div
+              ref={listRef}
+              style={
+                usePortal && coords
+                  ? {
+                      position: "fixed",
+                      top: coords.top,
+                      left: coords.left,
+                      width: coords.width,
+                    }
+                  : undefined
+              }
+              className={cn(
+                "z-[9999] mt-1 max-h-64 slim-scrollbar overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-gray-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] origin-top",
+                !usePortal && "absolute left-0 right-0 top-full shadow-xl"
+              )}
+            >
+              {filtered.length === 0 ? (
+                <p className="px-4 py-3 text-center text-sm text-gray-400">
+                  {emptyMessage}
+                </p>
+              ) : (
+                <ul id={listId} role="listbox">
+                  {filtered.map((option) => {
+                    const isSelected = option.value === value;
+                    return (
+                      <li
+                        key={option.value}
+                        role="option"
+                        aria-selected={isSelected}
+                        aria-disabled={option.disabled || undefined}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          handleSelect(option);
+                        }}
+                        onClick={() => handleSelect(option)}
+                        className={cn(
+                          "flex items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
+                          option.disabled
+                            ? "cursor-not-allowed text-gray-400"
+                            : cn(
+                                "cursor-pointer",
+                                isSelected
+                                  ? "bg-blue-50 font-medium text-blue-700"
+                                  : option.highlight
+                                  ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
+                                  : "text-gray-900 hover:bg-gray-50",
+                              ),
+                        )}
+                      >
+                        <span
                           className={cn(
-                            "flex items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
-                            option.disabled
-                              ? "cursor-not-allowed text-gray-400"
-                              : cn(
-                                  "cursor-pointer",
-                                  isSelected
-                                    ? "bg-blue-50 font-medium text-blue-700"
-                                    : option.highlight
-                                    ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
-                                    : "text-gray-900 hover:bg-gray-50",
-                                ),
+                            "absolute left-0 top-0 bottom-0 w-1 bg-blue-600 transition-transform duration-200 origin-center",
+                            isSelected && !option.disabled
+                              ? "scale-y-100"
+                              : "scale-y-0 group-hover:scale-y-100",
                           )}
-                        >
-                          <span
-                            className={cn(
-                              "absolute left-0 top-0 bottom-0 w-1 bg-blue-600 transition-transform duration-200 origin-center",
-                              isSelected && !option.disabled
-                                ? "scale-y-100"
-                                : "scale-y-0 group-hover:scale-y-100",
-                            )}
-                          />
-                          <span className="pl-2 flex flex-col">
-                            <span>{option.label}</span>
-                            {option.badge && (
-                              <span
-                                className={cn(
-                                  "text-[11px] font-medium",
-                                  option.badgeTone === "danger" ? "text-red-600" : "text-blue-600",
-                                )}
-                              >
-                                {option.badge}
-                              </span>
-                            )}
-                          </span>
-                          <Check
-                            className={cn(
-                              "h-4 w-4 text-blue-600 transition-opacity",
-                              isSelected ? "opacity-100" : "opacity-0",
-                            )}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>,
-              document.body,
-            )
-          : null}
+                        />
+                        <span className="pl-2 flex flex-col">
+                          <span>{option.label}</span>
+                          {option.badge && (
+                            <span
+                              className={cn(
+                                "text-[11px] font-medium",
+                                option.badgeTone === "danger" ? "text-red-600" : "text-blue-600",
+                              )}
+                            >
+                              {option.badge}
+                            </span>
+                          )}
+                        </span>
+                        <Check
+                          className={cn(
+                            "h-4 w-4 text-blue-600 transition-opacity",
+                            isSelected ? "opacity-100" : "opacity-0",
+                          )}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+
+          return usePortal
+            ? (coords ? createPortal(menuContent, document.body) : null)
+            : menuContent;
+        })()}
       </div>
     );
   },

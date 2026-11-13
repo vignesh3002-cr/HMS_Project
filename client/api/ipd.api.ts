@@ -338,6 +338,7 @@ export interface GetAdmissionsParams {
   search?: string;
   /** Only admissions where the caller is the consultant, duty doctor or nurse. */
   assignedToMe?: boolean;
+  hasTransfers?: boolean;
   page?: number;
   limit?: number;
   sortField?: string;

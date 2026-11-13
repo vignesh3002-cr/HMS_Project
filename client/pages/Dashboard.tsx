@@ -215,10 +215,28 @@ function formatDateOnly(iso: string): string {
   return `${day}-${month}-${d.getUTCFullYear()}`;
 }
 
-function formatTimeOnly(iso: string): string {
-  const d = new Date(iso);
-  const hours = d.getUTCHours();
-  const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+function formatTimeOnly(time?: string | null): string {
+  if (!time) return "—";
+  const str = String(time).trim();
+  let totalMin = 0;
+  if (str.includes("T")) {
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return "—";
+    totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+  } else {
+    const isPM = /pm/i.test(str);
+    const isAM = /am/i.test(str);
+    const cleaned = str.replace(/[^\d:]/g, "");
+    const parts = cleaned.split(":").map(Number);
+    if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return "—";
+    let hours = parts[0];
+    const minutes = parts[1];
+    if (isPM && hours < 12) hours += 12;
+    if (isAM && hours === 12) hours = 0;
+    totalMin = hours * 60 + minutes;
+  }
+  const hours = Math.floor(totalMin / 60) % 24;
+  const minutes = String(totalMin % 60).padStart(2, "0");
   const period = hours >= 12 ? "PM" : "AM";
   const h12 = hours % 12 || 12;
   return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
@@ -2171,6 +2189,8 @@ export default function Dashboard() {
                <p className="hms-subheading">Real-time clinical, inpatient, and staff performance across all branches.</p>
              </div>
              <div className="flex items-center gap-2">
+               {/* Component Showcase Button */}
+               {/*
                <button
                  type="button"
                  onClick={() => navigate("/component-showcase")}
@@ -2179,6 +2199,7 @@ export default function Dashboard() {
                >
                  🎨 Component Showcase
                </button>
+                */}
                <AdminQuickActionToolbar
                  showWardOccupancy={showWardOccupancy}
                  onToggleWardOccupancy={() => setShowWardOccupancy((prev) => !prev)}
@@ -2291,12 +2312,6 @@ export default function Dashboard() {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
-                {(activeTab === "appointments" ? isUpdatingAppointments : isUpdatingEmployees) && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-[#00488D] font-medium bg-blue-50 px-2.5 py-1 rounded-full animate-fade-in">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00488D]" />
-                    <span>Updating {activeTab}...</span>
-                  </span>
-                )}
                 <RefreshButton
                   onClick={() => {
                     if (activeTab === "appointments") fetchAppointments();

@@ -22,6 +22,7 @@ import { employeeApi, EmployeeDetailResponse } from "@/api/employee.api";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import Security from "@/components/Forms/view/Security";
 import NotificationSettings from "@/components/Forms/view/NotificationSettings";
+import IntegrationSettings from "@/components/Forms/view/IntegrationSettings";
 import { getUser } from "@/utils/token";
 import { addAccountActivity } from "@/utils/accountActivity";
 import { useBranchFilter } from "@/context/BranchFilterContext";
@@ -297,7 +298,8 @@ const Profile = () => {
                     if (
                       item.title === "Account" ||
                       item.title === "Security" ||
-                      item.title === "Notification"
+                      item.title === "Notification" ||
+                      item.title === "Integrations"
                     ) {
                       setActiveMenu(item.title);
                     }
@@ -341,6 +343,8 @@ const Profile = () => {
                 <Security embedded />
               ) : activeMenu === "Notification" ? (
                 <NotificationSettings />
+              ) : activeMenu === "Integrations" ? (
+                <IntegrationSettings />
               ) : (
                 <>
                   <h2 className="hms-heading mb-8">Account</h2>

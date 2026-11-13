@@ -31,6 +31,7 @@ import { getUser } from "@/utils/token";
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
+import { SandwichQueueModal } from "@/components/hms/SandwichQueueModal";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
@@ -57,6 +58,8 @@ interface Appointment {
   time: string;
   sortDate: number;
   status: string;
+  rawStatus?: string;
+  durationMinutes?: number | null;
   appointmentDateISO?: string;
 }
 
@@ -75,7 +78,6 @@ const STATUS_LABELS: Record<string, string> = {
   NO_SHOW: "No Show",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
-  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 function getInitials(name: string): string {
@@ -103,28 +105,44 @@ function formatAppointmentDate(date: string): string {
   return `${month}/${day}/${d.getUTCFullYear()}`;
 }
 
-function formatAppointmentTime(time: string): string {
-  const t = new Date(time);
-  if (isNaN(t.getTime())) return "—";
-  const minutes = String(t.getUTCMinutes()).padStart(2, "0");
-  const period = t.getUTCHours() >= 12 ? "PM" : "AM";
-  const hours12 = t.getUTCHours() % 12 || 12;
-  return `${String(hours12).padStart(2, "0")}:${minutes} ${period}`;
+function parseTimeToMinutes(time?: string | null): number | null {
+  if (!time) return null;
+  const str = String(time).trim();
+  if (str.includes("T")) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d.getUTCHours() * 60 + d.getUTCMinutes();
+  }
+  const isPM = /pm/i.test(str);
+  const isAM = /am/i.test(str);
+  const cleaned = str.replace(/[^\d:]/g, "");
+  const parts = cleaned.split(":").map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+  let hours = parts[0];
+  const minutes = parts[1];
+  if (isPM && hours < 12) hours += 12;
+  if (isAM && hours === 12) hours = 0;
+  return hours * 60 + minutes;
 }
 
-function isAppointmentTimePast(appointmentTime: string): boolean {
-  const now = new Date();
-  const appt = new Date(appointmentTime);
-  if (isNaN(appt.getTime())) return false;
-  return appt < now;
-}
+function formatAppointmentTime(time: string, durationMinutes?: number | null): string {
+  const startMin = parseTimeToMinutes(time);
+  if (startMin == null) return "—";
+  const dur = durationMinutes && durationMinutes > 0 ? durationMinutes : 10;
+  const endMin = startMin + dur;
 
-function formatAppointmentTimeConditional(record: Appointment): string {
-  const dateStr = record.date;
-  const todayStr = format(new Date(), "MM/dd/yyyy");
-  if (dateStr !== todayStr) return record.time;
-  if (isAppointmentTimePast(record.time)) return "—";
-  return record.time;
+  const startH = Math.floor(startMin / 60) % 24;
+  const startM = startMin % 60;
+  const startAmpm = startH >= 12 ? "PM" : "AM";
+  const startH12 = startH % 12 || 12;
+  const startTimeStr = `${String(startH12).padStart(2, "0")}:${String(startM).padStart(2, "0")} ${startAmpm}`;
+
+  const endH = Math.floor(endMin / 60) % 24;
+  const endM = endMin % 60;
+  const endAmpm = endH >= 12 ? "PM" : "AM";
+  const endH12 = endH % 12 || 12;
+  const endTimeStr = `${String(endH12).padStart(2, "0")}:${String(endM).padStart(2, "0")} ${endAmpm}`;
+
+  return `${startTimeStr} – ${endTimeStr}`;
 }
 
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
@@ -135,10 +153,8 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
   const { bg: deptBg, text: deptColor } = getDepartmentColors(deptName);
 
   const dateMs = new Date(record.appointment_date).getTime();
-  const timeMs = new Date(record.appointment_time).getTime();
-  const timeOfDayMs = !isNaN(timeMs)
-    ? (timeMs % 86400000 + 86400000) % 86400000
-    : 0;
+  const startMin = parseTimeToMinutes(record.appointment_time) ?? 0;
+  const timeOfDayMs = startMin * 60 * 1000;
   const sortDate = (isNaN(dateMs) ? 0 : dateMs) + timeOfDayMs;
 
   return {
@@ -155,9 +171,11 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     doctorInitial: getInitials(doctorName),
     visitType: record.Patient_visit_type || record.patient_visit_type || "",
     date: formatAppointmentDate(record.appointment_date),
-    time: formatAppointmentTime(record.appointment_time),
+    time: formatAppointmentTime(record.appointment_time, record.duration_minutes),
     sortDate,
     status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    rawStatus: record.status,
+    durationMinutes: record.duration_minutes,
     appointmentDateISO: record.appointment_date,
   };
 }
@@ -220,6 +238,7 @@ const AppointmentPage: React.FC = () => {
   );
 
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [sandwichTarget, setSandwichTarget] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
 
@@ -238,10 +257,12 @@ const AppointmentPage: React.FC = () => {
 
     setIsCancelling(true);
     try {
+      const currentUser = getUser();
+      const cancelledBy = currentUser?.employee_id || currentUser?.username || currentUser?.user_id || "admin";
       const res = await appointmentApi.cancel(
         cancelTarget.id,
         cancelReason.trim(),
-        getUser()?.employee_id ?? "",
+        cancelledBy,
       );
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       fetchAppointments();
@@ -715,7 +736,7 @@ const AppointmentPage: React.FC = () => {
                     )
                   )},
                   { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{formatAppointmentTimeConditional(r)}</div></div>
+                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.status === "Cancelled" ? <span className="line-through text-gray-400">{r.time} <span className="text-[10px] text-rose-500 font-semibold no-underline">(Slot Freed)</span></span> : r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
                     <StatusBadge status={r.status} />
@@ -727,6 +748,7 @@ const AppointmentPage: React.FC = () => {
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
                       onCancel={() => handleCancelAppointment(r)}
+                      onSandwich={() => setSandwichTarget(r)}
                       onCheckIn={() => handleCheckIn(r)}
                       onCheckOut={() => handleCheckOut(r)}
                       onVitalsSaved={fetchAppointments}
@@ -782,6 +804,44 @@ const AppointmentPage: React.FC = () => {
           />
         </div>
       </ConfirmationDialog>
+
+      <SandwichQueueModal
+        open={!!sandwichTarget}
+        onOpenChange={(open) => !open && setSandwichTarget(null)}
+        targetAppointment={
+          sandwichTarget
+            ? {
+                id: sandwichTarget.id,
+                patientName: sandwichTarget.patient,
+                patientId: sandwichTarget.patientId,
+                tokenNumber: sandwichTarget.tokenId,
+                durationMinutes: sandwichTarget.durationMinutes || 10,
+                status: sandwichTarget.rawStatus || sandwichTarget.status,
+                employeeId: sandwichTarget.doctorId !== "—" ? sandwichTarget.doctorId : null,
+                doctorName: sandwichTarget.doctor,
+              }
+            : null
+        }
+        activeAppointments={appointments
+          .filter(
+            (a) =>
+              a.doctorId === sandwichTarget?.doctorId &&
+              a.appointmentDateISO === sandwichTarget?.appointmentDateISO
+          )
+          .map((a) => ({
+            id: a.id,
+            patientName: a.patient,
+            tokenNumber: a.tokenId,
+            startTime: a.time,
+            durationMinutes: a.durationMinutes || 10,
+            status: a.rawStatus || a.status,
+          }))}
+        onSuccess={() => {
+          setSandwichTarget(null);
+          queryClient.invalidateQueries({ queryKey: ["appointments"] });
+          fetchAppointments();
+        }}
+      />
 
 
     </div>
