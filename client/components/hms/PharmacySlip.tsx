@@ -24,6 +24,7 @@ import { SingleSelectDropdown } from "@/components/ui/single-select-dropdown";
 import { useToast } from "@/hooks/use-toast";
 import { downloadExportPdf } from "@/lib/exportPdf";
 import { toProperCase } from "@/utils/caseFormatters";
+import { getActiveTimezone } from "@/utils/timezone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -91,7 +92,7 @@ const display = (value: string | number | null | undefined, fallback = "—") =>
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString(undefined, { timeZone: getActiveTimezone() });
 };
 
 const escapeHtml = (value: string) =>
@@ -615,7 +616,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
         <thead><tr><th>Medicine Name</th><th>Patient_dose</th><th>Brand</th><th>Dose</th><th style="text-align:right">Qty</th><th>Type</th></tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
-      <div class="foot">Printed ${escapeHtml(formatDateTime(record?.printed_at) ?? new Date().toLocaleString())}</div>
+      <div class="foot">Printed ${escapeHtml(formatDateTime(record?.printed_at) ?? new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() }))}</div>
     </body></html>`);
 
     printWindow.document.close();

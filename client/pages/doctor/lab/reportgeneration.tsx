@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ChevronLeft,
   ChevronRight,
@@ -526,10 +527,10 @@ function calculateAge(dob: string): number {
 }
 
 function formatReportDate(dateVal?: string | Date | null): string {
-  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() });
   const d = new Date(dateVal);
   if (isNaN(d.getTime())) return String(dateVal);
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() });
 }
 
 export function getDisplayBarcode(r?: {
@@ -1528,7 +1529,7 @@ export default function ReportGeneration() {
     );
     setApproverName(report.approverName || (currentUser?.username ? `Dr. ${currentUser.username}` : "Dr. Sarah Johnson"));
     setApproverRole(report.approverRole || "Senior Pathologist");
-    setApprovalDateTime(report.approvalDate || new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }));
+    setApprovalDateTime(report.approvalDate || new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() }));
     setDigitalSignature(report.signatureUrl || "certified-default");
     setViewMode("approve-results");
   };
@@ -1587,6 +1588,7 @@ export default function ReportGeneration() {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: getActiveTimezone(),
     });
     const nowSent = nowFormatted;
     const nowDelivered = nowFormatted;
@@ -1820,12 +1822,12 @@ export default function ReportGeneration() {
         doctorEmail: report.doctorEmail,
         testPanel: report.testPanel,
         sampleType: report.sampleType,
-        collectedOn: report.generatedDate || new Date().toLocaleDateString("en-GB"),
+        collectedOn: report.generatedDate || new Date().toLocaleDateString("en-GB", { timeZone: getActiveTimezone() }),
         reportedOn:
           report.completedDate ||
           report.approvalDate ||
           report.generatedDate ||
-          new Date().toLocaleDateString("en-GB"),
+          new Date().toLocaleDateString("en-GB", { timeZone: getActiveTimezone() }),
         targetDate: report.targetDate || "—",
         generatedDate: report.generatedDate,
         completedDate: report.completedDate,
@@ -1868,12 +1870,12 @@ export default function ReportGeneration() {
       doctorEmail: report.doctorEmail,
       testPanel: report.testPanel,
       sampleType: report.sampleType,
-      collectedOn: report.generatedDate || new Date().toLocaleDateString("en-GB"),
+      collectedOn: report.generatedDate || new Date().toLocaleDateString("en-GB", { timeZone: getActiveTimezone() }),
       reportedOn:
         report.completedDate ||
         report.approvalDate ||
         report.generatedDate ||
-        new Date().toLocaleDateString("en-GB"),
+        new Date().toLocaleDateString("en-GB", { timeZone: getActiveTimezone() }),
       targetDate: report.targetDate || "—",
       generatedDate: report.generatedDate,
       completedDate: report.completedDate,

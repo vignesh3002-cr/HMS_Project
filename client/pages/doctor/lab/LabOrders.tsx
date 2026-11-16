@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
+import { getActiveTimezone } from "@/utils/timezone";
 import LabNav from "./labnav";
 import {
   labOrderApi,
@@ -421,12 +422,14 @@ export default function LabOrders() {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",
+                timeZone: getActiveTimezone(),
               }) +
               ", " +
               deadlineDateObj.toLocaleTimeString("en-US", {
                 hour: "2-digit",
                 minute: "2-digit",
                 hour12: true,
+                timeZone: getActiveTimezone(),
               })
             : undefined;
 
@@ -438,7 +441,7 @@ export default function LabOrders() {
             barcode,
             status,
             statusLabel,
-            completedAt: status === "COMPLETED" ? (oi.updated_at ? new Date(oi.updated_at).toLocaleString() : "—") : undefined,
+            completedAt: status === "COMPLETED" ? (oi.updated_at ? new Date(oi.updated_at).toLocaleString(undefined, { timeZone: getActiveTimezone() }) : "—") : undefined,
             resultSummary: lsResult,
             parameters: lsParams.length > 0 ? lsParams : undefined,
             targetDate: targetDateFormatted !== "—" ? targetDateFormatted : undefined,
@@ -507,10 +510,10 @@ export default function LabOrders() {
         const orderDateObj = new Date(orderRawDate);
         const isValidDate = !Number.isNaN(orderDateObj.getTime());
         const orderDateFormatted = isValidDate
-          ? orderDateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+          ? orderDateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() })
           : "—";
         const orderTimeFormatted = isValidDate
-          ? orderDateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
+          ? orderDateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() })
           : undefined;
         const orderDateIso = toIsoDateString(orderDateObj);
 
@@ -1679,7 +1682,7 @@ export default function LabOrders() {
             {/* Footer */}
             <div className="p-4 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
               <span>Showing <strong>{filtered.length}</strong> of <strong>{orders.length}</strong> orders</span>
-              <span className="text-[11px] text-slate-400">Refreshed {lastRefreshed.toLocaleTimeString()}</span>
+              <span className="text-[11px] text-slate-400">Refreshed {lastRefreshed.toLocaleTimeString(undefined, { timeZone: getActiveTimezone() })}</span>
             </div>
           </section>
         </main>
@@ -1700,7 +1703,7 @@ export default function LabOrders() {
                     {selectedOrder.priority === "URGENT" && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">URGENT</span>}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                    <span>{new Date(selectedOrder.orderDatetime).toLocaleString()}</span>
+                    <span>{new Date(selectedOrder.orderDatetime).toLocaleString(undefined, { timeZone: getActiveTimezone() })}</span>
                     {selectedOrder.targetDateFormatted && selectedOrder.targetDateFormatted !== "—" && (
                       <span className={`inline-flex items-center gap-1 font-semibold ${isOrderOverdue(selectedOrder) ? "text-rose-700 font-bold" : "text-slate-700"}`}>
                         · <CalendarIcon className="w-3.5 h-3.5 shrink-0" /> Target Date: {selectedOrder.targetDateFormatted}

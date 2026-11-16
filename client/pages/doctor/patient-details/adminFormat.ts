@@ -1,10 +1,12 @@
 import type { ChemoAdministrationItem } from "@/api/chemotherapy.api";
+import { getActiveTimezone } from "@/utils/timezone";
 
 /* Formatting shared by the Administration tab and its printouts (MAR,
    cycle report). */
 
-/* 09-Oct-2026. Date-only values (YYYY-MM-DD) are calendar dates; full
-   timestamps are shown in IST, the hospital's timezone. */
+/* 09-Oct-2026. Date-only values (YYYY-MM-DD) are calendar dates (pinned to
+   UTC so a branch west of UTC never shows the previous day); full
+   timestamps are shown in the active branch's timezone. */
 export function fmtDate(value?: string | null): string {
   if (!value) return "—";
   const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -15,7 +17,7 @@ export function fmtDate(value?: string | null): string {
       day: "2-digit",
       month: "short",
       year: "numeric",
-      timeZone: isDateOnly ? "UTC" : "Asia/Kolkata",
+      timeZone: isDateOnly ? "UTC" : getActiveTimezone(),
     })
     .replace(/ /g, "-");
 }
@@ -24,7 +26,11 @@ export function fmtTime(value?: string | null): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  return date.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: getActiveTimezone(),
+  });
 }
 
 export function doseText(value: number | string | null | undefined, unit: string | null | undefined): string {

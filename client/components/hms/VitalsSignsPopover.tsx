@@ -18,6 +18,7 @@ import {
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { encounterApi, type PatientHistoryPayload, type VitalsLogEntry } from "@/api/encounter.api";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export type TemperatureUnit = "C" | "F";
 export type WeightUnit = "kg" | "lb";
@@ -488,7 +489,7 @@ const VitalsSignsPopover = ({
   };
 
   const openSummary = () => {
-    setRecordedAt(new Date().toLocaleString());
+    setRecordedAt(new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() }));
     setSummaryOpen(true);
   };
 

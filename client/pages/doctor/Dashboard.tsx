@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getActiveBranchId } from "../../api/axios";
 import {
@@ -227,6 +228,7 @@ function formatDate(value: string) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -697,6 +699,7 @@ export default function DoctorDashboard() {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: getActiveTimezone(),
   });
 
   const doctorId = doctor?.employee?.employee_id || "-";
@@ -779,7 +782,7 @@ export default function DoctorDashboard() {
 
             <div className="flex items-center gap-2 pl-2">
               <span className="font-['Manrope',sans-serif] text-xs font-bold tracking-[0.6px] text-[#434654]">
-                {new Date().toLocaleDateString()}
+                {new Date().toLocaleDateString(undefined, { timeZone: getActiveTimezone() })}
               </span>
 
               <Icon

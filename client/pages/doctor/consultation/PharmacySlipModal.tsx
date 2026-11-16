@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   AlertTriangle,
   Check,
@@ -481,7 +482,7 @@ export function PharmacySlipModal({
     </thead>
     <tbody>${bodyRows || '<tr><td colspan="8">No medicines on this cycle day.</td></tr>'}</tbody>
   </table>
-  <div class="foot"><span>Cycle ${cycleNumber} / Day ${cycleDay}</span><span>${new Date().toLocaleString()}</span></div>
+  <div class="foot"><span>Cycle ${cycleNumber} / Day ${cycleDay}</span><span>${new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() })}</span></div>
   <script>window.onload = function () { window.print(); };</script>
 </body>
 </html>`);

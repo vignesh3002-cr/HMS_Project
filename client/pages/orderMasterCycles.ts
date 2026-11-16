@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import type { ChemoPlan } from "@/api/chemotherapy.api";
+import { getActiveTimezone, getTimezoneOffsetMs } from "@/utils/timezone";
 
 /*
  * Pure helpers behind the Chemotherapy Orders table (OrderMaster.tsx).
@@ -161,21 +162,24 @@ export function toTime(iso: string | null | undefined): number {
 }
 
 // The backend's appointment status sweep and the due-today/delayed counters
-// this page mirrors both run on IST days, so both sides of the comparison are
-// reduced to a whole IST day-number. The previous version did a
-// (Date.UTC(...) - 5.5h) then (+ 5.5h) round trip, which cancelled itself out.
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+// this page mirrors both run on BRANCH days, so both sides of the comparison
+// are reduced to a whole day-number in the ACTIVE BRANCH timezone (the zone
+// offset is recomputed per instant, so DST zones stay correct too). Exported
+// names are kept for existing consumers.
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const localDayKey = (time: number): number =>
+  Math.floor((time + getTimezoneOffsetMs(getActiveTimezone(), new Date(time))) / DAY_MS);
 
 export function istDayKey(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
-  return Math.floor((time + IST_OFFSET_MS) / DAY_MS);
+  return localDayKey(time);
 }
 
 export function todayIstKey(): number {
-  return Math.floor((Date.now() + IST_OFFSET_MS) / DAY_MS);
+  return localDayKey(Date.now());
 }
 
 export function isTodayIso(iso: string | null | undefined): boolean {

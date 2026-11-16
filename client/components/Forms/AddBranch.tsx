@@ -1,4 +1,4 @@
-import { useState, ChangeEvent, FormEvent, useEffect } from "react";
+import { useState, ChangeEvent, FormEvent, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Building2, Check, Loader2, Plus, ShieldCheck, UserCheck, UserPlus } from "lucide-react";
 import {
@@ -32,8 +32,37 @@ import {
 
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { PhoneInput } from "@/components/ui/phone-input";
-import { State as CSState, City } from "country-state-city";
+import { Country, State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
+import { getActiveTimezone, getCountryTimezones, isValidTimeZone, suggestTimezone } from "@/utils/timezone";
+
+// All countries for the worldwide Country -> State -> City cascade (fetched
+// once; country-state-city is a static dataset).
+const ALL_COUNTRIES = Country.getAllCountries();
+
+// Common stored names -> the name country-state-city uses, so an edit of an
+// older branch still resolves to the right country id.
+const COUNTRY_NAME_ALIASES: Record<string, string> = {
+  usa: "united states of america",
+  us: "united states of america",
+  uk: "united kingdom",
+  uae: "united arab emirates",
+};
+
+/** ISO-3166 alpha-2 id for a stored country name/code ("" when unknown). */
+function countryIdFromName(name?: string | null): string {
+  const raw = (name || "").trim().toLowerCase();
+  if (!raw) return "";
+  const target = COUNTRY_NAME_ALIASES[raw] ?? raw;
+  return (
+    ALL_COUNTRIES.find((c) => c.name.toLowerCase() === target)?.isoCode ||
+    ALL_COUNTRIES.find((c) => c.isoCode.toLowerCase() === target)?.isoCode ||
+    ALL_COUNTRIES.find(
+      (c) => c.name.toLowerCase().includes(target) || target.includes(c.name.toLowerCase()),
+    )?.isoCode ||
+    ""
+  );
+}
 
 export const medicalServiceTypes = [
   "Single Specialty",
@@ -54,6 +83,12 @@ interface BranchFormData {
   district: string;
   country: string;
   countryId: string;
+  // City-level locality (kept in sync with the `district` selector below -
+  // district was always populated from the same city list in the India-only
+  // UI, so both columns receive the picked city).
+  city: string;
+  // IANA zone id ("Asia/Kolkata") confirmed by the admin for this branch.
+  timezone: string;
   pincode: string;
   licenseNumber: string;
   emergencyNumber: string;
@@ -116,6 +151,8 @@ const emptyBranchData: BranchFormData = {
   district: "",
   country: "",
   countryId: "",
+  city: "",
+  timezone: "",
   pincode: "",
   licenseNumber: "",
   emergencyNumber: "",
@@ -177,8 +214,10 @@ const branchRequired: { key: keyof BranchFormData; label: string }[] = [
   { key: "branchName", label: "Branch Name" },
   { key: "branchType", label: "Branch Type" },
   { key: "area", label: "Area" },
+  { key: "country", label: "Country" },
   { key: "state", label: "State" },
-  { key: "district", label: "District" },
+  { key: "city", label: "City" },
+  { key: "timezone", label: "Timezone" },
   { key: "licenseNumber", label: "License Number" },
   { key: "emergencyNumber", label: "Emergency Number" },
   { key: "dateOfEstablish", label: "Date of Establish" },
@@ -302,6 +341,25 @@ export default function AddBranch() {
   const [originalBranchData, setOriginalBranchData] = useState<BranchFormData | null>(null);
   const [originalAdminData, setOriginalAdminData] = useState<AdminFormData | null>(null);
 
+  // ── Worldwide Country -> State -> City cascade + timezone suggestion ──────
+  const countryOptions = useMemo(() => ALL_COUNTRIES.map((c) => c.name), []);
+  const branchStates = useMemo(
+    () => (branchData.countryId ? CSState.getStatesOfCountry(branchData.countryId) : []),
+    [branchData.countryId],
+  );
+  // Keep a stored value visible even when it is not in the computed list
+  // (e.g. an older branch whose state name the dataset spells differently).
+  const stateOptions = useMemo(() => {
+    const names = branchStates.map((s) => s.name);
+    if (branchData.state && !names.includes(branchData.state)) names.push(branchData.state);
+    return names;
+  }, [branchStates, branchData.state]);
+  const timezoneOptions = useMemo(() => {
+    const zones = getCountryTimezones(branchData.countryId);
+    if (branchData.timezone && !zones.includes(branchData.timezone)) zones.push(branchData.timezone);
+    return zones;
+  }, [branchData.countryId, branchData.timezone]);
+
   const currentUserRole = getUser()?.role_type || getUser()?.role || "";
   const canReassignAdmin = TOP_LEVEL_ADMIN_ROLES.some(
     (r) => r.toLowerCase() === String(currentUserRole).toLowerCase(),
@@ -388,6 +446,22 @@ export default function AddBranch() {
 
   const handleAdminModeChange = (mode: BranchAdminMode) => {
     setAdminData((prev) => ({ ...prev, adminMode: mode }));
+  };
+
+  // Country pick re-drives the cascade: state/city/district are cleared (they
+  // belong to the previous country) and the timezone is re-suggested for the
+  // new country - the admin confirms or overrides it before saving.
+  const handleCountryChange = (countryName: string) => {
+    const countryId = countryIdFromName(countryName);
+    setBranchData((prev) => ({
+      ...prev,
+      country: countryName,
+      countryId,
+      state: "",
+      city: "",
+      district: "",
+      timezone: suggestTimezone(countryId),
+    }));
   };
 
   // Non-top-level-admin users can't reassign admins (backend 403s), so force
@@ -495,25 +569,39 @@ export default function AddBranch() {
 
   useEffect(() => {
     if (branchData.state) {
-      const s = indianStates.find((s) => s.name === branchData.state);
-      if (s)
-        setBranchDistrictOptions(
-          City.getCitiesOfState("IN", s.isoCode)
+      const s = branchStates.find((s) => s.name === branchData.state);
+      const list = s
+        ? City.getCitiesOfState(branchData.countryId || "IN", s.isoCode)
             .map((c) => c.name)
-            .sort(),
-        );
+            .sort()
+        : [];
+      // Preserve already-stored values that the dataset does not list.
+      for (const v of [branchData.city, branchData.district]) {
+        if (v && !list.includes(v)) list.push(v);
+      }
+      setBranchDistrictOptions(list);
     } else {
       setBranchDistrictOptions([]);
     }
-  }, [branchData.state, indianStates]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchData.state, branchData.countryId, branchStates]);
 
   useEffect(() => {
+    // Default for a brand-new branch: India + its IANA zone (matches every
+    // existing branch, so behaviour on day one is unchanged). Edit mode is
+    // overridden by the branch fetch below as soon as it resolves.
     setBranchData((prev) => ({
       ...prev,
       country: "India",
       countryId: "IN",
+      timezone: suggestTimezone("IN"),
     }));
-    setOriginalBranchData({ ...emptyBranchData, country: "India", countryId: "IN" });
+    setOriginalBranchData({
+      ...emptyBranchData,
+      country: "India",
+      countryId: "IN",
+      timezone: suggestTimezone("IN"),
+    });
     setOriginalAdminData(emptyAdminData);
   }, []);
 
@@ -538,9 +626,13 @@ export default function AddBranch() {
             branchType: branch.branch_type || "",
             area: branch.branch_area || "",
             state: branch.state_name || "",
-            district: branch.district || "",
+            district: branch.district || branch.city || "",
+            city: branch.city || branch.district || "",
             country: branch.country || "India",
-            countryId: "IN",
+            countryId: countryIdFromName(branch.country) || "IN",
+            // Stored IANA zone wins; only brand-new rows (just added column)
+            // fall back to the default.
+            timezone: branch.timezone || suggestTimezone(countryIdFromName(branch.country) || "IN"),
             pincode: branch.branch_pincode != null ? String(branch.branch_pincode) : "",
             licenseNumber: branch.branch_license_no || "",
             emergencyNumber: branch.emergency_no || "",
@@ -572,9 +664,11 @@ export default function AddBranch() {
             branchType: branch.branch_type || "",
             area: branch.branch_area || "",
             state: branch.state_name || "",
-            district: branch.district || "",
+            district: branch.district || branch.city || "",
+            city: branch.city || branch.district || "",
             country: branch.country || "India",
-            countryId: "IN",
+            countryId: countryIdFromName(branch.country) || "IN",
+            timezone: branch.timezone || suggestTimezone(countryIdFromName(branch.country) || "IN"),
             pincode: branch.branch_pincode != null ? String(branch.branch_pincode) : "",
             licenseNumber: branch.branch_license_no || "",
             emergencyNumber: branch.emergency_no || "",
@@ -629,6 +723,18 @@ export default function AddBranch() {
     if (!validateRequiredFields(branchRequired, branchData, toast)) return;
     if (!validateRequiredFields(adminRequired[adminData.adminMode], adminData, toast)) return;
 
+    // Server-side re-validates against Intl's zone database; catch a bad or
+    // tampered value here for an immediate, friendly message.
+    if (!isValidTimeZone(branchData.timezone)) {
+      toast({
+        title: "Invalid timezone",
+        description:
+          "Please select a valid IANA timezone for this branch (e.g. Asia/Kolkata, America/New_York).",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (
       adminData.adminMode === "NEW" &&
       adminData.adminDepartmentId === OTHER_DEPARTMENT_VALUE &&
@@ -658,6 +764,8 @@ export default function AddBranch() {
           emergency_number: branchData.emergencyNumber,
           address: branchData.address,
           district: branchData.district,
+          city: branchData.city || branchData.district || undefined,
+          timezone: branchData.timezone || undefined,
           state_name: branchData.state,
           country: branchData.country,
           area: branchData.area,
@@ -763,6 +871,8 @@ export default function AddBranch() {
           emergency_number: branchData.emergencyNumber,
           address: branchData.address,
           district: branchData.district,
+          city: branchData.city || branchData.district || undefined,
+          timezone: branchData.timezone || undefined,
           state_name: branchData.state,
           country: branchData.country,
           country_id: branchData.countryId,
@@ -873,7 +983,12 @@ export default function AddBranch() {
       window.location.reload();
       return;
     }
-    setBranchData(emptyBranchData);
+    setBranchData({
+      ...emptyBranchData,
+      country: "India",
+      countryId: "IN",
+      timezone: suggestTimezone("IN"),
+    });
     setAdminData(emptyAdminData);
     setCustomDepartment("");
     setSameAsCurrent(false);
@@ -1071,7 +1186,7 @@ export default function AddBranch() {
           {/* ── Location ── */}
           <Section
             title="Location"
-            sub="Address, state, district and pincode details."
+            sub="Country, state, city, timezone, address and pincode details."
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
@@ -1099,26 +1214,39 @@ export default function AddBranch() {
                 />
               </div>
               <div>
+                <label className={labelCls}>Country <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={countryOptions}
+                  value={branchData.country}
+                  onValueChange={handleCountryChange}
+                  placeholder="Select country"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
                 <label className={labelCls}>State <Req /></label>
                 <FormDropdown
                   className={inputCls}
-                  options={indianStates.map((s) => s.name)}
+                  options={stateOptions}
                   value={branchData.state}
                   onValueChange={(v) =>
-                    setBranchData((p) => ({ ...p, state: v, district: "" }))
+                    setBranchData((p) => ({ ...p, state: v, city: "", district: "" }))
                   }
                   placeholder="Select state"
                   disabled={submitting}
                 />
               </div>
               <div>
-                <label className={labelCls}>District <Req /></label>
+                <label className={labelCls}>City <Req /></label>
                 <FormDropdown
                   className={inputCls}
                   options={branchDistrictOptions}
-                  value={branchData.district}
-                  onValueChange={(v) => setBranchData((p) => ({ ...p, district: v }))}
-                  placeholder={branchData.state ? "Select district" : "Select state first"}
+                  value={branchData.city || branchData.district}
+                  onValueChange={(v) =>
+                    setBranchData((p) => ({ ...p, city: v, district: v }))
+                  }
+                  placeholder={branchData.state ? "Select city" : "Select state first"}
                   disabled={submitting || !branchData.state}
                 />
               </div>
@@ -1135,6 +1263,21 @@ export default function AddBranch() {
                   onChange={handleChange}
                   disabled={submitting}
                 />
+              </div>
+              <div>
+                <label className={labelCls}>Timezone <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={timezoneOptions}
+                  value={branchData.timezone}
+                  onValueChange={(v) => setBranchData((p) => ({ ...p, timezone: v }))}
+                  placeholder="Select timezone"
+                  disabled={submitting}
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Suggested from the country — confirm the branch's local timezone (all
+                  schedules and "today" follow it).
+                </p>
               </div>
             </div>
           </Section>
@@ -1265,7 +1408,7 @@ export default function AddBranch() {
                             className={inputCls}
                             value={
                               currentAdmin.assigned_date
-                                ? new Date(currentAdmin.assigned_date).toLocaleDateString()
+                                ? new Date(currentAdmin.assigned_date).toLocaleDateString(undefined, { timeZone: getActiveTimezone() })
                                 : "—"
                             }
                             disabled

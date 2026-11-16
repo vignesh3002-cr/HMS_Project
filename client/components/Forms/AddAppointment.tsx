@@ -239,19 +239,17 @@ function timeStringToMinutes(time: string): number {
   return hours * 60 + minutes;
 }
 
-// The hospital operates in Asia/Kolkata (IST), UTC+05:30 with no daylight
-// saving. "Now" in IST is UTC now shifted by a fixed offset, so Local and
-// Vercel behave identically regardless of the browser/server timezone.
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
-const getNowInIST = () => new Date(Date.now() + IST_OFFSET_MS);
-const getTodayInIST = () => {
-  const d = getNowInIST();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-};
-const getNowMinutesInIST = () => {
-  const d = getNowInIST();
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-};
+// "Today"/"now" for slot maths follow the ACTIVE BRANCH's timezone
+// (branch.timezone, published by BranchFilterContext) instead of a hardcoded
+// IST offset, so a branch abroad compares against its own local day/clock.
+// Both fall back to Asia/Kolkata when no branch is selected.
+import {
+  getActiveTimezone,
+  getNowInActiveTimezone,
+  getNowMinutesInActiveTimezone,
+  getTodayInActiveTimezone,
+  getTimezoneOffsetMs,
+} from "@/utils/timezone";
 
 // Daycare: would a session starting at `time` (IST) on `date` for
 // `stayDays` still fit the ward? Same rule as the server (which re-checks
@@ -262,7 +260,8 @@ function daycareSlotFits(occ: DaycareOccupancy | null, date: string, time: strin
   if (occ.capacity <= 0) return false;
   const [h, m] = time.split(":").map(Number);
   const start =
-    Date.parse(`${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00.000Z`) - IST_OFFSET_MS;
+    Date.parse(`${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00.000Z`) -
+    getTimezoneOffsetMs(getActiveTimezone());
   const end = start + stayDays * 24 * 60 * 60 * 1000;
   const sessions = occ.bookings
     .map((b) => ({ s: Date.parse(b.start), e: Date.parse(b.end) }))
@@ -934,14 +933,15 @@ export default function AddAppointment() {
         const slots = res.data.data?.slots || [];
 
 
-        // Defensive client-side filter: for today (in IST) drop any slot whose
-        // time is at or before the current IST time. The backend is the source
-        // of truth, but a past slot must never leak through to the UI.
-        const todayInIST = getTodayInIST();
-        const nowMinutesInIST = getNowMinutesInIST();
-        const isTodayIST = formData.selectDate === todayInIST;
+        // Defensive client-side filter: for today (in the active branch's own
+        // timezone) drop any slot whose time is at or before the branch's
+        // current time. The backend is the source of truth, but a past slot
+        // must never leak through to the UI.
+        const todayLocal = getTodayInActiveTimezone();
+        const nowMinutesLocal = getNowMinutesInActiveTimezone();
+        const isTodayLocal = formData.selectDate === todayLocal;
         const futureSlots = slots.filter(
-          (s) => s.is_available && (!isTodayIST || timeStringToMinutes(s.time) > nowMinutesInIST),
+          (s) => s.is_available && (!isTodayLocal || timeStringToMinutes(s.time) > nowMinutesLocal),
         );
 
         setAvailableSlots(futureSlots);
@@ -1102,8 +1102,8 @@ export default function AddAppointment() {
         // highlighted.
         const preferredMinutes = timeStringToMinutes(preferredTime);
         const exact = openSlots.find((s) => timeStringToMinutes(s.time) === preferredMinutes);
-        const isToday = formData.selectDate === getTodayInIST();
-        const nowMinutes = getNowMinutesInIST();
+        const isToday = formData.selectDate === getTodayInActiveTimezone();
+        const nowMinutes = getNowMinutesInActiveTimezone();
         const preferredIsPast = isToday && preferredMinutes <= nowMinutes;
 
         if (exact) {

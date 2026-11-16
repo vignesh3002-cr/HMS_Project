@@ -7,6 +7,9 @@ export interface Branch {
   branch_area: string | null;
   branch_email: string | null;
   branch_contact_number: string | null;
+  city?: string | null;
+  /** IANA zone id (e.g. "Asia/Kolkata") - authoritative for this branch. */
+  timezone?: string;
   hospital_name: string;
   hospital_id: string;
   admin_name?: string;
@@ -63,6 +66,9 @@ export interface CreateBranchPayload {
   state_name?: string;
   country?: string;
   country_id?: string;
+  city?: string;
+  /** IANA zone id confirmed by the admin (falls back to Asia/Kolkata if absent). */
+  timezone?: string;
   area?: string;
   pincode?: number;
   license_number?: string;
@@ -132,6 +138,9 @@ export interface BranchDetail {
   district: string | null;
   state_name: string | null;
   country: string | null;
+  city: string | null;
+  /** IANA zone id (e.g. "Asia/Kolkata") - authoritative for this branch. */
+  timezone: string;
   branch_pincode: number | null;
   branch_license_no: string | null;
   emergency_no: string | null;

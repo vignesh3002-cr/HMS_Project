@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ClipboardList, Loader2 } from "lucide-react";
+import { getActiveTimezone } from "@/utils/timezone";
   import API, { getActiveBranchId } from "../../../api/axios";
   import { getUser } from "../../../utils/token";
   import { encounterApi } from "../../../api/encounter.api";
@@ -1636,7 +1637,7 @@ if (embedded) {
           <div className="grid grid-cols-1 gap-5 p-8 sm:grid-cols-2">
             {ipdDischargeDone && (
               <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-[10px] font-semibold text-emerald-800">
-                Discharge details saved{activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}. The patient stays admitted until the admin confirms the discharge. You can still edit and save again.
+                Discharge details saved{activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}` : ""}. The patient stays admitted until the admin confirms the discharge. You can still edit and save again.
               </div>
             )}
             {(
@@ -1712,7 +1713,7 @@ if (embedded) {
                     <label className="text-[10px] font-semibold text-gray-700">Next Visit Date (from Follow Up)</label>
                     <div className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[10px] text-gray-700">
                       {ipdReviewDate
-                        ? new Date(ipdReviewDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                        ? new Date(ipdReviewDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
                         : "Not set -- add it in the Follow Up step"}
                     </div>
                   </div>

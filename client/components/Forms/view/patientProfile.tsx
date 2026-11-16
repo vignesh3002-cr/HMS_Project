@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   UserRound,
   Droplet,
@@ -153,7 +154,7 @@ export default function PatientProfile() {
   function formatDob(dob: string | null) {
     if (!dob) return "—";
     const d = new Date(dob);
-    return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+    return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   }
 
   function calculateAge(dob: string | null | undefined): string {

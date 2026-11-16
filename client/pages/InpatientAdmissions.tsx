@@ -13,6 +13,7 @@ import {
   Calendar,
 } from "lucide-react";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
+import { getActiveTimezone } from "@/utils/timezone";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1380,7 +1381,7 @@ const InpatientAdmissions: React.FC = () => {
                 </div>
                 <div className="col-span-2 text-[11px] text-slate-500">
                   Saved by {activeAdmission.discharge_details_by_name || activeAdmission.discharge_details_by || "doctor"}
-                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}
+                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}` : ""}
                 </div>
               </div>
 

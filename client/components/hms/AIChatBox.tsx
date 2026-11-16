@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { aiChatApi, type AIPerformedAction } from "@/api/ai-chat.api";
 import { getUser } from "@/utils/token";
 import { loadChatPanelPosition, saveChatPanelPosition } from "@/utils/chatPanelPosition";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
     CHAT_MESSAGES_KEY_PREFIX,
     CHAT_OPEN_KEY_PREFIX,
@@ -430,7 +431,7 @@ export function AIChatBox() {
     };
 
     const formatTime = (ts: number) => {
-        return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() });
     };
 
     return (
