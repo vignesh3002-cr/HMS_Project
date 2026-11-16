@@ -261,18 +261,20 @@ export default function CreateProtocol() {
     );
   };
 
-  const handleDrawerDone = async () => {
+  const handleDrawerDone = async (draftRow?: any) => {
     if (!activeDrawer) {
       setActiveDrawer(null);
       return;
     }
     const { section, index } = activeDrawer;
-    let currentRow: any = null;
-    if (section === "premeds") currentRow = premeds[index];
-    else if (section === "chemo") currentRow = chemoPlans[index];
-    else if (section === "supportive") currentRow = supportive[index];
-    else if (section === "dilution") currentRow = dilution[index];
-    else if (section === "post") currentRow = post[index];
+    let currentRow: any = draftRow;
+    if (!currentRow) {
+      if (section === "premeds") currentRow = premeds[index];
+      else if (section === "chemo") currentRow = chemoPlans[index];
+      else if (section === "supportive") currentRow = supportive[index];
+      else if (section === "dilution") currentRow = dilution[index];
+      else if (section === "post") currentRow = post[index];
+    }
 
     if (currentRow && (currentRow.medication || currentRow.medicineName)) {
       const rawMed = (currentRow.medication || "").trim();
@@ -298,6 +300,7 @@ export default function CreateProtocol() {
 
             // Update current row state with valid medicine_id and generic_name
             const updateRow = (n: any[]) => {
+              n[index] = { ...currentRow };
               n[index].medication = updated.medicine_id;
               n[index].medicineName = updated.generic_name;
               if (updated.dosage_form && !n[index].form) {
@@ -331,6 +334,8 @@ export default function CreateProtocol() {
               title: "Medicine & Generic Saved",
               description: `"${updated.generic_name}" (Generic ID: ${updated.generic_id}) saved successfully.`,
             });
+            setActiveDrawer(null);
+            return;
           }
         } catch (err: any) {
           console.error("Failed to catalog/update generic medicine:", err);
@@ -342,6 +347,31 @@ export default function CreateProtocol() {
         } finally {
           setSavingDrawer(false);
         }
+      }
+    }
+
+    // Apply the draftRow directly to parent state if not caught by catalog update
+    if (draftRow) {
+      if (section === "premeds") {
+        const n = [...premeds];
+        n[index] = { ...draftRow };
+        setPremeds(n);
+      } else if (section === "chemo") {
+        const n = [...chemoPlans];
+        n[index] = { ...draftRow };
+        setChemoPlans(n);
+      } else if (section === "supportive") {
+        const n = [...supportive];
+        n[index] = { ...draftRow };
+        setSupportive(n);
+      } else if (section === "dilution") {
+        const n = [...dilution];
+        n[index] = { ...draftRow };
+        setDilution(n);
+      } else if (section === "post") {
+        const n = [...post];
+        n[index] = { ...draftRow };
+        setPost(n);
       }
     }
 

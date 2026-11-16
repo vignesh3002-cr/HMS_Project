@@ -251,6 +251,10 @@ export interface ChemoPlanItem {
   minimum_dose?: string | number | null;
   remarks?: string | null;
   duration?: string | null;
+  /* Unit code from the source discharge instruction (D / Wk / Mo). Plan
+     items have no duration unit column, so this is only set when the API
+     returns it. */
+  duration_days?: string | null;
   medicine_master?: {
     medicine_id?: string;
     medicine_name?: string | null;
@@ -271,6 +275,9 @@ export interface ChemoDischargeMedicinePayload {
   drug_name?: string | null;
   drug_sequence: number;
   drug_type?: string | null;
+  /* The discharge form (chemotherapy_discharge_instructions.drug_from), kept
+     on the plan item so an edited protocol row keeps its slip form. */
+  formulation?: string | null;
   dosage?: number | null;
   dosage_unit?: string | null;
   frequency?: string | null;
@@ -347,6 +354,10 @@ export interface PharmacySlipItemRecord {
   dose_unit: string | null;
   quantity: number | null;
   drug_role: string | null;
+  route?: string | null;
+  frequency?: string | null;
+  duration?: string | null;
+  instructions?: string | null;
   medicine_master: {
     medicine_name: string | null;
     generic_name: string | null;
@@ -1042,6 +1053,103 @@ export const chemotherapyApi = {
       message: string;
       data: Array<{ subtype_id: string; subtype_name: string; cancer_type_id: string }>;
     }>(`/oncology/reference/cancer-types/${cancerTypeId}/subtypes`),
+  listScoreVariables: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: Array<{
+        score_variable_id: string;
+        score_id: string;
+        variable_name: string;
+        criterion: string | null;
+        points: string | null;
+        source: string;
+        auto_filled: boolean;
+        source_field: string | null;
+        display_order: number;
+      }>;
+    }>(`/oncology/reference/scores/${scoreId}/variables`),
+  listScoreGroups: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: Array<{
+        score_group_id: string;
+        score_id: string;
+        group_range: string;
+        meaning: string | null;
+        sort_order: number;
+      }>;
+    }>(`/oncology/reference/scores/${scoreId}/groups`),
+  getScoreDetail: (scoreId: string) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: {
+        score_id: string;
+        score_name: string | null;
+        cancer_type_id: string | null;
+        applies_to: string | null;
+        purpose: string | null;
+        when_to_record: string | null;
+        method: string | null;
+        range: string | null;
+        risk_groups: string | null;
+        status: string | null;
+        reference: string | null;
+        developer_note: string | null;
+        variables: number;
+        auto_filled: number;
+        auto_fill_percent: string | null;
+        variables_list: Array<{
+          score_variable_id: string;
+          score_id: string;
+          variable_name: string;
+          criterion: string | null;
+          points: string | null;
+          source: string;
+          auto_filled: boolean;
+          source_field: string | null;
+          display_order: number;
+        }>;
+        groups: Array<{
+          score_group_id: string;
+          score_id: string;
+          group_range: string;
+          meaning: string | null;
+          sort_order: number;
+        }>;
+      };
+    }>(`/oncology/reference/scores/${scoreId}`),
+  /* Catalogue metadata (descriptive columns only). Only the keys sent are
+     changed. */
+  updateScore: (
+    scoreId: string,
+    patch: Partial<{
+      purpose: string | null;
+      when_to_record: string | null;
+      score_range: string | null;
+      risk_groups: string | null;
+      score_status: string | null;
+      score_reference: string | null;
+      developer_note: string | null;
+    }>
+  ) =>
+    API.patch<{
+      success: boolean;
+      message: string;
+      data: {
+        score_id: string;
+        score_name: string | null;
+        purpose: string | null;
+        when_to_record: string | null;
+        range: string | null;
+        risk_groups: string | null;
+        status: string | null;
+        reference: string | null;
+        developer_note: string | null;
+      };
+    }>(`/oncology/reference/scores/${scoreId}`, patch),
   listMedicines: () =>
     API.get<{ success: boolean; message: string; data: MedicineOption[] }>(
       "/chemotherapy/medicines"

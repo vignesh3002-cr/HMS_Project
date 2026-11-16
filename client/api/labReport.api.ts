@@ -92,6 +92,61 @@ export interface LabReportRecord {
   } | null;
 }
 
+export interface LabReportParameterRecord {
+  name: string;
+  value: string;
+  unit: string;
+  referenceRange: string;
+  status: string;
+  comment: string;
+}
+
+/* One order item's report, resolved by GET /lab-report/by-order-item/:id. */
+export interface LabOrderItemReportRecord {
+  item: {
+    lab_order_item_id: string;
+    lab_order_id: string;
+    lab_test_id: string;
+    item_status?: string | null;
+    remarks?: string | null;
+    created_at?: string | null;
+    lab_test_master?: {
+      lab_test_id: string;
+      test_name: string;
+      test_code?: string | null;
+      unit?: string | null;
+      sample_type?: string | null;
+      reference_range?: string | null;
+      tat_hours?: number | string | null;
+    } | null;
+  };
+  order: {
+    lab_order_id: string;
+    order_datetime?: string | null;
+    priority?: string | null;
+    clinical_notes?: string | null;
+    department?: string;
+    doctor?: string;
+  };
+  patient: {
+    patient_id: string;
+    name: string;
+    age?: number | null;
+    gender?: string | null;
+    dob?: string | null;
+    mrn_no?: string | null;
+  };
+  report: LabReportRecord | null;
+  otherReports: {
+    lab_report_id: string;
+    report_number?: string | null;
+    report_status?: string | null;
+    generated_datetime?: string | null;
+    has_file: boolean;
+  }[];
+  parameters: LabReportParameterRecord[];
+}
+
 export const labReportApi = {
   getAll: () =>
     API.get<{ success: boolean; data: LabReportRecord[] }>("/lab-report"),
@@ -104,6 +159,13 @@ export const labReportApi = {
   getByOrderId: (orderId: string) =>
     API.get<{ success: boolean; data: LabReportRecord }>(
       `/lab-report/order/${encodeURIComponent(orderId)}`
+    ),
+
+  /* The report for one lab_order_item: lab_result -> lab_report, with
+     fallbacks for orders that carry several reports. */
+  getByOrderItem: (itemId: string) =>
+    API.get<{ success: boolean; data: LabOrderItemReportRecord }>(
+      `/lab-report/by-order-item/${encodeURIComponent(itemId)}`
     ),
 
   create: (payload: {

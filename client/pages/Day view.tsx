@@ -735,11 +735,25 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         }
       }
 
+      // Add all real booked appointment times so elastic appointments are never skipped
+      for (const appt of dayAppointments) {
+        if (appt.employees?.employee_id === doc.employeeId && appt.appointment_time) {
+          if (appt.status && NON_BLOCKING_STATUSES.has(appt.status)) continue;
+          doctorTimes.add(normalizeAppointmentTime(appt.appointment_time));
+        }
+      }
+
       const sortedDoctorTimes = Array.from(doctorTimes).sort((a, b) => hhmmToMinutes(a) - hhmmToMinutes(b));
 
       const cells: { time: string; cell: AppointmentSlot }[] = [];
 
       for (const time of sortedDoctorTimes) {
+        const apptsHere = appointmentsAt(doc, time);
+        if (apptsHere.length > 0) {
+          cells.push({ time, cell: bookedCard(apptsHere) });
+          continue;
+        }
+
         // Backend-authoritative cell: the slot was returned by
         // available-slots for this doctor, so is_available decides it.
         const backendAtTime = backendByTime.get(time);
@@ -758,8 +772,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 time,
               }),
             });
-          } else {
-            cells.push({ time, cell: bookedCard(appointmentsAt(doc, time)) });
           }
           continue;
         }
@@ -770,22 +782,24 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         const matchedRange = ranges.find((r) => rowMinutes >= r.start && rowMinutes < r.end);
         if (!matchedRange) continue;
 
-        const apptsHere = appointmentsAt(doc, time);
-        if (apptsHere.length > 0) {
-          cells.push({ time, cell: bookedCard(apptsHere) });
-          continue;
-        }
+        const todayStr = format(new Date(), "yyyy-MM-dd");
+        const isToday = selectedDateStr === todayStr;
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const isPastToday = isToday && rowMinutes <= nowMinutes;
 
-        cells.push({
-          time,
-          cell: slot(0, "New slot available", 0, false, {
-            doctorId: doc.employeeId,
-            branchId: matchedRange.schedule.branch_id || doc.branchId,
-            departmentId: doc.departmentId,
-            date: selectedDateStr,
+        if (!isPastToday) {
+          cells.push({
             time,
-          }),
-        });
+            cell: slot(0, "New slot available", 0, false, {
+              doctorId: doc.employeeId,
+              branchId: matchedRange.schedule.branch_id || doc.branchId,
+              departmentId: doc.departmentId,
+              date: selectedDateStr,
+              time,
+            }),
+          });
+        }
       }
 
       cellsByDoctor.set(doc.employeeId, cells);
@@ -1140,26 +1154,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                               )}
                             >
                               {cells.length === 0 ? (
-                                <EmptySlot
-                                  onClick={() => {
-                                    const doc = visibleDoctorColumns[i];
-                                    // Reuse the branch of this doctor's existing schedule for the
-                                    // selected day (if any), so the new slot lands on the same
-                                    // branch as their real slots and getAvailableSlots returns both
-                                    // together -- otherwise picking an arbitrary mapped branch here
-                                    // can silently split the new slot onto a different branch than
-                                    // the doctor's normal schedule, hiding the old slots from it.
-                                    const existingBranch = (doctorSchedulesByEmployee[doc.employeeId] ?? []).find(
-                                      (s) => (s.day_of_week ?? "").trim().toUpperCase() === selectedDayOfWeek && s.branch_id,
-                                    )?.branch_id;
-                                    const mapped = doctorMappedBranches[doc.employeeId];
-                                    const branchId =
-                                      existingBranch ||
-                                      (mapped && mapped.size > 0 ? Array.from(mapped)[0] : null) ||
-                                      doc.branchId;
-                                    setAddSlotTarget({ doctorId: doc.employeeId, branchId, hour: row.hour });
-                                  }}
-                                />
+                                <EmptySlot />
                               ) : (
                                 cells.map((cell, cellIdx) => <AppointmentCard key={cellIdx} cell={cell} />)
                               )}

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from "react";
+﻿import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { getUser } from "../../../utils/token";
 import { encounterApi } from "../../../api/encounter.api";
 import type { LabTestMasterRecord } from "../../../api/labTestMaster.api";
@@ -15,6 +15,7 @@ import {
 } from "./helpers";
 import { BackIcon, CheckIcon } from "./icons";
 import type { InvestigationOrderDetail } from "./types";
+import LabReportViewerModal from "./LabReportViewerModal";
 
 /* ============================================================
    LAB REVIEW COMPONENT
@@ -40,6 +41,24 @@ const formatOrderedDate = (value?: string | null) => {
 const formatTargetDate = (value?: string | null) => {
   const iso = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : "—";
+};
+
+/* Local calendar day (YYYY-MM-DD) of a timestamp, so the date filter
+   matches what the doctor sees rather than UTC. */
+const localDateKey = (value?: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+};
+
+const todayDateKey = () => localDateKey(new Date().toISOString());
+
+const formatDateKey = (value: string) => {
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : value;
 };
 
 const NotificationIcon = () => (
@@ -114,13 +133,19 @@ const LabReview: React.FC<{
   /* ------------------------------------------------------------
      LAB ORDER ITEMS (lab_order_item table via GET /lab-order-item)
      One row per investigation ordered for this patient.
-     item_status: "Ordered" initially → "Completed" once reported.
+     item_status: "Ordered" initially → "Report Generated" once the
+     lab report is approved.
   ------------------------------------------------------------ */
 
   const [orderedItems, setOrderedItems] = useState<LabOrderItemRecord[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
   const [itemsError, setItemsError] = useState("");
   const [orderError, setOrderError] = useState("");
+
+  /* Day-wise report view: defaults to today, preserving the original
+     behaviour. "" means every date. */
+  const [reportDate, setReportDate] = useState<string>(() => todayDateKey());
+  const [reportItem, setReportItem] = useState<LabOrderItemRecord | null>(null);
 
   const placingRef = useRef(false);
 
@@ -133,20 +158,10 @@ const LabReview: React.FC<{
       .then((response) => {
         if (cancelled) return;
         const allItems = response.data.data ?? [];
-        const now = new Date();
         const forPatient = allItems.filter(
-          (item) => {
-            if (item.lab_order?.patient_history?.patient_id !== patientId) return false;
-            const dateStr = item.lab_order?.order_datetime ?? item.created_at;
-            if (!dateStr) return false;
-            const d = new Date(dateStr);
-            if (isNaN(d.getTime())) return false;
-            return (
-              d.getFullYear() === now.getFullYear() &&
-              d.getMonth() === now.getMonth() &&
-              d.getDate() === now.getDate()
-            );
-          }
+          (item) =>
+            !patientId ||
+            item.lab_order?.patient_history?.patient_id === patientId
         );
         setOrderedItems(forPatient);
       })
@@ -171,6 +186,16 @@ const LabReview: React.FC<{
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  /* The rows shown for the selected report date (ordered date). */
+  const visibleItems = useMemo(() => {
+    if (!reportDate) return orderedItems;
+    return orderedItems.filter(
+      (item) =>
+        localDateKey(item.lab_order?.order_datetime ?? item.created_at) ===
+        reportDate
+    );
+  }, [orderedItems, reportDate]);
 
   /* ------------------------------------------------------------
      AUTO-PLACE the selected investigations when Lab Review opens:
@@ -219,6 +244,10 @@ const LabReview: React.FC<{
 
         if (result.errors.length > 0) {
           setOrderError(result.errors[0]);
+        }
+        if (result.created > 0) {
+          /* Newly placed tests are dated today - keep them visible. */
+          setReportDate(todayDateKey());
         }
         if (result.resolvedTestIds.length > 0) {
           onOrdered?.(result.resolvedTestIds);
@@ -309,22 +338,50 @@ const LabReview: React.FC<{
     }
   };
 
-  const handleViewReport = (name: string) => {
-    alert(`Viewing report: ${name}`);
-  };
-
   const content = (
     <div className="space-y-6">
       {/* Laboratory Investigations */}
       <section className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)]">
         {/* Card Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-8 py-6">
-
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-8 py-6">
           <span className="text-[10px] font-bold text-gray-900">
             {itemsLoading
               ? "Loading..."
-              : `${orderedItems.length} Reports Found`}
+              : `${visibleItems.length} Reports Found`}
           </span>
+
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="lab-report-date"
+              className="text-[10px] font-bold uppercase tracking-wider text-gray-500"
+            >
+              Report Date
+            </label>
+            <input
+              id="lab-report-date"
+              type="date"
+              value={reportDate}
+              max={todayDateKey()}
+              onChange={(event) => setReportDate(event.target.value)}
+              className="h-8 rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-medium text-gray-700 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <button
+              type="button"
+              onClick={() => setReportDate(todayDateKey())}
+              disabled={reportDate === todayDateKey()}
+              className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportDate("")}
+              disabled={!reportDate}
+              className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[10px] font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              All dates
+            </button>
+          </div>
         </div>
 
         {itemsError && (
@@ -375,20 +432,28 @@ const LabReview: React.FC<{
             </thead>
 
             <tbody className="bg-white text-gray-700">
-              {!itemsLoading && !itemsError && orderedItems.length === 0 && (
+              {!itemsLoading && !itemsError && visibleItems.length === 0 && (
                 <tr>
                   <td
                     colSpan={5}
                     className="px-8 py-6 text-center text-xs text-gray-500"
                   >
-                    No investigations have been ordered for this patient yet.
+                    {orderedItems.length === 0
+                      ? "No investigations have been ordered for this patient yet."
+                      : reportDate
+                        ? `No investigations were ordered on ${formatDateKey(
+                            reportDate
+                          )}.`
+                        : "No investigations match this filter."}
                   </td>
                 </tr>
               )}
 
-              {orderedItems.map((item) => {
+              {visibleItems.map((item) => {
                 const status = item.item_status || "Ordered";
                 const completed = status === "Completed";
+                const reportGenerated =
+                  status.trim().toLowerCase() === "report generated";
 
                 return (
                 <tr
@@ -437,7 +502,7 @@ const LabReview: React.FC<{
                   <td className="px-8 py-5">
                     <span
                       className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                        completed
+                        completed || reportGenerated
                           ? "bg-[#DCFCE7] text-[#166534]"
                           : "bg-[#FEF3C7] text-[#92400E]"
                       }`}
@@ -449,21 +514,15 @@ const LabReview: React.FC<{
                   <td className="px-8 py-5 text-right">
                     <button
                       type="button"
-                      onClick={() =>
-                        completed &&
-                        handleViewReport(
-                          item.lab_test_master?.test_name ??
-                            item.lab_order_item_id
-                        )
-                      }
-                      disabled={!completed}
+                      onClick={() => reportGenerated && setReportItem(item)}
+                      disabled={!reportGenerated}
                       title={
-                        completed
+                        reportGenerated
                           ? "View report"
-                          : "Report available once the test is Completed"
+                          : "Report available once the status is Report Generated"
                       }
                       className={`inline-flex items-center justify-center rounded-lg px-4 py-2 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
-                        completed
+                        reportGenerated
                           ? "bg-[#F0F5FF] text-[#2563EB] hover:bg-blue-100 focus:ring-blue-500"
                           : "cursor-not-allowed bg-slate-100 text-slate-400"
                       }`}
@@ -506,6 +565,14 @@ const LabReview: React.FC<{
           </p>
         )}
       </section>
+
+      <LabReportViewerModal
+        open={!!reportItem}
+        onOpenChange={(next) => {
+          if (!next) setReportItem(null);
+        }}
+        item={reportItem}
+      />
     </div>
   );
 

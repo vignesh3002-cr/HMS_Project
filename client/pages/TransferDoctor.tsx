@@ -14,6 +14,7 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import AffectedAppointmentsDialog from "@/components/hms/AffectedAppointmentsDialog";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
   employeeApi,
   EmployeeDetailResponse,
@@ -104,6 +105,11 @@ export default function TransferDoctor() {
   const [details, setDetails] = useState<BranchTransferDetails>(defaultBranchDetails());
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const [recentTransfers, setRecentTransfers] = useState<BranchTransfer[]>([]);
+  const [activePendingTransfer, setActivePendingTransfer] = useState<(InitiateTransferResult & { new_branch_id?: string; branch_name?: string; effective_date?: string }) | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardTargetId, setDiscardTargetId] = useState<string | null>(null);
+  const [pendingOverwriteConfirm, setPendingOverwriteConfirm] = useState(false);
+  const [pendingOverwritePayload, setPendingOverwritePayload] = useState<InitiateTransferPayload | null>(null);
 
   // Step 2 modal — which recent transfer is being viewed
   const [viewingTransferId, setViewingTransferId] = useState<string | null>(null);
@@ -191,6 +197,24 @@ export default function TransferDoctor() {
           setDetails(seededDetails);
           // schedules start empty - user will add them for the toBranch
           setSchedules([]);
+
+          // Fetch active pending transfer if one exists
+          try {
+            const pendingRes = await doctorTransferApi.getPendingTransfer(id!);
+            const pending = pendingRes.data?.data;
+            if (pending && pending.status === "PENDING_CONFIRMATION") {
+              setActivePendingTransfer(pending);
+              setRecentTransfers([{
+                transferId: pending.transfer_id,
+                fromBranchId: pending.old_branch_id || "",
+                toBranchId: pending.new_branch_id || "",
+                effectiveDate: pending.effective_date || "",
+                result: pending,
+              }]);
+            }
+          } catch (pErr) {
+            console.warn("[Transfer] Could not fetch pending transfer", pErr);
+          }
         }
       } catch (err) {
         console.error("[Transfer] Init error", err);
@@ -351,10 +375,6 @@ export default function TransferDoctor() {
       toast({ title: "Effective date is required", variant: "destructive" });
       return;
     }
-    if (!details.transferReason.trim()) {
-      toast({ title: "Transfer reason is required", variant: "destructive" });
-      return;
-    }
     if (schedules.length === 0) {
       toast({
         title: `Add working hours for ${branchLabelOf(toBranchId)}`,
@@ -378,16 +398,6 @@ export default function TransferDoctor() {
         });
         return;
       }
-    }
-
-    // Only one transfer may be awaiting confirmation at a time.
-    if (recentTransfers.some((t) => t.result.status === "PENDING_CONFIRMATION")) {
-      toast({
-        title: "A transfer is already awaiting confirmation",
-        description: "Complete or discard the existing pending transfer before starting a new one.",
-        variant: "destructive",
-      });
-      return;
     }
 
     // Client-side conflict check: the new working hours must not overlap
@@ -421,22 +431,41 @@ export default function TransferDoctor() {
       consultation_minutes: Number(details.consultationMinutes) || 20,
     };
 
+    // If there is an active pending transfer, confirm whether the user wants to overwrite/discard it
+    if (activePendingTransfer || recentTransfers.some((t) => t.result.status === "PENDING_CONFIRMATION")) {
+      setPendingOverwritePayload(payload);
+      setPendingOverwriteConfirm(true);
+      return;
+    }
+
+    await executeInitiate(payload, false);
+  };
+
+  const executeInitiate = async (payload: InitiateTransferPayload, bypassPending: boolean = false) => {
+    if (!id) return;
     setSubmitting(true);
     try {
-      const res = await doctorTransferApi.initiateTransfer(id, payload);
+      const res = await doctorTransferApi.initiateTransfer(id, payload, bypassPending);
       const newTransfer: BranchTransfer = {
         transferId: res.data.data.transfer_id,
-        fromBranchId,
+        fromBranchId: res.data.data.old_branch_id || fromBranchId,
         toBranchId,
         effectiveDate: details.effectiveDate,
         result: res.data.data,
       };
       // Add to recent transfers list
       setRecentTransfers((prev) => [newTransfer, ...prev]);
+
+      if (res.data.data.status === "PENDING_CONFIRMATION") {
+        setActivePendingTransfer(res.data.data);
+        setViewingTransferId(res.data.data.transfer_id);
+      } else {
+        setActivePendingTransfer(null);
+      }
+
       // Reset form for next transfer (reset both From and To)
       resetForm();
-      // Refetch so the From branch list and schedules are fresh — the
-      // branch just left must disappear from the dropdown immediately.
+      // Refetch so the From branch list and schedules are fresh
       await refreshEmployee();
       setJustCompleted(true);
 
@@ -446,7 +475,7 @@ export default function TransferDoctor() {
         description:
           opMode === "TRANSFER"
             ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
-            : `Doctor assigned to ${branchLabelOf(toBranchId)} —  existing branches kept.`,
+            : `Doctor assigned to ${branchLabelOf(toBranchId)} — existing branches kept.`,
       });
     } catch (err: any) {
       toast({
@@ -456,6 +485,39 @@ export default function TransferDoctor() {
       });
     } finally {
       setSubmitting(false);
+      setPendingOverwriteConfirm(false);
+      setPendingOverwritePayload(null);
+    }
+  };
+
+  const handleDiscardPending = async (transferId: string) => {
+    if (!id) return;
+    setDiscarding(true);
+    try {
+      await doctorTransferApi.discardTransfer(id, transferId, "Discarded by admin from Transfer Doctor interface");
+      setActivePendingTransfer(null);
+      setRecentTransfers((prev) =>
+        prev.map((t) =>
+          t.transferId === transferId
+            ? { ...t, result: { ...t.result, status: "CANCELLED" } }
+            : t
+        )
+      );
+      setViewingTransferId(null);
+      await refreshEmployee();
+      toast({
+        title: "Pending transfer discarded",
+        description: "The pending transfer was cancelled. Doctor is now unblocked for new transfers and schedule modifications.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Failed to discard transfer",
+        description: err?.response?.data?.message || err?.message || "Could not discard transfer",
+        variant: "destructive",
+      });
+    } finally {
+      setDiscarding(false);
+      setDiscardTargetId(null);
     }
   };
 
@@ -479,6 +541,7 @@ export default function TransferDoctor() {
           : t,
       ),
     );
+    setActivePendingTransfer(null);
     await refreshEmployee();
     setJustCompleted(true);
     toast({
@@ -554,6 +617,46 @@ export default function TransferDoctor() {
             </div>
           </div>
           <StatusBadge status={doctorSummary.active ? "active" : "inactive"} />
+        </div>
+      )}
+
+            {/* ─── Active Pending Transfer Alert Banner ─── */}
+      {activePendingTransfer && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-bold text-amber-900">
+                Active Pending Transfer Awaiting Confirmation
+              </h3>
+              <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                Transfer ID: <span className="font-mono font-semibold">{activePendingTransfer.transfer_id}</span>
+                {activePendingTransfer.effective_date && ` · Effective: ${activePendingTransfer.effective_date}`}
+                {activePendingTransfer.appointments?.length !== undefined && ` · ${activePendingTransfer.appointments.length} affected appointment(s)`}
+                <br />
+                This doctor cannot be transferred again or have schedules edited until this pending transfer is completed or discarded.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setViewingTransferId(activePendingTransfer.transfer_id);
+              }}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition-colors"
+            >
+              Review & Complete
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiscardTargetId(activePendingTransfer.transfer_id)}
+              disabled={discarding}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-white border border-red-300 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              {discarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Discard Transfer"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -683,18 +786,9 @@ export default function TransferDoctor() {
               onChange={(e) => updateDetails("effectiveDate", e.target.value)}
             />
           </div>
+
           <div>
-            <label className={labelCls}>Consultation minutes</label>
-            <input
-              type="number"
-              min={1}
-              className={inputCls}
-              value={details.consultationMinutes}
-              onChange={(e) => updateDetails("consultationMinutes", e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Transfer reason</label>
+            <label className={labelCls}>Transfer reason (optional)</label>
             <textarea
               rows={2}
               className={inputCls}
@@ -824,6 +918,15 @@ export default function TransferDoctor() {
                   tone={t.result.status === "COMPLETED" ? "green" : "amber"}
                   status={t.result.status === "COMPLETED" ? "Completed" : "Pending Confirmation"}
                 />
+                {t.result.status === "PENDING_CONFIRMATION" && (
+                  <button
+                    onClick={() => setDiscardTargetId(t.transferId)}
+                    disabled={discarding}
+                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50"
+                  >
+                    Discard
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setViewingTransferId(t.transferId);
@@ -844,6 +947,7 @@ export default function TransferDoctor() {
           if (!open) closeViewingModal();
         }}
         employeeId={id ?? ""}
+        oldBranchId={viewingTransfer?.fromBranchId || viewingTransfer?.result.old_branch_id}
         branches={branches}
         doctors={openDoctors}
         transfers={
@@ -852,6 +956,7 @@ export default function TransferDoctor() {
                 {
                   transfer_id: viewingTransfer.result.transfer_id,
                   message: viewingTransfer.result.message,
+                  old_branch_id: viewingTransfer.fromBranchId || viewingTransfer.result.old_branch_id,
                 },
               ]
             : []
@@ -860,6 +965,42 @@ export default function TransferDoctor() {
         title="Transfer Details"
         onCompleted={(summary) => {
           void handleAffectedCompleted(summary);
+        }}
+      />
+      {/* ─── Discard Confirmation Dialog ─── */}
+      <ConfirmationDialog
+        open={discardTargetId !== null}
+        type="danger"
+        title="Discard Pending Transfer?"
+        description="Are you sure you want to discard this pending transfer? This will cancel the transfer request and unblock the doctor for new transfers and schedule modifications. Any appointments scheduled for this doctor will remain unchanged."
+        confirmText={discarding ? "Discarding..." : "Discard Transfer"}
+        cancelText="Keep Pending"
+        loading={discarding}
+        onConfirm={async () => {
+          if (discardTargetId) {
+            await handleDiscardPending(discardTargetId);
+          }
+        }}
+        onCancel={() => setDiscardTargetId(null)}
+      />
+
+      {/* ─── Overwrite Pending Confirmation Dialog ─── */}
+      <ConfirmationDialog
+        open={pendingOverwriteConfirm}
+        type="warning"
+        title="Overwrite Existing Pending Transfer?"
+        description="This doctor already has a pending transfer awaiting confirmation. Proceeding will discard the previous pending transfer and create this new transfer request. Are you sure you want to proceed?"
+        confirmText="Discard Previous & Proceed"
+        cancelText="Cancel"
+        loading={submitting}
+        onConfirm={async () => {
+          if (pendingOverwritePayload) {
+            await executeInitiate(pendingOverwritePayload, true);
+          }
+        }}
+        onCancel={() => {
+          setPendingOverwriteConfirm(false);
+          setPendingOverwritePayload(null);
         }}
       />
     </div>

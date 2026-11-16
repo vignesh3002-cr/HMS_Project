@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { downloadExportPdf } from "@/lib/exportPdf";
 import { toProperCase } from "@/utils/caseFormatters";
 import { getActiveTimezone } from "@/utils/timezone";
+import { slipFrequencyDuration } from "@/pages/doctor/consultation/pharmacySlip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -196,14 +197,22 @@ interface SlipLine {
   pharmacy_slip_item_id: string;
   medicine_id?: string | null;
   medicineName: string;
+  dosageForm: string;
   patientDose: string;
   brandName: string;
   strengthValue: string;
   strengthUnit: string;
   drugRole: string;
   quantity: string;
+  frequency: string;
+  duration: string;
+  instructions: string;
   pharmacy_item_id?: string | null;
 }
+
+/* Discharge-only directions, e.g. "1-0-2 / 4 D"; blank for other roles. */
+const frequencyDurationOf = (line: SlipLine) =>
+  slipFrequencyDuration(line.drugRole, line.frequency, line.duration);
 
 function toLine(item: PharmacySlipItem): SlipLine {
   const calculatedQty =
@@ -215,12 +224,16 @@ function toLine(item: PharmacySlipItem): SlipLine {
     pharmacy_slip_item_id: item.pharmacy_slip_item_id,
     medicine_id: item.medicine_id ?? null,
     medicineName: toProperCase(display(item.drug_name)),
+    dosageForm: item.dosage_form ?? "",
     patientDose: display(item.patient_dose),
     brandName: toProperCase(item.brand_name || ""),
     strengthValue: item.dose ?? "",
     strengthUnit: item.dose_unit ?? "mg",
     drugRole: item.drug_role ?? "PRIMARY",
     quantity: calculatedQty || "1",
+    frequency: item.frequency ?? "",
+    duration: item.duration ?? "",
+    instructions: item.instructions ?? "",
     pharmacy_item_id: item.pharmacy_item_id ?? null,
   };
 }
@@ -236,12 +249,16 @@ function fromResolved(line: SlipPreview["lines"][number], index: number): SlipLi
     pharmacy_slip_item_id: `pending-${index}`,
     medicine_id: line.medicine_id ?? null,
     medicineName: toProperCase(display(line.drug_name)),
+    dosageForm: line.dosage_form ?? "",
     patientDose: display(line.patient_dose),
     brandName: toProperCase(line.brand_name || ""),
     strengthValue: line.dose ?? "",
     strengthUnit: line.dose_unit ?? "mg",
     drugRole: line.drug_role ?? "PRIMARY",
     quantity: calculatedQty || "1",
+    frequency: line.frequency ?? "",
+    duration: line.duration ?? "",
+    instructions: line.instructions ?? "",
     pharmacy_item_id: null,
   };
 }
@@ -381,12 +398,16 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
         pharmacy_slip_item_id: newId,
         medicine_id: null,
         medicineName: "",
+        dosageForm: "",
         patientDose: "—",
         brandName: "",
         strengthValue: "",
         strengthUnit: "mg",
         drugRole: "PRIMARY",
         quantity: "1",
+        frequency: "",
+        duration: "",
+        instructions: "",
       },
     ]);
   };
@@ -457,11 +478,16 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
               : line.pharmacy_slip_item_id,
           medicine_id: medId ?? undefined,
           drug_name: line.medicineName.trim(),
+          dosage_form: line.dosageForm.trim() || null,
+          patient_dose: line.patientDose.trim() ? line.patientDose : null,
           brand_name: line.brandName.trim() || null,
           dose: line.strengthValue.trim() || null,
           dose_unit: line.strengthUnit.trim() || null,
           quantity: line.quantity.trim() === "" ? null : Number(line.quantity),
           drug_role: line.drugRole,
+          frequency: line.frequency.trim() || null,
+          duration: line.duration.trim() || null,
+          instructions: line.instructions.trim() || null,
           pharmacy_item_id: line.pharmacy_item_id ?? undefined,
         });
       }
@@ -581,13 +607,18 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
     const bodyRows = lines
       .map(
         (line) => `<tr>
-          <td>${escapeHtml(toProperCase(line.medicineName))}</td>
+          <td>${escapeHtml(toProperCase(line.medicineName))}${
+            line.instructions
+              ? `<br /><span class="drug-note">${escapeHtml(line.instructions)}</span>`
+              : ""
+          }</td>
           <td>${escapeHtml(line.patientDose)}</td>
           <td>${escapeHtml(toProperCase(line.brandName) || "—")}</td>
           <td>${escapeHtml(
             line.strengthValue ? `${line.strengthValue}${line.strengthUnit ? ` ${line.strengthUnit}` : ""}` : "—"
           )}</td>
           <td class="qty">${escapeHtml(line.quantity || "—")}</td>
+          <td>${escapeHtml(frequencyDurationOf(line) || "—")}</td>
           <td>${escapeHtml(DRUG_ROLE_LABELS[line.drugRole] ?? line.drugRole)}</td>
         </tr>`
       )
@@ -605,6 +636,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       .lines-table th { text-align: left; background: #f1f5f9; padding: 8px; font-size: 11px; border: 1px solid #cbd5e1; }
       .lines-table td { padding: 8px; border: 1px solid #cbd5e1; }
       .lines-table .qty { text-align: right; }
+      .drug-note { display: block; margin-top: 2px; font-size: 10px; color: #64748b; }
       .foot { font-size: 10px; color: #64748b; margin-top: 16px; }
     </style></head><body>
       <h1>Pharmacy Slip</h1>
@@ -613,7 +645,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
       )})</div>
       <table class="meta-table">${headerRows}</table>
       <table class="lines-table">
-        <thead><tr><th>Medicine Name</th><th>Patient_dose</th><th>Brand</th><th>Dose</th><th style="text-align:right">Qty</th><th>Type</th></tr></thead>
+        <thead><tr><th>Medicine Name</th><th>Patient_dose</th><th>Brand</th><th>Dose</th><th style="text-align:right">Qty</th><th>F/D</th><th>Type</th></tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
       <div class="foot">Printed ${escapeHtml(formatDateTime(record?.printed_at) ?? new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() }))}</div>
@@ -639,6 +671,7 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
             line.strengthValue ? `${line.strengthValue}${line.strengthUnit ? ` ${line.strengthUnit}` : ""}` : "—",
         },
         { header: "Qty", cell: (line: SlipLine) => line.quantity || "—" },
+        { header: "F/D", cell: (line: SlipLine) => frequencyDurationOf(line) || "—" },
         { header: "Type", cell: (line: SlipLine) => DRUG_ROLE_LABELS[line.drugRole] ?? line.drugRole },
       ],
       rows: lines,
@@ -838,7 +871,8 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
                 <th className="px-6 py-3.5 hms-table-header w-[18%]">Brand</th>
                 <th className="px-6 py-3.5 hms-table-header w-[17%]">Dose</th>
                 <th className="px-6 py-3.5 hms-table-header w-20 text-right">Qty</th>
-                <th className="px-6 py-3.5 hms-table-header w-[13%]">Type</th>
+                <th className="px-6 py-3.5 hms-table-header w-[10%]">F/D</th>
+                <th className="px-6 py-3.5 hms-table-header w-[11%]">Type</th>
                 {editing && (
                   <th className="px-6 py-3.5 hms-table-header w-16 text-center print:hidden">Action</th>
                 )}
@@ -854,6 +888,11 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
                     >
                       <td className="px-6 py-3.5">
                         <div className="hms-name-text text-[#111827]">{toProperCase(line.medicineName)}</div>
+                        {line.instructions && (
+                          <p className="mt-0.5 text-[11px] leading-tight text-[#6B7280]">
+                            {line.instructions}
+                          </p>
+                        )}
                       </td>
                       <td className="px-6 py-3.5">
                         <span className="hms-content-text text-slate-700">{line.patientDose || "—"}</span>
@@ -873,6 +912,11 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
                       <td className="px-6 py-3.5 text-right">
                         <span className="hms-content-text font-bold text-slate-800 bg-slate-100/90 border border-slate-200/80 px-2.5 py-0.5 rounded-md inline-block">
                           {line.quantity || "—"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3.5">
+                        <span className="hms-content-text text-slate-700">
+                          {frequencyDurationOf(line) || "—"}
                         </span>
                       </td>
                       <td className="px-6 py-3.5">
@@ -1071,6 +1115,11 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
                         placeholder="—"
                         className="h-8 w-20 text-xs text-right inline-block"
                       />
+                    </td>
+
+                    {/* F/D (from the discharge medicine; read-only here) */}
+                    <td className="px-6 py-3 text-sm text-[#374151]">
+                      {frequencyDurationOf(line) || "—"}
                     </td>
 
                     {/* Type */}

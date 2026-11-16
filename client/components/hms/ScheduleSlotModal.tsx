@@ -232,10 +232,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         alert("Please select start time and end time.");
         return;
       }
-      if (!isCancelChange && (!slotConsultationMinutes || Number(slotConsultationMinutes) < 1)) {
-        alert("Please enter consultation minutes.");
-        return;
-      }
+
 
       const selectedBranch = branchOptions.find((b) => b.branch_id === slotBranch);
       const timeLabel = isCancelChange
@@ -447,22 +444,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                     </select>
                   </div>
                 )}
-                {!(slotMode === "date" && slotChangeMode === "CANCEL") && (
-                  <div>
-                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                      CONSULTATION MINUTES *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={slotConsultationMinutes}
-                      onChange={(e) => setSlotConsultationMinutes(e.target.value)}
-                      placeholder="e.g. 20"
-                      disabled={isSubmitting}
-                      className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                    />
-                  </div>
-                )}
+
               </div>
 
               {showBypassOption && slotMode === "date" && slotChangeMode !== "CANCEL" && (

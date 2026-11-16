@@ -153,6 +153,86 @@ const strengthOf = (item: PharmacyMasterItem): StrengthOption | null => {
 export const formatNumber = (value: number) =>
   String(Number(value.toFixed(4)));
 
+/* ---------------------------------------------------------------
+   Frequency / duration (the slip's F/D column)
+
+   chemotherapy_discharge_instructions stores the duration as a number
+   (`duration`) plus a unit code (`duration_days`: D / Wk / Mo). The slip
+   prints both, e.g. "1-0-2 / 4 D". A plan row may already carry the unit
+   inside `duration` (patient rows have no duration_days column), so the
+   unit is never added twice.
+--------------------------------------------------------------- */
+
+const DURATION_UNIT_CODES: Record<string, string> = {
+  d: "D",
+  day: "D",
+  days: "D",
+  "day's": "D",
+  wk: "Wk",
+  wks: "Wk",
+  week: "Wk",
+  weeks: "Wk",
+  "week's": "Wk",
+  mo: "Mo",
+  mos: "Mo",
+  month: "Mo",
+  months: "Mo",
+  "month's": "Mo",
+  yr: "Yr",
+  yrs: "Yr",
+  year: "Yr",
+  years: "Yr",
+};
+
+/* "D" / "day" / "D " -> "D"; an unknown code is kept as typed. */
+export function normalizeDurationCode(unit?: string | null): string {
+  const raw = text(unit);
+  if (!raw) return "";
+  return DURATION_UNIT_CODES[raw.toLowerCase()] ?? raw;
+}
+
+/* "4" + "D" -> "4 D"; "4 D" + "D" -> "4 D". */
+export function formatSlipDuration(
+  value: string | number | null | undefined,
+  unit?: string | null
+): string {
+  const raw = text(value);
+  if (!raw) return "";
+
+  const code = normalizeDurationCode(unit);
+  if (!code) return raw;
+
+  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alreadyHasUnit = new RegExp(`(^|\\s)${escaped}$`, "i").test(raw);
+
+  return alreadyHasUnit ? raw : `${raw} ${code}`;
+}
+
+/* "1-0-2" + "4" + "D" -> "1-0-2 / 4 D"; one side alone is enough. */
+export function formatFrequencyDuration(
+  frequency: string | null | undefined,
+  duration: string | null | undefined,
+  durationUnit?: string | null
+): string {
+  const freq = text(frequency);
+  const dur = formatSlipDuration(duration, durationUnit);
+
+  if (freq && dur) return `${freq} / ${dur}`;
+  return freq || dur;
+}
+
+/* The F/D column only applies to take-home (Discharge) rows; every other
+   medicine type leaves it blank. */
+export function slipFrequencyDuration(
+  role: string | null | undefined,
+  frequency: string | null | undefined,
+  duration: string | null | undefined,
+  durationUnit?: string | null
+): string {
+  if (text(role).toUpperCase() !== "DISCHARGE") return "";
+  return formatFrequencyDuration(frequency, duration, durationUnit);
+}
+
 export function buildBrandOptions(
   row: Pick<SlipSourceRow, "medicineId" | "genericId" | "drugForm">,
   masterItems: PharmacyMasterItem[]
@@ -341,6 +421,9 @@ export type SlipSourceRow = {
   route: string;
   frequency: string;
   duration: string;
+  /* chemotherapy_discharge_instructions.duration_days ("D" / "Wk" / "Mo").
+     Absent on rows added directly to a plan. */
+  durationUnit?: string;
   instructions: string;
 };
 
@@ -391,10 +474,11 @@ export function buildSlipSourceRows({
         medicineId: text(item.medicine_id),
         genericId: text(medicine?.generic_id),
         drugName:
+          text(medicine?.generic_name) ||
           text(medicine?.medicine_name) ||
           text(item.drug_name) ||
           "",
-        drugForm: text(medicine?.dosage_form) || text(item.formulation),
+        drugForm: text(item.formulation) || text(medicine?.dosage_form),
         patientDose,
         patientDoseValue: dose.value,
         patientDoseUnit: dose.unit,
@@ -402,6 +486,7 @@ export function buildSlipSourceRows({
         route: text(item.administration_route),
         frequency: text(item.frequency),
         duration: text(item.duration),
+        durationUnit: text(item.duration_days),
         instructions: text(item.administration_detail || item.remarks),
       },
     });
@@ -434,6 +519,7 @@ export function buildSlipSourceRows({
       route: "",
       frequency: text(row.frequency),
       duration: text(row.duration),
+      durationUnit: text(row.durationUnit),
       instructions: text(row.instruction),
     };
   });
@@ -452,6 +538,8 @@ export type SlipDischargeRow = {
   frequency: string;
   instruction: string;
   duration: string;
+  /* Unit code from the protocol row, when known. */
+  durationUnit?: string;
 };
 
 /* The brand + strength a row opens with: the strength closest to the
@@ -570,7 +658,7 @@ export function toSlipOrderItems(rows: SlipDraftRow[]): PharmacySlipOrderItemPay
       drug_role: row.role,
       route: row.route || null,
       frequency: row.frequency || null,
-      duration: row.duration || null,
+      duration: formatSlipDuration(row.duration, row.durationUnit) || null,
       instructions: row.instructions || null,
       pharmacy_item_id: row.pharmacyItemId || null,
     });
@@ -589,7 +677,7 @@ export function toSlipOrderItems(rows: SlipDraftRow[]): PharmacySlipOrderItemPay
         drug_role: row.role,
         route: row.route || null,
         frequency: row.frequency || null,
-        duration: row.duration || null,
+        duration: formatSlipDuration(row.duration, row.durationUnit) || null,
         instructions: row.instructions || null,
         pharmacy_item_id: plan.extra.strength.pharmacyItemId || null,
       });
@@ -695,6 +783,10 @@ export type SlipDisplayRow = {
   brand: string;
   dose: string;
   quantity: string;
+  /* Discharge-only "1-0-2 / 4 D"; blank for every other medicine type. */
+  frequencyDuration: string;
+  /* The discharge instruction, printed as a small line under the name. */
+  instructions: string;
   type: string;
   role: string;
   isExtra: boolean;
@@ -720,6 +812,13 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
       brand: row.brand,
       dose: `${row.selectedDose}${row.selectedUnit ? ` ${row.selectedUnit}` : ""}`.trim(),
       quantity: baseQuantity === null ? "" : String(baseQuantity),
+      frequencyDuration: slipFrequencyDuration(
+        row.role,
+        row.frequency,
+        row.duration,
+        row.durationUnit
+      ),
+      instructions: row.instructions,
       type: slipRoleLabel(row.role),
       role: row.role,
       isExtra: false,
@@ -740,6 +839,13 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
           plan.extra.strength.unit ? ` ${plan.extra.strength.unit}` : ""
         }`.trim(),
         quantity: String(extraQuantity),
+        frequencyDuration: slipFrequencyDuration(
+          row.role,
+          row.frequency,
+          row.duration,
+          row.durationUnit
+        ),
+        instructions: row.instructions,
         type: slipRoleLabel(row.role),
         role: row.role,
         isExtra: true,
