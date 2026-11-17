@@ -15,6 +15,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { format } from "date-fns";
+import { formatInBranchTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -462,8 +463,8 @@ export default function OrderMaster() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Chemotherapy Orders",
-        subtitle: `${rowsForExport.length} order${rowsForExport.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `chemotherapy-orders-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${rowsForExport.length} order${rowsForExport.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `chemotherapy-orders-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Date", cell: (r: any) => fmtDate(r.date) },
           { header: "Patient ID", cell: (r: any) => r.patient_id },
@@ -506,7 +507,7 @@ export default function OrderMaster() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `chemotherapy-orders-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      a.download = `chemotherapy-orders-${getTodayInActiveTimezone()}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();

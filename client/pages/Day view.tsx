@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Loader2, ChevronDown, ChevronLeft, ChevronRight, Search, Check } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { getTodayInActiveTimezone, getNowMinutesInActiveTimezone, dayKeyOf, formatInBranchTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
@@ -251,7 +252,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       setAppointmentsFailed(false);
 
       try {
-        const date = format(selectedDate, "yyyy-MM-dd");
+        const date = dayKeyOf(selectedDate);
         const firstPage = await appointmentApi.getAll({ date, page: 1, limit: 100 });
         const firstData = firstPage.data?.data;
         const remainingPages = Array.from(
@@ -513,8 +514,8 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // an active doctor_schedule row for the selected date's day of week get a
   // column at all. e.g. selecting a Monday only shows doctors who actually
   // work Mondays, instead of every doctor with an all-empty column.
-  const selectedDayOfWeek = format(selectedDate, "EEEE").toUpperCase();
-  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+  const selectedDayOfWeek = formatInBranchTimezone(selectedDate, "EEEE").toUpperCase();
+  const selectedDateStr = dayKeyOf(selectedDate);
 
   // Real per-doctor slots for the selected day, fetched from
   // GET /appointments/available-slots with includePast=true so the FULL
@@ -538,7 +539,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     let cancelled = false;
 
     const fetchRealSlots = async () => {
-      const dateStr = format(selectedDate, "yyyy-MM-dd");
+      const dateStr = dayKeyOf(selectedDate);
 
       const entries = await Promise.all(
         doctorColumns.map(async (doc) => {
@@ -782,10 +783,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         const matchedRange = ranges.find((r) => rowMinutes >= r.start && rowMinutes < r.end);
         if (!matchedRange) continue;
 
-        const todayStr = format(new Date(), "yyyy-MM-dd");
+        // "Today"/"now" judged in the ACTIVE BRANCH timezone, never the
+        // viewer's laptop clock.
+        const todayStr = getTodayInActiveTimezone();
         const isToday = selectedDateStr === todayStr;
-        const now = new Date();
-        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const nowMinutes = getNowMinutesInActiveTimezone();
         const isPastToday = isToday && rowMinutes <= nowMinutes;
 
         if (!isPastToday) {
@@ -859,13 +861,13 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     }
   };
 
-  const dateLabel = isToday(selectedDate)
+  const dateLabel = isTodayInActiveTimezone(selectedDate)
     ? "Today"
-    : isYesterday(selectedDate)
+    : isYesterdayInActiveTimezone(selectedDate)
       ? "Yesterday"
-      : isTomorrow(selectedDate)
+      : isTomorrowInActiveTimezone(selectedDate)
         ? "Tomorrow"
-        : format(selectedDate, "dd/MM/yyyy");
+        : formatInBranchTimezone(selectedDate, "dd/MM/yyyy");
 
   const totalAppointments = dayAppointments.length;
 
@@ -873,7 +875,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const handleExport = async (exportFormat: string) => {
     if (exportFormat !== "csv") return;
     try {
-      const day = format(selectedDate, "yyyy-MM-dd");
+      const day = dayKeyOf(selectedDate);
       await downloadExportCsv("appointments", { from: day, to: day });
       toast({ title: "Export complete", description: "The CSV file has been downloaded." });
     } catch (err: any) {
@@ -1098,7 +1100,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                           className="sticky left-0 z-10 flex items-center justify-center border-r border-[#E2E8F0] bg-white px-2 py-3"
                         >
                           <span className="whitespace-nowrap text-center text-[11px] font-bold text-clinical-label">
-                            {format(selectedDate, "dd-MM-yyyy")}
+                            {formatInBranchTimezone(selectedDate, "dd-MM-yyyy")}
                           </span>
                         </div>
 

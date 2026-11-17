@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { getActiveTimezone } from "@/utils/timezone";
+import { getActiveTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getActiveBranchId } from "../../api/axios";
 import {
@@ -264,10 +264,9 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
 }
 
 function isBeforeToday(dateStr: string): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const apptDate = new Date(dateStr);
-  return apptDate < today;
+  // "Before today" = earlier than TODAY IN THE BRANCH'S timezone, never the
+  // viewer's laptop calendar.
+  return String(dateStr).slice(0, 10) < getTodayInActiveTimezone();
 }
 
 function timeAgo(iso: string): string {

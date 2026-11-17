@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import type { PatientDetail } from "@/types/patient";
 import type { ErrorState } from "@/types/patient";
 
@@ -34,7 +34,7 @@ export function safeFormatDate(
   try {
     const parsedDate = new Date(date);
     if (isNaN(parsedDate.getTime())) return "—";
-    return format(parsedDate, formatStr);
+    return formatInBranchTimezone(parsedDate, formatStr);
   } catch {
     return "—";
   }

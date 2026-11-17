@@ -147,7 +147,7 @@ const emptyFormData: AppointmentFormData = {
   branchId: "",
   departmentId: "",
   doctorId: "",
-  selectDate: format(new Date(), "yyyy-MM-dd"),
+  selectDate: getTodayInActiveTimezone(),
   timeSlot: "",
   patientComment: "",
   customVisitType: "",
@@ -248,6 +248,8 @@ function timeStringToMinutes(time: string): number {
 // Both fall back to Asia/Kolkata when no branch is selected.
 import {
   getActiveTimezone,
+  dayKeyOf,
+  formatInBranchTimezone,
   getNowInActiveTimezone,
   getNowMinutesInActiveTimezone,
   getTodayInActiveTimezone,
@@ -459,7 +461,7 @@ export default function AddAppointment() {
         }
 
         const patient = record.patient_bio_data;
-        const date = record.appointment_date ? format(new Date(record.appointment_date), "yyyy-MM-dd") : "";
+        const date = record.appointment_date ? dayKeyOf(new Date(record.appointment_date)) : "";
         // Use UTC time to match the backend storage format (UTC-based)
         const time = record.appointment_time ? toTimeInputValue(record.appointment_time) : "";
 
@@ -544,8 +546,8 @@ export default function AddAppointment() {
       departmentId: admissionEdit.department_id || "",
       doctorId: admissionEdit.employee_id || "",
       selectDate: admissionEdit.admission_date
-        ? format(new Date(admissionEdit.admission_date), "yyyy-MM-dd")
-        : format(new Date(), "yyyy-MM-dd"),
+        ? formatInBranchTimezone(new Date(admissionEdit.admission_date), "yyyy-MM-dd")
+        : getTodayInActiveTimezone(),
       timeSlot: "",
       patientType: "Inpatient (IPD)",
       patientVisitType: admissionTypeToVisitType(admissionEdit.admission_type),
@@ -1680,8 +1682,10 @@ const isDirty = Boolean(
 
   // Appointment Date is bookable from today up to 365 days in advance (1 year) --
   // no past dates.
-  const minSelectableDate = format(new Date(), "yyyy-MM-dd");
-  const maxSelectableDate = format(addDays(new Date(), 365), "yyyy-MM-dd");
+  // "Today" (min selectable) follows the ACTIVE BRANCH timezone, not the
+  // viewer's laptop date.
+  const minSelectableDate = getTodayInActiveTimezone();
+  const maxSelectableDate = formatInBranchTimezone(addDays(new Date(), 365), "yyyy-MM-dd");
 
   // Weekdays (MONDAY..SUNDAY) the selected doctor actually works at the
   // selected branch, derived from their active schedules. null = no doctor or
@@ -1729,13 +1733,13 @@ const isDirty = Boolean(
     // CANCELLED date is always off, while an ADD/OVERRIDE date is always
     // selectable -- the slots API serves real bookable slots for it even
     // when the weekday has no recurring template row.
-    const info = changeInfoByDate.get(format(date, "yyyy-MM-dd"));
+    const info = changeInfoByDate.get(dayKeyOf(date));
     if (info?.cancelled) return true;
     if (info?.extra) return false;
 
     if (!workingWeekdays) return false;
     if (workingWeekdays.size === 0) return true;
-    return !workingWeekdays.has(format(date, "EEEE").toUpperCase());
+    return !workingWeekdays.has(formatInBranchTimezone(date, "EEEE").toUpperCase());
   };
 
   // The slots API can return the same time more than once (e.g. overlapping
@@ -2081,7 +2085,7 @@ const branchField = (
           onClick={() => setIsCalendarOpen(false)}
           className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-2.5 text-left cursor-default bg-white text-sm text-gray-900"
         >
-          <span>{format(parseISO(formData.selectDate), "dd-MM-yyyy")}</span>
+          <span>{formatInBranchTimezone(parseISO(formData.selectDate), "dd-MM-yyyy")}</span>
         </button>
 
         {/* Calendar icon - the ONLY trigger */}
@@ -2108,7 +2112,7 @@ const branchField = (
                 if (date instanceof Date) {
                   setFormData((prev) => ({
                     ...prev,
-                    selectDate: format(date, "yyyy-MM-dd"),
+                    selectDate: dayKeyOf(date),
                     timeSlot: "",
                   }));
                   setIsCalendarOpen(false);
@@ -2141,7 +2145,7 @@ const branchField = (
   const ipdDoctorCards = (
     <div className="sm:col-span-2 lg:col-span-3">
       <label className={labelClass}>
-        Doctors Available on {format(parseISO(formData.selectDate), "dd-MM-yyyy")}
+        Doctors Available on {formatInBranchTimezone(parseISO(formData.selectDate), "dd-MM-yyyy")}
       </label>
 
       {!formData.branchId ? (
@@ -2234,7 +2238,7 @@ const branchField = (
               return (
                 <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                   <span className="font-semibold">{selectedDoctorName || "The selected doctor"}</span>{" "}
-                  is not available on {format(parseISO(formData.selectDate), "dd-MM-yyyy")} (on leave
+                  is not available on {formatInBranchTimezone(parseISO(formData.selectDate), "dd-MM-yyyy")} (on leave
                   or not scheduled at this branch). You can still confirm, or pick one of the
                   available doctors above.
                 </p>
@@ -3155,7 +3159,7 @@ onClick={() => setAddWardOpen(true)}
               <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Date</span>
                 <span className="text-right font-semibold text-gray-900">
-                  {format(parseISO(bookingResult.appointment_date), "EEE, MMM d, yyyy")}
+                  {formatInBranchTimezone(parseISO(bookingResult.appointment_date), "EEE, MMM d, yyyy")}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-6 py-1">
@@ -3223,7 +3227,7 @@ onClick={() => setAddWardOpen(true)}
                   {ipdResult.status === "ADMITTED" ? "Admitted At" : ipdResult.is_daycare ? "Session" : "Requested Date"}
                 </span>
                 <span className="text-right font-semibold text-gray-900">
-                  {format(
+                  {formatInBranchTimezone(
                     parseISO(ipdResult.admission_date),
                     ipdResult.status === "ADMITTED" || ipdResult.is_daycare ? "EEE, MMM d, yyyy, hh:mm a" : "EEE, MMM d, yyyy",
                   )}

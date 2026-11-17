@@ -11,6 +11,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
@@ -147,10 +148,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     }
   };
 
-  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+  // Anchor the week to the selected date's CALENDAR DAY in the active branch
+  // timezone (a Date picker value keeps the day as picked; "now" resolves to
+  // the BRANCH's day) - never the viewer's laptop clock.
+  const [anchorY, anchorM, anchorD] = dayKeyOf(selectedDate).split("-").map(Number);
+  const weekAnchor = new Date(anchorY, anchorM - 1, anchorD);
+  const weekStart = startOfWeek(weekAnchor, { weekStartsOn: 1 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const weekDateFrom = format(weekStart, "yyyy-MM-dd");
-  const weekDateTo = format(addDays(weekStart, 6), "yyyy-MM-dd");
+  const weekDateFrom = dayKeyOf(weekStart);
+  const weekDateTo = dayKeyOf(addDays(weekStart, 6));
 
   // Real appointments for the selected week, fetched from GET /appointments
   // -- the doctor rows and per-day patient counts below are both derived
@@ -323,7 +329,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       const branchMap = Object.fromEntries(branchEntries);
       setDoctorBranchIds(branchMap);
 
-      const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
+      const dayKeys = weekDays.map((d) => dayKeyOf(d));
 
       // Chunk the requests (5 at a time) so a large doctor roster doesn't
       // fire hundreds of parallel calls at the backend at once.
@@ -387,7 +393,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   }, [allDoctors, weekAppointments, selectedDate]);
 
   useEffect(() => {
-    const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
+    const dayKeys = weekDays.map((d) => dayKeyOf(d));
 
     const byId = new Map<string, { employeeId: string; name: string; department: string }>();
     allDoctors.forEach((doc) => byId.set(doc.employeeId, doc));
@@ -441,9 +447,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     setDoctors(derivedDoctors);
   }, [weekAppointments, allDoctors, selectedDate, availableByDoctorDay]);
 
-  const dateLabel = isSameWeek(selectedDate, new Date(), { weekStartsOn: 1 })
+  const todayIsoWeek = getTodayInActiveTimezone();
+  const dateLabel = todayIsoWeek >= weekDateFrom && todayIsoWeek <= weekDateTo
     ? "This Week"
-    : `${format(weekStart, "dd MMM")} - ${format(addDays(weekStart, 6), "dd MMM")}`;
+    : `${formatInBranchTimezone(weekStart, "dd MMM")} - ${formatInBranchTimezone(addDays(weekStart, 6), "dd MMM")}`;
 
   // Doctor filter options, built from the real (deduped) doctor rows -- lets
   // the toolbar Filter popover pick any number of specific doctors.
@@ -705,7 +712,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                               key={day.toISOString()}
                               className="w-[130px] border-r border-[#E2E8F0] last:border-r-0 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wide text-clinical-label"
                             >
-                              {format(day, "EEE d")}
+                              {formatInBranchTimezone(day, "EEE d")}
                             </th>
                           ))}
 

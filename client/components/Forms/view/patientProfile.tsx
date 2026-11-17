@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getActiveTimezone } from "@/utils/timezone";
+import { getActiveTimezone, formatInBranchTimezone } from "@/utils/timezone";
 import {
   UserRound,
   Droplet,
@@ -73,7 +73,7 @@ function mapAppointment(a: AppointmentRecord) {
   if (a.appointment_date) {
     const d = new Date(a.appointment_date);
     if (!isNaN(d.getTime())) {
-      date = format(d, "dd MMM yyyy");
+      date = formatInBranchTimezone(d, "dd MMM yyyy");
     }
   }
 

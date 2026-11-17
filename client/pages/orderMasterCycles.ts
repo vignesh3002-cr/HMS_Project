@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 import type { ChemoPlan } from "@/api/chemotherapy.api";
-import { getActiveTimezone, getTimezoneOffsetMs } from "@/utils/timezone";
+import { getActiveTimezone, getTimezoneOffsetMs, formatInBranchTimezone } from "@/utils/timezone";
 
 /*
  * Pure helpers behind the Chemotherapy Orders table (OrderMaster.tsx).
@@ -151,7 +151,7 @@ export function fmtDate(d: string | null | undefined): string {
     parsed.getUTCMinutes() === 0 &&
     parsed.getUTCSeconds() === 0 &&
     parsed.getUTCMilliseconds() === 0;
-  if (!isDateOnly) return format(parsed, "MMM d, yyyy");
+  if (!isDateOnly) return formatInBranchTimezone(parsed, "MMM d, yyyy");
   return `${MONTHS_SHORT[parsed.getUTCMonth()]} ${parsed.getUTCDate()}, ${parsed.getUTCFullYear()}`;
 }
 

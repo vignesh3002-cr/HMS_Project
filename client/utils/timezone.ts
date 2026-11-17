@@ -10,6 +10,8 @@
 // A missing/invalid value falls back to Asia/Kolkata, matching the DB default.
 // ---------------------------------------------------------------------------
 
+import { format } from "date-fns";
+
 export const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
 let activeTimezone: string = DEFAULT_TIMEZONE;
@@ -254,4 +256,84 @@ export function formatInActiveTimezone(
     ...options,
     timeZone: isDateOnly ? "UTC" : activeTimezone,
   });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** True for a value anchored exactly at UTC midnight (a stored @db.Date). */
+function isUtcMidnightAnchor(value: Date): boolean {
+  return value.getTime() % DAY_MS === 0;
+}
+
+/** True for a date-only value picked at local midnight (calendar pickers). */
+function isLocalMidnightAnchor(value: Date): boolean {
+  return (
+    value.getHours() === 0 &&
+    value.getMinutes() === 0 &&
+    value.getSeconds() === 0 &&
+    value.getMilliseconds() === 0
+  );
+}
+
+/**
+ * date-fns `format` rendered in the ACTIVE BRANCH timezone, not the viewer's
+ * laptop zone.
+ *
+ * - date-only values keep their calendar day exactly as stored (UTC-midnight
+ *   anchor) or as picked (local-midnight picker value) - never shifted;
+ * - real instants (recorded_at, now, created_at ...) are converted to the
+ *   branch's wall clock first, then formatted, so date-fns' local getters
+ *   read the HOSPITAL's time.
+ *
+ * Delegates to date-fns for invalid input so it throws exactly as before.
+ */
+export function formatInBranchTimezone(value: Date, pattern: string): string {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    // Let date-fns produce its usual Invalid Date error.
+    return format(value as Date, pattern);
+  }
+  const tz = isUtcMidnightAnchor(value)
+    ? "UTC"
+    : isLocalMidnightAnchor(value)
+      ? null // picked day: the local getters already hold it
+      : activeTimezone;
+  if (tz === null) return format(value, pattern);
+  const p = zonedParts(tz, value);
+  return format(new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second), pattern);
+}
+
+/** Shift a "YYYY-MM-DD" calendar string by whole days (pure date math). */
+function shiftDayIso(iso: string, days: number): string {
+  return new Date(Date.parse(`${iso}T00:00:00.000Z`) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Calendar day of any value for display and day-keys: date-only values keep
+ * the day as stored (UTC) or as picked (local); real instants resolve in the
+ * active branch zone.
+ */
+export function dayKeyOf(value: Date): string {
+  if (isUtcMidnightAnchor(value)) {
+    return `${value.getUTCFullYear()}-${pad2(value.getUTCMonth() + 1)}-${pad2(value.getUTCDate())}`;
+  }
+  if (isLocalMidnightAnchor(value)) {
+    return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+  }
+  return getDateIn(activeTimezone, value);
+}
+
+/**
+ * Branch-zone replacements for date-fns isToday/isYesterday/isTomorrow,
+ * which otherwise compare in the viewer's laptop timezone.
+ */
+export function isTodayInActiveTimezone(value: Date): boolean {
+  return dayKeyOf(value) === getTodayInActiveTimezone();
+}
+
+export function isYesterdayInActiveTimezone(value: Date): boolean {
+  return dayKeyOf(value) === shiftDayIso(getTodayInActiveTimezone(), -1);
+}
+
+export function isTomorrowInActiveTimezone(value: Date): boolean {
+  return dayKeyOf(value) === shiftDayIso(getTodayInActiveTimezone(), 1);
 }
