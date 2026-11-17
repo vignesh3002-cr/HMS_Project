@@ -80,6 +80,66 @@ export type FormData = {
   valueEdits: Record<string, string>;
 };
 
+/* A prognostic score variable (one measurable item a score is built from). */
+export type ScoreVariable = {
+  score_variable_id: string;
+  score_id: string;
+  variable_name: string;
+  criterion: string | null;
+  points: string | null;
+  source: string;
+  auto_filled: boolean;
+  source_field: string | null;
+  display_order: number;
+  /* Runtime selections */
+  selected_criterion?: string | null;
+  selected_points?: number | null;
+  source_value?: string | null;   // auto-filled or clinician-entered value
+  resolved_meaning?: string | null; // meaning for the selected criterion (from groups)
+};
+
+/* A prognostic score risk group (total-points band -> meaning). */
+export type ScoreGroup = {
+  score_group_id: string;
+  score_id: string;
+  group_range: string;
+  meaning: string | null;
+  sort_order: number;
+};
+
+/* Full catalogue detail for a score (purpose, method, risk groups, ...). */
+export type ScoreCatalogueDetail = {
+  score_id: string;
+  score_name: string | null;
+  cancer_type_id: string | null;
+  applies_to: string | null;
+  purpose: string | null;
+  when_to_record: string | null;
+  method: string | null;
+  range: string | null;
+  risk_groups: string | null;
+  status: string | null;
+  reference: string | null;
+  developer_note: string | null;
+  variables: number;
+  auto_filled: number;
+  auto_fill_percent: string | null;
+  variables_list: ScoreVariable[];
+  groups: ScoreGroup[];
+};
+
+/* One selected score with its variables, groups and computed result. */
+export type ScoreSelection = {
+  score_id: string;
+  score_system: string;
+  score_value: string;
+  catalogue?: ScoreCatalogueDetail | null;
+  variables: ScoreVariable[];
+  groups: ScoreGroup[];
+  total_points: number | null;
+  risk_group: string | null;
+};
+
 /* Row shape returned by
    GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines */
 export type DischargeMedicineRecord = {
@@ -94,6 +154,8 @@ export type DischargeMedicineRecord = {
   frequency?: string | null;
   composition?: string | null;
   duration?: string | null;
+  /* The duration's unit code (D / Wk / Mo), stored separately. */
+  duration_days?: string | null;
   patient_dose?: number | string | null;
   patient_dose_unit?: string | null;
   administration_detail?: string | null;

@@ -124,6 +124,7 @@ export const getDurationUnitCode = (unit?: string | null): string => {
   if (u === "d" || u === "day" || u === "days" || u === "day's") return "D";
   if (u === "wk" || u === "wks" || u === "week" || u === "weeks" || u === "week's") return "Wk";
   if (u === "mo" || u === "mos" || u === "month" || u === "months" || u === "month's") return "Mo";
+  if (u === "yr" || u === "yrs" || u === "year" || u === "years" || u === "year's") return "Yr";
   return unit;
 };
 
@@ -137,6 +138,7 @@ export const getDurationUnitOptions = (
     { value: "D", label: isSingular ? "Day" : "Days" },
     { value: "Wk", label: isSingular ? "Week" : "Weeks" },
     { value: "Mo", label: isSingular ? "Month" : "Months" },
+    { value: "Yr", label: isSingular ? "Year" : "Years" },
   ];
   const unit = currentUnit?.trim();
   if (unit) {
@@ -184,18 +186,19 @@ export function stripOthersOpts<T extends { label: string; value: string }>(
 export const PROTOCOL_OTHERS_INPUT_CLS =
   "w-full h-9 pl-3 pr-8 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13.5px] text-[#17212e] placeholder:text-[#a7b2bf] outline-none transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f5f8fb] focus:border-[#12335c] focus:bg-white focus:ring-3 focus:ring-[#12335c]/15 disabled:bg-[#f1f3f5] disabled:text-[#9aa5b1] disabled:cursor-not-allowed";
 
+export const PROTOCOL_DURATION_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
+
+export const CLEAN_DOSE_UNITS = ["mg", "g", "mcg", "u", "kg", "mg/m²", "mg/kg"];
+export const CLEAN_VOLUME_UNITS = ["mL", "L", "CC"];
+export const CLEAN_DISCHARGE_UNITS = ["mg", "g", "mcg", "Tab", "Cap", "mL", "Puff", "Drops", "Patch"];
+
 export const DOSE_CALC_OPTIONS = [
   "BSA (mg/m²)",
   "Weight (mg/kg)",
-  "AUC (Calvert)",
-  "Fixed Dose",
-  "BSA",
-  "IBW",
-  "BMI",
-  "AUC 1.5",
-  "AUC 2",
-  "AUC 5",
-  "KG",
+  "AUC (Calvert Formula)",
+  "Fixed Dose (mg)",
+  "IBW (mg/kg)",
+  "BMI (mg/kg)",
 ];
 
 export const COMMON_PROTOCOL_DOSES = [

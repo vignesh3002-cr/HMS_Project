@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday } from "date-fns";
 import {
+  ArrowDownUp,
   CalendarPlus,
   List,
   LayoutGrid,
@@ -25,6 +26,7 @@ import { employeeApi } from "../../api/employee.api";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { SandwichQueueModal } from "@/components/hms/SandwichQueueModal";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
@@ -57,7 +59,6 @@ type AppointmentStatus =
   | "Reschedule"
   | "In Consultation"
   | "No Show"
-  | "Transfer Review"
   | "Reschedule Required";
 
 interface Patient {
@@ -65,6 +66,7 @@ interface Patient {
   patientId: string;
   name: string;
   patientCode: string;
+  tokenNumber?: number | null;
   age?: number;
   gender?: string;
   phone?: string;
@@ -85,7 +87,6 @@ const STATUS_TO_DISPLAY: Record<string, AppointmentStatus> = {
   COMPLETED: "Checked Out",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
-  TRANSFER_REVIEW_REQUIRED: "Transfer Review",
   RESCHEDULE_REQUIRED: "Reschedule Required",
 };
 
@@ -104,7 +105,7 @@ function buildPatientName(bio?: AppointmentRecord["patient_bio_data"]): string {
   return parts.join(" ") || "Unknown Patient";
 }
 
-function formatAppointmentTime(time?: string | null): string {
+function formatAppointmentTime(time?: string | null, durationMinutes?: number | null): string {
   if (!time) return "";
   let hours: number;
   let minutes: number;
@@ -119,9 +120,31 @@ function formatAppointmentTime(time?: string | null): string {
     minutes = Number(m ?? "0");
     if (isNaN(hours)) return time;
   }
-  const period = hours < 12 ? "AM" : "PM";
-  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
-  return `${String(hour12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
+  const startMin = hours * 60 + minutes;
+  const dur = durationMinutes && durationMinutes > 0 ? durationMinutes : 10;
+  const endMin = startMin + dur;
+
+  const startH = Math.floor(startMin / 60) % 24;
+  const startM = startMin % 60;
+  const startAmpm = startH >= 12 ? "PM" : "AM";
+  const startH12 = startH % 12 || 12;
+  const startTimeStr = `${String(startH12).padStart(2, "0")}:${String(startM).padStart(2, "0")} ${startAmpm}`;
+
+  const endH = Math.floor(endMin / 60) % 24;
+  const endM = endMin % 60;
+  const endAmpm = endH >= 12 ? "PM" : "AM";
+  const endH12 = endH % 12 || 12;
+  const endTimeStr = `${String(endH12).padStart(2, "0")}:${String(endM).padStart(2, "0")} ${endAmpm}`;
+
+  const blockStartH = Math.floor(startMin / 60);
+  const blockEndH = blockStartH + 1;
+  const blockStartAmpm = blockStartH >= 12 ? "PM" : "AM";
+  const blockEndAmpm = blockEndH >= 12 ? "PM" : "AM";
+  const bStart12 = blockStartH % 12 || 12;
+  const bEnd12 = blockEndH % 12 || 12;
+  const windowStr = `${String(bStart12).padStart(2, "0")}:00 ${blockStartAmpm} – ${String(bEnd12).padStart(2, "0")}:00 ${blockEndAmpm}`;
+
+  return `${startTimeStr} – ${endTimeStr} (${windowStr})`;
 }
 
 function computeAge(dob?: string | null): number | undefined {
@@ -184,10 +207,11 @@ function toPatient(a: AppointmentRecord): Patient {
     id: a.appointment_id,
     patientId: a.patient_id,
     name: buildPatientName(bio),
-    patientCode: bio?.patient_id ?? `Token ${a.token_number ?? ""}`.trim(),
+    patientCode: bio?.patient_id ?? "—",
+    tokenNumber: a.token_number,
     gender,
     phone: bio?.patient_primary_mobile ?? "—",
-    appointmentDate: formatAppointmentTime(a.appointment_time) || dateFallback,
+    appointmentDate: formatAppointmentTime(a.appointment_time, a.duration_minutes) || dateFallback,
     appointmentDateRaw: a.appointment_date
       ? a.appointment_date.slice(0, 10)
       : "",
@@ -223,7 +247,6 @@ const STATUS_STYLES: Record<AppointmentStatus, string> = {
   Reschedule: "bg-purple-50 text-purple-600",
   "In Consultation": "bg-cyan-50 text-cyan-600",
   "No Show": "bg-gray-50 text-gray-500",
-  "Transfer Review": "bg-indigo-50 text-indigo-600",
   "Reschedule Required": "bg-purple-50 text-purple-600",
 };
 
@@ -481,6 +504,7 @@ function AppointmentToolbar({
 }
 
 const COLUMNS: { key: string; label: string }[] = [
+  { key: "token", label: "Token #" },
   { key: "name", label: "Name" },
   { key: "age", label: "Age/Gender" },
   { key: "phone", label: "Mobile" },
@@ -532,6 +556,7 @@ interface PatientActionProps {
   onCancelRequest: (patient: Patient) => void;
   onReschedule: (patient: Patient) => void;
   onBookFollowUp: (patient: Patient) => void;
+  onSandwich?: (patient: Patient) => void;
 }
 
 function AppointmentRowMenu({
@@ -539,11 +564,12 @@ function AppointmentRowMenu({
   onReschedule,
   onBookFollowUp,
   onCancelRequest,
+  onSandwich,
 }: {
   patient: Patient;
 } & Pick<
   PatientActionProps,
-  "onReschedule" | "onBookFollowUp" | "onCancelRequest"
+  "onReschedule" | "onBookFollowUp" | "onCancelRequest" | "onSandwich"
 >) {
   const canReschedule = !NON_EDITABLE_STATUSES.includes(
     patient.originalStatus,
@@ -595,18 +621,49 @@ function AppointmentRowMenu({
             </DropdownMenuItem>
           </>
         )}
+
+        {(patient.originalStatus === "NO_SHOW" ||
+          patient.originalStatus === "CANCELLED" ||
+          patient.originalStatus === "SCHEDULED" ||
+          patient.originalStatus === "RESCHEDULED") &&
+          onSandwich && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2 text-amber-700 focus:text-amber-700 focus:bg-amber-50"
+                onSelect={() => onSandwich(patient)}
+              >
+                <ArrowDownUp className="w-4 h-4 text-amber-600" />
+                Sandwich into Queue
+              </DropdownMenuItem>
+            </>
+          )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest }: PatientActionProps & { patient: Patient }) {
+function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest, onSandwich }: PatientActionProps & { patient: Patient }) {
   const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
   const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
   const canCancel = !NON_CANCELABLE_STATUSES.includes(patient.originalStatus);
   const isBusy = actionBusyId === patient.id;
 
   if (!canCheckIn && !canProceed && !canCancel) {
+    if (patient.originalStatus === "NO_SHOW" && onSandwich) {
+      return (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => onSandwich(patient)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors shadow-sm"
+          >
+            <ArrowDownUp className="w-3.5 h-3.5" />
+            Sandwich
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="flex items-center justify-end gap-3 text-gray-400">
         —
@@ -665,6 +722,7 @@ function PatientCard({
   onCancelRequest,
   onReschedule,
   onBookFollowUp,
+  onSandwich,
   getCriticalInfo,
 }: { patient: Patient; getCriticalInfo: (id: string) => import("@/components/hms/CriticalPatientIndicator").CriticalInfo } & PatientActionProps) {
   const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
@@ -684,7 +742,14 @@ function PatientCard({
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="hms-name-text truncate">{patient.name}</p>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {patient.tokenNumber != null && (
+            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F1FF] text-[#00488D] border border-[#B3D1FF] flex-shrink-0">
+              #{patient.tokenNumber}
+            </span>
+          )}
+          <p className="hms-name-text truncate">{patient.name}</p>
+        </div>
         <p className="hms-id-text flex items-center">{patient.patientCode}<CriticalDot reasons={crit.reasons} /></p>
         <p className="hms-content-text text-[#191C1E] mt-1">
           {patient.age !== undefined ? `${patient.age}/${patient.gender}` : patient.gender}
@@ -699,6 +764,7 @@ function PatientCard({
           onCancelRequest={onCancelRequest}
           onReschedule={onReschedule}
           onBookFollowUp={onBookFollowUp}
+          onSandwich={onSandwich}
         />
       </div>
 
@@ -755,7 +821,7 @@ export default function AppointmentPage() {
 
   // Column sorting (list view headers).
   const [sortField, setSortField] = useState("appointmentDate");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const handleSort = (key: string): void => {
     setPage(1);
@@ -1026,6 +1092,7 @@ export default function AppointmentPage() {
 
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Patient | null>(null);
+  const [sandwichTarget, setSandwichTarget] = useState<Patient | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   const handleCheckIn = async (patient: Patient): Promise<void> => {
@@ -1070,9 +1137,12 @@ export default function AppointmentPage() {
 
     try {
       setCancelling(true);
+      const currentUser = getUser();
+      const cancelledBy = currentUser?.employee_id || currentUser?.username || currentUser?.user_id || "doctor";
       await appointmentApi.cancel(
         cancelTarget.id,
         "Cancelled by doctor from appointments page",
+        cancelledBy,
       );
       setCancelTarget(null);
       toast({
@@ -1149,6 +1219,10 @@ export default function AppointmentPage() {
   const handleReschedule = (patient: Patient): void => {
     navigate(`/doctor/appointments/edit/${patient.id}`);
   };
+
+  const handleSandwichRequest = useCallback((patient: Patient): void => {
+    setSandwichTarget(patient);
+  }, []);
 
   /* =======================================================
      HEADER NOTIFICATIONS - Using global BellNotificationButton
@@ -1231,12 +1305,17 @@ export default function AppointmentPage() {
       const factor = sortDirection === "asc" ? 1 : -1;
       result = [...result].sort((a: any, b: any) => {
         switch (sortField) {
+          case "token":
+            return ((a.tokenNumber ?? 999999) - (b.tokenNumber ?? 999999)) * factor;
           case "age":
             return ((a.age ?? -1) - (b.age ?? -1)) * factor;
-          case "appointmentDate":
-            return `${a.appointmentDateRaw} ${a.appointmentTimeRaw}`.localeCompare(
+          case "appointmentDate": {
+            const cmp = `${a.appointmentDateRaw} ${a.appointmentTimeRaw}`.localeCompare(
               `${b.appointmentDateRaw} ${b.appointmentTimeRaw}`,
-            ) * factor;
+            );
+            if (cmp !== 0) return cmp * factor;
+            return ((a.tokenNumber ?? 999999) - (b.tokenNumber ?? 999999)) * factor;
+          }
           case "status":
             return a.originalStatus.localeCompare(b.originalStatus) * factor;
           default: {
@@ -1270,6 +1349,7 @@ export default function AppointmentPage() {
         subtitle: `${filtered.length} appointment${filtered.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
         filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
         columns: [
+          { header: "Token #", cell: (r: any) => (r.tokenNumber != null ? `#${r.tokenNumber}` : "—") },
           { header: "Patient Name", cell: (r: any) => r.name },
           { header: "Patient Code", cell: (r: any) => r.patientCode },
           { header: "Age/Gender", cell: (r: any) => r.age !== undefined ? `${r.age}/${r.gender}` : r.gender },
@@ -1290,6 +1370,22 @@ export default function AppointmentPage() {
 
   const hmsColumns = useMemo(
     () => [
+      {
+        key: "token",
+        label: "Token #",
+        sortable: true,
+        className: "w-24 whitespace-nowrap",
+        render: (r: any) => {
+          const tok = r.tokenNumber;
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 rounded-full text-xs font-bold bg-[#E8F1FF] text-[#00488D] border border-[#B3D1FF]">
+                {tok != null ? `#${tok}` : "—"}
+              </span>
+            </div>
+          );
+        },
+      },
       {
         key: "name",
         label: "Name",
@@ -1371,19 +1467,21 @@ export default function AppointmentPage() {
                 onCancelRequest={setCancelTarget}
                 onReschedule={handleReschedule}
                 onBookFollowUp={handleBookFollowUp}
+                onSandwich={handleSandwichRequest}
               />
               <AppointmentRowMenu
                 patient={patient}
                 onCancelRequest={setCancelTarget}
                 onReschedule={handleReschedule}
                 onBookFollowUp={handleBookFollowUp}
+                onSandwich={handleSandwichRequest}
               />
             </div>
           );
         },
       },
     ],
-    [actionBusyId, handleCheckIn, handleProceed, handleReschedule, handleBookFollowUp],
+    [actionBusyId, handleCheckIn, handleProceed, handleReschedule, handleBookFollowUp, handleSandwichRequest],
   );
 
   /* =======================================================
@@ -1640,6 +1738,38 @@ export default function AppointmentPage() {
         loading={cancelling}
         onConfirm={handleCancelAppointment}
         onCancel={() => setCancelTarget(null)}
+      />
+
+      <SandwichQueueModal
+        open={Boolean(sandwichTarget)}
+        onOpenChange={(open) => !open && setSandwichTarget(null)}
+        targetAppointment={
+          sandwichTarget
+            ? {
+                id: sandwichTarget.id,
+                patientName: sandwichTarget.name,
+                patientId: sandwichTarget.patientId,
+                tokenNumber: sandwichTarget.tokenNumber != null ? `Token #${sandwichTarget.tokenNumber}` : sandwichTarget.patientCode,
+                durationMinutes: 10,
+                status: sandwichTarget.originalStatus,
+                doctorName: doctorName || getUser()?.name || "",
+              }
+            : null
+        }
+        activeAppointments={patients
+          .filter((p) => p.appointmentDateRaw === sandwichTarget?.appointmentDateRaw)
+          .map((p) => ({
+            id: p.id,
+            patientName: p.name,
+            tokenNumber: p.tokenNumber != null ? `Token #${p.tokenNumber}` : p.patientCode,
+            startTime: p.appointmentTimeRaw,
+            durationMinutes: 10,
+            status: p.originalStatus,
+          }))}
+        onSuccess={() => {
+          setSandwichTarget(null);
+          fetchAppointments();
+        }}
       />
     </div>
   );

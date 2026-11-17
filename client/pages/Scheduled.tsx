@@ -10,7 +10,7 @@ import {
   GraduationCap, Hospital, Clock, Calendar,
   Plus, Sun, Calendar as CalendarIcon,
   UserCircle, Quote, Ban, Coffee, Send, ClipboardList,
-  CalendarX,
+  CalendarX, AlertTriangle,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -40,6 +40,7 @@ import { doctorScheduleApi,
 import {
   doctorTransferApi,
   type TransferAppointmentSummary,
+  type InitiateTransferResult,
 } from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
 import type { DoctorLeaveRecord } from "@/api/doctorLeave.api";
@@ -218,7 +219,11 @@ export default function DoctorProfile() {
     transferId: string;
     appointments: TransferAppointmentSummary[];
     message: string;
+    old_branch_id?: string;
   } | null>(null);
+  const [activePendingTransfer, setActivePendingTransfer] = useState<(InitiateTransferResult & { old_branch_id?: string; new_branch_id?: string; branch_name?: string; effective_date?: string }) | null>(null);
+  const [discardingTransfer, setDiscardingTransfer] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [openDoctors, setOpenDoctors] = useState<EmployeeRecord[]>([]);
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(() => {
@@ -526,6 +531,43 @@ export default function DoctorProfile() {
       .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
   };
 
+  const loadPendingTransfer = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await doctorTransferApi.getPendingTransfer(id);
+      const data = res.data?.data;
+      if (data && data.status === "PENDING_CONFIRMATION") {
+        setActivePendingTransfer(data);
+      } else {
+        setActivePendingTransfer(null);
+      }
+    } catch (err) {
+      console.warn("[Scheduled] Could not check pending transfer:", err);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadPendingTransfer();
+  }, [loadPendingTransfer]);
+
+  const handleDiscardPending = async () => {
+    if (!id || !activePendingTransfer) return;
+    setDiscardingTransfer(true);
+    try {
+      await doctorTransferApi.discardTransfer(id, activePendingTransfer.transfer_id, "Discarded by admin from Schedule page");
+      setActivePendingTransfer(null);
+      setPendingTransfer(null);
+      setDiscardConfirmOpen(false);
+      await refetchDoctor();
+      await refetchWeekChanges();
+      showAlert("Pending transfer discarded. Schedule is now unblocked.");
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || err?.message || "Failed to discard transfer", "destructive");
+    } finally {
+      setDiscardingTransfer(false);
+    }
+  };
+
   const handleDateChange = async ({
     day,
     date,
@@ -661,7 +703,9 @@ export default function DoctorProfile() {
           transferId: data.transfer_id,
           appointments: data.appointments ?? [],
           message: data.message ?? "",
+          old_branch_id: data.old_branch_id,
         });
+        setActivePendingTransfer(data);
         return true;
       }
 
@@ -829,7 +873,9 @@ export default function DoctorProfile() {
             transferId: data.transfer_id,
             appointments: data.appointments ?? [],
             message: data.message ?? "",
+            old_branch_id: data.old_branch_id,
           });
+          setActivePendingTransfer(data);
           return;
         }
 
@@ -879,8 +925,10 @@ export default function DoctorProfile() {
 
   const handleTransferCompleted = async () => {
     setPendingTransfer(null);
+    setActivePendingTransfer(null);
     await refetchDoctor();
     await refetchWeekChanges();
+    await loadPendingTransfer();
     showAlert("Transfer action completed.");
   };
 
@@ -1224,6 +1272,50 @@ export default function DoctorProfile() {
             </button>
           ))}
         </div>
+
+        {/* ─── Active Pending Transfer Alert Banner ─── */}
+        {activePendingTransfer && (
+          <div className="mb-6 bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold text-amber-900">
+                  Active Pending Transfer Awaiting Confirmation
+                </h3>
+                <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                  Transfer ID: <span className="font-mono font-semibold">{activePendingTransfer.transfer_id}</span>
+                  {activePendingTransfer.effective_date && ` · Effective: ${activePendingTransfer.effective_date}`}
+                  {activePendingTransfer.affected_appointment_count !== undefined && ` · ${activePendingTransfer.affected_appointment_count} affected booking(s)`}
+                  <br />
+                  This doctor has a pending transfer or schedule change awaiting confirmation. Review and resolve it or discard it to unblock schedule editing.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingTransfer({
+                    transferId: activePendingTransfer.transfer_id,
+                    appointments: activePendingTransfer.appointments ?? [],
+                    message: activePendingTransfer.message ?? "",
+                    old_branch_id: activePendingTransfer.old_branch_id,
+                  });
+                }}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition-colors"
+              >
+                Review & Complete
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiscardConfirmOpen(true)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Main Grid */}
         <div className="space-y-6">
@@ -1754,14 +1846,24 @@ export default function DoctorProfile() {
       <AffectedAppointmentsDialog
         open={pendingTransfer !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingTransfer(null);
+          if (!open) {
+            setPendingTransfer(null);
+            void loadPendingTransfer();
+          }
         }}
         employeeId={id ?? ""}
+        oldBranchId={pendingTransfer?.old_branch_id}
         branches={doctorDetail?.branches ?? []}
         doctors={openDoctors}
         transfers={
           pendingTransfer
-            ? [{ transfer_id: pendingTransfer.transferId, message: pendingTransfer.message }]
+            ? [
+                {
+                  transfer_id: pendingTransfer.transferId,
+                  message: pendingTransfer.message,
+                  old_branch_id: pendingTransfer.old_branch_id,
+                },
+              ]
             : []
         }
         appointments={pendingTransfer?.appointments ?? []}
@@ -1770,6 +1872,38 @@ export default function DoctorProfile() {
           void handleTransferCompleted();
         }}
       />
+
+      {/* DISCARD PENDING TRANSFER DIALOG */}
+      <AlertDialog
+        open={discardConfirmOpen}
+        onOpenChange={(open) => {
+          if (!discardingTransfer) setDiscardConfirmOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard Pending Transfer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to discard this pending transfer? This will cancel the transfer request and unblock this doctor for new schedule changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={discardingTransfer}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={discardingTransfer}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDiscardPending();
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {discardingTransfer ? "Discarding..." : "Discard Transfer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* LEAVE CONFIRM DIALOG */}
       <AlertDialog

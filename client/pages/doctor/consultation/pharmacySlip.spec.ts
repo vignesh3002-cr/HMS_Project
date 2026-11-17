@@ -7,8 +7,11 @@ import {
   createDraftRow,
   effectiveBaseQuantity,
   effectiveExtraQuantity,
+  formatFrequencyDuration,
+  formatSlipDuration,
   parseDoseText,
   pickDefaultStrength,
+  slipFrequencyDuration,
   suggestionFor,
   toDisplayRows,
   toSlipOrderItems,
@@ -459,5 +462,116 @@ describe("buildSlipSourceRows", () => {
 
   it("returns no rows when the order has not been saved", () => {
     expect(buildSlipSourceRows({ order: null, dischargeRows: [] })).toEqual([]);
+  });
+});
+
+describe("formatSlipDuration", () => {
+  it("appends the unit code to a bare duration", () => {
+    expect(formatSlipDuration("4", "D")).toBe("4 D");
+    expect(formatSlipDuration(30, "day")).toBe("30 D");
+    expect(formatSlipDuration("2", "Wk")).toBe("2 Wk");
+  });
+
+  it("never writes the unit twice", () => {
+    expect(formatSlipDuration("4 D", "D")).toBe("4 D");
+    expect(formatSlipDuration("4 D", "day")).toBe("4 D");
+    expect(formatSlipDuration("2 Wk", "Wk")).toBe("2 Wk");
+  });
+
+  it("keeps the value alone when no unit is known", () => {
+    expect(formatSlipDuration("4", null)).toBe("4");
+    expect(formatSlipDuration("4 D", "")).toBe("4 D");
+  });
+
+  it("is blank for an empty duration", () => {
+    expect(formatSlipDuration("", "D")).toBe("");
+    expect(formatSlipDuration(null, "D")).toBe("");
+    expect(formatSlipDuration(undefined, undefined)).toBe("");
+  });
+});
+
+describe("formatFrequencyDuration", () => {
+  it("joins frequency and duration with a slash", () => {
+    expect(formatFrequencyDuration("1-0-2", "4", "D")).toBe("1-0-2 / 4 D");
+  });
+
+  it("returns whichever side is present", () => {
+    expect(formatFrequencyDuration("1-0-2", "", "")).toBe("1-0-2");
+    expect(formatFrequencyDuration("", "4", "D")).toBe("4 D");
+  });
+
+  it("is blank when neither side is present", () => {
+    expect(formatFrequencyDuration("", "", "D")).toBe("");
+  });
+});
+
+describe("slipFrequencyDuration", () => {
+  it("fills the column for a discharge row", () => {
+    expect(slipFrequencyDuration("DISCHARGE", "1-0-2", "4", "D")).toBe(
+      "1-0-2 / 4 D"
+    );
+    expect(slipFrequencyDuration("discharge", "1-0-2", "4 D")).toBe(
+      "1-0-2 / 4 D"
+    );
+  });
+
+  it("leaves every other medicine type blank", () => {
+    expect(slipFrequencyDuration("PRIMARY", "1-0-2", "4", "D")).toBe("");
+    expect(slipFrequencyDuration("PREMEDICATION", "OD", "5", "D")).toBe("");
+    expect(slipFrequencyDuration("SUPPORTIVE", "BD", "", "")).toBe("");
+    expect(slipFrequencyDuration("", "OD", "5", "D")).toBe("");
+  });
+});
+
+describe("F/D on the printed rows", () => {
+  it("carries the discharge frequency/duration onto both display lines", () => {
+    const rows = toDisplayRows([
+      draft({
+        key: "DISCHARGE:1",
+        role: "DISCHARGE",
+        drugName: "Paracetamol",
+        drugForm: "Tablet",
+        patientDose: "150 mg",
+        patientDoseValue: 150,
+        patientDoseUnit: "mg",
+        selectedDose: "120",
+        frequency: "1-0-2",
+        duration: "4",
+        durationUnit: "D",
+        instructions: "After food",
+      }),
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].frequencyDuration).toBe("1-0-2 / 4 D");
+    expect(rows[1].frequencyDuration).toBe("1-0-2 / 4 D");
+    expect(rows[0].instructions).toBe("After food");
+  });
+
+  it("leaves F/D blank for a non-discharge row even when it has directions", () => {
+    const [row] = toDisplayRows([
+      draft({ frequency: "OD", duration: "3", durationUnit: "D" }),
+    ]);
+
+    expect(row.frequencyDuration).toBe("");
+  });
+
+  it("writes the composed duration (\"4 D\") into the order payload", () => {
+    const items = toSlipOrderItems([
+      draft({
+        key: "DISCHARGE:1",
+        role: "DISCHARGE",
+        selectedDose: "120",
+        frequency: "1-0-2",
+        duration: "4",
+        durationUnit: "D",
+      }),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      frequency: "1-0-2",
+      duration: "4 D",
+    });
+    expect(items[1]).toMatchObject({ duration: "4 D" });
   });
 });

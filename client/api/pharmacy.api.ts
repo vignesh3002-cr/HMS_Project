@@ -147,11 +147,17 @@ export interface UpdateSlipItemsPayload {
     pharmacy_slip_item_id?: string;
     medicine_id?: string | null;
     drug_name?: string | null;
+    dosage_form?: string | null;
+    patient_dose?: string | null;
     brand_name?: string | null;
     dose?: string | null;
     dose_unit?: string | null;
     quantity?: number | null;
     drug_role?: string | null;
+    route?: string | null;
+    frequency?: string | null;
+    duration?: string | null;
+    instructions?: string | null;
     pharmacy_item_id?: string | null;
   }[];
 }

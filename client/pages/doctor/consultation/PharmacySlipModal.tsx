@@ -28,9 +28,11 @@ import {
   formatNumber,
   parseDoseText,
   pickDefaultStrength,
+  slipFrequencyDuration,
   slipRoleLabel,
   suggestionFor,
   strengthsOfBrand,
+  toDisplayRows,
   toSlipOrderItems,
   type SlipDisplayRow,
   type SlipDraftRow,
@@ -54,6 +56,8 @@ export interface PharmacySlipModalProps {
   planId: string;
   cycleNumber: number;
   cycleDay: number;
+  /* Printed in the sheet header so the page is dispensable on its own. */
+  patientId?: string | null;
   encounterNo?: string | null;
   appointmentId?: string | null;
   /* Order + discharge medicines, already flattened and role-ordered. */
@@ -87,6 +91,7 @@ export function PharmacySlipModal({
   planId,
   cycleNumber,
   cycleDay,
+  patientId,
   encounterNo,
   appointmentId,
   sourceRows,
@@ -111,7 +116,16 @@ export function PharmacySlipModal({
     () =>
       sourceRows
         .map((row) =>
-          [row.key, row.medicineId, row.drugForm, row.patientDose].join("|")
+          [
+            row.key,
+            row.medicineId,
+            row.drugForm,
+            row.patientDose,
+            row.frequency,
+            row.duration,
+            row.durationUnit ?? "",
+            row.instructions,
+          ].join("|")
         )
         .join("~"),
     [sourceRows]
@@ -285,12 +299,33 @@ export function PharmacySlipModal({
   const warnings = useMemo(
     () =>
       rows
-        .map((row) =>
-          row.medicineId && row.brandOptions.length === 0
-            ? `No pharmacy brand found for ${row.drugName} (${row.drugForm || "no form"}). Enter its dosage manually.`
-            : suggestionFor(row).warning
-        )
-        .filter((warning): warning is string => Boolean(warning)),
+        .flatMap((row) => {
+          const rowWarnings: string[] = [];
+
+          if (row.medicineId && row.brandOptions.length === 0) {
+            rowWarnings.push(
+              `No pharmacy brand found for ${row.drugName} (${row.drugForm || "no form"}). Enter its dosage manually.`
+            );
+          }
+
+          const quantityWarning = suggestionFor(row).warning;
+          if (quantityWarning) rowWarnings.push(quantityWarning);
+
+          /* A discharge row with neither direction would print an empty F/D
+             cell, which looks like a slip error rather than a missing value. */
+          if (
+            row.role === "DISCHARGE" &&
+            !row.frequency.trim() &&
+            !row.duration.trim()
+          ) {
+            rowWarnings.push(
+              `No frequency / duration for ${row.drugName}. Add them in Discharge Medication so the pharmacist has directions.`
+            );
+          }
+
+          return rowWarnings;
+        })
+        .filter(Boolean),
     [rows]
   );
 
@@ -393,46 +428,7 @@ export function PharmacySlipModal({
   };
 
   const handlePrint = () => {
-    const printable: SlipDisplayRow[] = [];
-    let no = 0;
-
-    for (const { row, plan } of displayRows) {
-      const baseQuantity = effectiveBaseQuantity(row, plan);
-      printable.push({
-        key: `${row.key}:base`,
-        rowKey: row.key,
-        no: ++no,
-        drugName: row.drugName,
-        drugForm: row.drugForm,
-        patientDose: row.patientDose,
-        brand: row.brand,
-        dose: `${row.selectedDose}${row.selectedUnit ? ` ${row.selectedUnit}` : ""}`.trim(),
-        quantity: baseQuantity === null ? "" : String(baseQuantity),
-        type: slipRoleLabel(row.role),
-        role: row.role,
-        isExtra: false,
-      });
-
-      const extraQuantity = effectiveExtraQuantity(row, plan);
-      if (plan.extra && extraQuantity !== null) {
-        printable.push({
-          key: `${row.key}:extra`,
-          rowKey: row.key,
-          no: ++no,
-          drugName: row.drugName,
-          drugForm: row.drugForm,
-          patientDose: row.patientDose,
-          brand: row.brand,
-          dose: `${formatNumber(plan.extra.strength.value)}${
-            plan.extra.strength.unit ? ` ${plan.extra.strength.unit}` : ""
-          }`.trim(),
-          quantity: String(extraQuantity),
-          type: slipRoleLabel(row.role),
-          role: row.role,
-          isExtra: true,
-        });
-      }
-    }
+    const printable: SlipDisplayRow[] = toDisplayRows(rows);
 
     const printWindow = window.open("", "_blank", "width=1100,height=800");
     if (!printWindow) return;
@@ -442,12 +438,17 @@ export function PharmacySlipModal({
         (row) => `
           <tr>
             <td>${row.no}</td>
-            <td>${escapeHtml(row.drugName)}</td>
+            <td>${escapeHtml(row.drugName)}${
+              row.instructions
+                ? `<br /><span class="drug-note">${escapeHtml(row.instructions)}</span>`
+                : ""
+            }</td>
             <td>${escapeHtml(row.drugForm)}</td>
             <td>${escapeHtml(row.patientDose)}</td>
             <td>${escapeHtml(row.brand)}</td>
             <td>${escapeHtml(row.dose)}</td>
             <td>${escapeHtml(row.quantity)}</td>
+            <td>${escapeHtml(row.frequencyDuration)}</td>
             <td>${escapeHtml(row.type)}</td>
           </tr>`
       )
@@ -466,20 +467,29 @@ export function PharmacySlipModal({
     th { text-align: left; text-transform: uppercase; letter-spacing: .04em; background: #F2F4F6; }
     th, td { border: 1px solid #D8DEE6; padding: 6px 8px; }
     tr:nth-child(even) td { background: #FAFBFC; }
+    .drug-note { display: block; margin-top: 2px; font-size: 9px; color: #6B7280; }
     .foot { margin-top: 20px; font-size: 9px; color: #6B7280; display: flex; justify-content: space-between; }
   </style>
 </head>
 <body>
   <h1>Pharmacy Slip</h1>
-  <p>Cycle ${cycleNumber} / Day ${cycleDay}${dirty ? " &middot; draft (not saved)" : ""}</p>
+  <p>${
+    [
+      patientId ? `Patient ID: ${escapeHtml(String(patientId))}` : "",
+      encounterNo ? `Encounter: ${escapeHtml(String(encounterNo))}` : "",
+      `Cycle ${cycleNumber} / Day ${cycleDay}`,
+    ]
+      .filter(Boolean)
+      .join(" &middot; ")
+  }${dirty ? " &middot; draft (not saved)" : ""}</p>
   <table>
     <thead>
       <tr>
         <th>No.</th><th>Drug Name</th><th>Drug Form</th><th>Patient Dosage</th>
-        <th>Brand Name</th><th>Dosage</th><th>Quantity</th><th>Type</th>
+        <th>Brand Name</th><th>Dosage</th><th>Quantity</th><th>F/D</th><th>Type</th>
       </tr>
     </thead>
-    <tbody>${bodyRows || '<tr><td colspan="8">No medicines on this cycle day.</td></tr>'}</tbody>
+    <tbody>${bodyRows || '<tr><td colspan="9">No medicines on this cycle day.</td></tr>'}</tbody>
   </table>
   <div class="foot"><span>Cycle ${cycleNumber} / Day ${cycleDay}</span><span>${new Date().toLocaleString()}</span></div>
   <script>window.onload = function () { window.print(); };</script>
@@ -604,13 +614,14 @@ export function PharmacySlipModal({
                   <tr className="border-b border-[#E5E7EB]">
                     {[
                       { label: "No.", className: "w-12" },
-                      { label: "Drug Name", className: "w-[17%]" },
+                      { label: "Drug Name", className: "w-[16%]" },
                       { label: "Drug Form", className: "w-[9%]" },
-                      { label: "Patient Dosage", className: "w-[11%]" },
-                      { label: "Brand Name", className: "w-[17%]" },
-                      { label: "Dosage", className: "w-[13%]" },
-                      { label: "Quantity", className: "w-[11%]" },
-                      { label: "Type", className: "w-[10%]" },
+                      { label: "Patient Dosage", className: "w-[10%]" },
+                      { label: "Brand Name", className: "w-[16%]" },
+                      { label: "Dosage", className: "w-[11%]" },
+                      { label: "Quantity", className: "w-[9%]" },
+                      { label: "F/D", className: "w-[8%]" },
+                      { label: "Type", className: "w-[9%]" },
                     ].map((column) => (
                       <th
                         key={column.label}
@@ -657,6 +668,11 @@ export function PharmacySlipModal({
                             {row.route && (
                               <p className="mt-0.5 text-[10px] text-[#9AA4B2]">
                                 {row.route}
+                              </p>
+                            )}
+                            {row.instructions && (
+                              <p className="mt-0.5 text-[9px] leading-tight text-[#6B7280]">
+                                {row.instructions}
                               </p>
                             )}
                           </td>
@@ -770,6 +786,19 @@ export function PharmacySlipModal({
                             )}
                           </td>
 
+                          <td className="px-3 py-2.5 align-top text-[11px] font-medium text-[#374151]">
+                            {row.role === "DISCHARGE" ? (
+                              slipFrequencyDuration(
+                                row.role,
+                                row.frequency,
+                                row.duration,
+                                row.durationUnit
+                              ) || "—"
+                            ) : (
+                              <span className="text-[#9AA4B2]">—</span>
+                            )}
+                          </td>
+
                           <td className="px-3 py-2.5 align-top">
                             <span
                               className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 ${
@@ -850,6 +879,14 @@ export function PharmacySlipModal({
                                   )}
                               </div>
                             </td>
+                            <td className="px-3 py-2.5 align-top text-[11px] font-medium text-[#374151]">
+                              {slipFrequencyDuration(
+                                row.role,
+                                row.frequency,
+                                row.duration,
+                                row.durationUnit
+                              ) || "—"}
+                            </td>
                             <td className="px-3 py-2.5 align-top">
                               <span
                                 className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 ${
@@ -874,7 +911,7 @@ export function PharmacySlipModal({
             <p className="mt-3 text-[10px] leading-relaxed text-[#6B7280]">
               Quantity counts units of the selected dosage. A second line appears when
               the selected strength is below the patient's dose and a smaller strength
-              exists to make it up.
+              exists to make it up. F/D is filled for discharge medicines only.
             </p>
           )}
 

@@ -45,7 +45,6 @@ const STATUS_LABELS: Record<string, string> = {
   NO_SHOW: "No Show",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
-  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 // appointment_time is stored as a UTC-anchored wall-time value, so it must

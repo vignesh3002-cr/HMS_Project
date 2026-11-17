@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
-import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2, Hospital } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2, Hospital, Clock, Lock, Check, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
 import { FormDropdown } from "@/components/ui/form-dropdown";
@@ -31,6 +31,7 @@ import { getBedStatusMeta } from "@/components/hms/BedStatusBadge";
 import {
   appointmentApi,
   type AvailableSlot,
+  type SessionPhase,
   type AppointmentResponse,
 } from "@/api/appointment.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
@@ -83,6 +84,7 @@ interface AppointmentFormData {
   timeSlot: string;
   patientComment: string;
   customVisitType: string;
+  durationMinutes: number;
 
   // IPD admission-request fields (book-first flow -- only captured here,
   // the real `admission` row is created later at admit time).
@@ -149,6 +151,7 @@ const emptyFormData: AppointmentFormData = {
   timeSlot: "",
   patientComment: "",
   customVisitType: "",
+  durationMinutes: 40,
   requestedWardId: "",
   requestedBedId: "",
   ipdPaymentMode: "CASH",
@@ -679,6 +682,8 @@ export default function AddAppointment() {
 
   // Available time slots
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
+  const [sessionPhases, setSessionPhases] = useState<SessionPhase[]>([]);
+  const [activePhaseNumber, setActivePhaseNumber] = useState<number>(1);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
 
@@ -903,6 +908,7 @@ export default function AddAppointment() {
 
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
+      setSessionPhases([]);
       setDoctorUnavailable(false);
       setDoctorOnLeave(false);
       setLeaveReason(null);
@@ -923,6 +929,7 @@ export default function AddAppointment() {
 
     (async () => {
       let openSlots: AvailableSlot[] = [];
+      let futureSlots: AvailableSlot[] = [];
       let fetchError: any = null;
 
       try {
@@ -930,24 +937,27 @@ export default function AddAppointment() {
           formData.doctorId,
           formData.branchId,
           formData.selectDate,
+          { duration: formData.durationMinutes },
         );
         const slots = res.data.data?.slots || [];
+        const phases = res.data.data?.phases || [];
+        const activePhase = res.data.data?.active_phase_number || 1;
 
+        setSessionPhases(phases);
+        setActivePhaseNumber(activePhase);
 
-        // Defensive client-side filter: for today (in IST) drop any slot whose
-        // time is at or before the current IST time. The backend is the source
-        // of truth, but a past slot must never leak through to the UI.
+        // Keep all doctor shift slots for the selected date; for today, only drop
+        // slots whose window has fully elapsed. Use the backend's is_past flag
+        // rather than comparing raw clock minutes: on an overnight shift
+        // (e.g. 21:00 -> 02:00) the tail's end_time ("02:00") is numerically
+        // smaller than "now" even though that window is still ahead, which used
+        // to hide the whole post-midnight session from today's picker.
         const todayInIST = getTodayInIST();
-        const nowMinutesInIST = getNowMinutesInIST();
         const isTodayIST = formData.selectDate === todayInIST;
-        const futureSlots = slots.filter(
-          (s) => s.is_available && (!isTodayIST || timeStringToMinutes(s.time) > nowMinutesInIST),
-        );
+        futureSlots = slots.filter((s) => !isTodayIST || !s.is_past);
 
         setAvailableSlots(futureSlots);
-        // Empty slots array = the backend found no active schedule for this
-        // doctor/branch/date (a fully-booked day still returns slot entries).
-        openSlots = futureSlots;
+        openSlots = futureSlots.filter((s) => s.is_available && s.is_phase_open !== false);
 
         const isCancelled = res.data.data?.is_cancelled ?? false;
         const isOnLeave = res.data.data?.is_on_leave ?? false;
@@ -961,6 +971,7 @@ export default function AddAppointment() {
       } catch (error) {
         fetchError = error;
         setAvailableSlots([]);
+        setSessionPhases([]);
         setDoctorUnavailable(true);
         setSlotsCancelled(false);
         setDoctorOnLeave(false);
@@ -1057,7 +1068,7 @@ export default function AddAppointment() {
         return;
       }
 
-      setAvailableSlots(openSlots);
+      setAvailableSlots(futureSlots);
 
       // In edit mode, inject the original appointment slot back if it was filtered out
       // (e.g., because it was marked as booked/unavailable by the backend)
@@ -1131,7 +1142,7 @@ export default function AddAppointment() {
     return () => {
       cancelled = true;
     };
-  }, [formData.doctorId, formData.branchId, formData.selectDate, formData.patientVisitType, formData.patientType]);
+  }, [formData.doctorId, formData.branchId, formData.selectDate, formData.patientVisitType, formData.patientType, formData.durationMinutes]);
 
   // Load the full patient list once for the Patient dropdown.
   useEffect(() => {
@@ -1495,16 +1506,21 @@ const stopVoiceRecognition = () => {
         return;
       }
 
+      const selectedSlotObj = availableSlots.find((s) => s.time === formData.timeSlot);
+      const effectiveAppointmentDate = selectedSlotObj?.slot_date || formData.selectDate;
+
       if (isEditMode && appointmentId) {
         await appointmentApi.update(appointmentId, {
           employee_id: formData.doctorId,
           branch_id: formData.branchId,
           department_id: effectiveDepartmentId || undefined,
-          appointment_date: formData.selectDate,
+          appointment_date: effectiveAppointmentDate,
           appointment_time: formData.timeSlot,
           reason_for_visit: formData.patientComment || undefined,
           patient_type: formData.patientType || undefined,
           patient_visit_type: formData.patientVisitType || undefined,
+          duration_minutes: formData.durationMinutes,
+          schedule_id: selectedSlotObj?.schedule_id ? String(selectedSlotObj.schedule_id) : undefined,
         });
 
         await appointmentApi.updateStatus(appointmentId, "RESCHEDULED");
@@ -1543,11 +1559,13 @@ const stopVoiceRecognition = () => {
           branch_id: formData.branchId,
           department_id: effectiveDepartmentId,
           employee_id: formData.doctorId,
-          appointment_date: formData.selectDate,
+          appointment_date: effectiveAppointmentDate,
           appointment_time: formData.timeSlot,
           reason_for_visit: effectiveReason,
           patient_type: formData.patientType || undefined,
           patient_visit_type: effectiveVisitType || undefined,
+          duration_minutes: formData.durationMinutes,
+          schedule_id: selectedSlotObj?.schedule_id ? String(selectedSlotObj.schedule_id) : undefined,
           ...(isIpdAdmissionFlow
             ? {
                 requested_ward_id: formData.requestedWardId || undefined,
@@ -2229,6 +2247,158 @@ const branchField = (
     ? uniqueSlots.filter((slot) => daycareSlotFits(daycareOccupancy, formData.selectDate, slot.time, daycareStayDays))
     : uniqueSlots;
 
+  // For Daycare bookings, if the earliest fitting slot is in a later phase, unlock it so daycare can be booked
+  const displaySlots = useMemo(() => {
+    const slots = visibleSlots.filter((slot) => !slot.is_completed && !slot.is_past);
+    if (isDaycareBooking && slots.length > 0 && !slots.some((s) => s.is_available)) {
+      const firstFitting = slots[0];
+      return slots.map((s) => (s.time === firstFitting.time ? { ...s, is_available: true } : s));
+    }
+    return slots;
+  }, [visibleSlots, isDaycareBooking]);
+
+  // A "session" is the doctor's whole shift/schedule row (e.g. 9:00 AM - 5:00 PM,
+  // or an overnight 9:00 PM - 2:00 AM) -- NOT one 3-hour phase. The backend's
+  // 3-hour phases are the individual bookable slots INSIDE a session. Grouping
+  // by schedule_id keeps an overnight shift's post-midnight phase inside the
+  // same session and orders it after the pre-midnight phase instead of
+  // presenting it as a next-day slot first.
+  const sessionGroups = useMemo(() => {
+    const formatSessionTime = (total: number) => {
+      const minutesInDay = ((total % 1440) + 1440) % 1440;
+      const h24 = Math.floor(minutesInDay / 60);
+      const minutes = minutesInDay % 60;
+      const ampm = h24 >= 12 ? "PM" : "AM";
+      const h12 = h24 % 12 || 12;
+      return `${h12}:${String(minutes).padStart(2, "0")} ${ampm}`;
+    };
+
+    // Backend phases (including already-completed ones) describe the whole
+    // shift, so derive each session's real start/end from them when available.
+    type ShiftPhase = { start: number; end: number; shiftName: string };
+    const phasesByShift = new Map<string, ShiftPhase[]>();
+    for (const phase of sessionPhases) {
+      const phaseTime = (phase as SessionPhase & { time?: string }).time ?? phase.start_time;
+      if (!phaseTime) continue;
+      const key = String(phase.schedule_id ?? phase.shift_name ?? "session");
+      const list = phasesByShift.get(key) ?? [];
+      list.push({
+        start: timeStringToMinutes(phaseTime),
+        end: timeStringToMinutes(phase.end_time || phaseTime),
+        shiftName: phase.shift_name || "",
+      });
+      phasesByShift.set(key, list);
+    }
+
+    type SessionMeta = { sessionStart: number; sessionEnd: number; shiftName: string };
+    const shiftMeta = new Map<string, SessionMeta>();
+    for (const [key, phases] of phasesByShift) {
+      let sessionStart = Math.min(...phases.map((phase) => phase.start));
+      for (const phase of phases) {
+        // The phase whose clock end is not after its start is the one that
+        // crosses midnight; its start is the real start of the shift.
+        if (phase.end <= phase.start) {
+          sessionStart = phase.start;
+          break;
+        }
+      }
+      const sessionEnd = Math.max(
+        ...phases.map((phase) => (phase.end < sessionStart ? phase.end + 1440 : phase.end)),
+      );
+      shiftMeta.set(key, {
+        sessionStart,
+        sessionEnd,
+        shiftName: phases[0]?.shiftName || "",
+      });
+    }
+
+    type RawGroup = {
+      scheduleId: string;
+      shiftName: string;
+      slots: AvailableSlot[];
+      hasPhase: boolean;
+    };
+
+    const groups = new Map<string, RawGroup>();
+    for (const slot of displaySlots) {
+      // Slots injected by a Day View click have no schedule phase -- keep them
+      // in a trailing, header-less group instead of inventing a fake session.
+      const key = String(slot.schedule_id ?? slot.shift_name ?? "session");
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          scheduleId: key,
+          shiftName: slot.shift_name || "",
+          slots: [],
+          hasPhase: false,
+        };
+        groups.set(key, group);
+      }
+      group.slots.push(slot);
+      if (slot.phase_number != null) group.hasPhase = true;
+    }
+
+    const sessions = [...groups.values()].map((group) => {
+      const meta = shiftMeta.get(group.scheduleId);
+
+      let sessionStart = meta?.sessionStart;
+      if (sessionStart == null) {
+        sessionStart = Math.min(
+          ...group.slots.map((slot) => timeStringToMinutes(slot.time)),
+        );
+        for (const slot of group.slots) {
+          const start = timeStringToMinutes(slot.time);
+          const end = timeStringToMinutes(slot.end_time || slot.time);
+          if (end <= start) {
+            sessionStart = start;
+            break;
+          }
+        }
+      }
+
+      // Order the session's phases along the shift timeline (post-midnight
+      // phases get +1440) so 12:00 AM never jumps above 9:00 PM.
+      const slotMinutes = new Map<AvailableSlot, number>();
+      for (const slot of group.slots) {
+        const minutes = timeStringToMinutes(slot.time);
+        slotMinutes.set(slot, minutes < sessionStart ? minutes + 1440 : minutes);
+      }
+      const slots = [...group.slots].sort(
+        (a, b) => (slotMinutes.get(a) ?? 0) - (slotMinutes.get(b) ?? 0),
+      );
+
+      let sessionEnd = meta?.sessionEnd;
+      if (sessionEnd == null) {
+        const last = slots[slots.length - 1];
+        sessionEnd = last ? timeStringToMinutes(last.end_time || last.time) : sessionStart;
+        if (sessionEnd < sessionStart) sessionEnd += 1440;
+      }
+
+      return {
+        ...group,
+        shiftName: meta?.shiftName || group.shiftName,
+        slots,
+        sessionStart,
+        // Only a shift whose last phase lands on the next day is overnight.
+        overnight: sessionEnd > 1440,
+        rangeLabel: `${formatSessionTime(sessionStart)} - ${formatSessionTime(sessionEnd)}`,
+      };
+    });
+
+    // Real shifts first (in start-time order), then any Day View slot without
+    // session phases.
+    sessions.sort((a, b) => {
+      if (a.hasPhase !== b.hasPhase) return a.hasPhase ? -1 : 1;
+      return a.sessionStart - b.sessionStart;
+    });
+
+    let sessionCounter = 0;
+    return sessions.map((group) => ({
+      ...group,
+      sessionLabel: group.hasPhase ? `Session ${++sessionCounter}` : null,
+    }));
+  }, [displaySlots, sessionPhases]);
+
   const timeSlotsField = (
                   <div className="lg:col-span-3 flex flex-col gap-3">
                       <div className="flex items-center justify-between">
@@ -2285,21 +2455,60 @@ const branchField = (
                         <div className="col-span-full py-8 text-center text-sm text-amber-600 bg-amber-50 rounded-xl">
                           The ward is full for all of this doctor's free times on this day -- try another date or ward
                         </div>
+                      ) : displaySlots.length === 0 ? (
+                        <div className="col-span-full py-8 text-center text-sm text-amber-600 bg-amber-50 rounded-xl">
+                          No available slots for this doctor on this day
+                        </div>
                       ) : (
-                        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                          {visibleSlots.map((slot) => (
-                            <button
-                              key={slot.time}
-                              type="button"
-                              onClick={() => setFormData((prev) => ({ ...prev, timeSlot: slot.time }))}
-                              className={`h-10 text-sm font-bold rounded-lg transition-all duration-200 ${
-                                formData.timeSlot === slot.time
-                                  ? "bg-blue-600 text-white shadow-md"
-                                  : "border border-blue-200 text-blue-600 hover:bg-blue-50"
-                              }`}
-                            >
-                              {formatSlotLabel(slot.time)}
-                            </button>
+                        <div className="flex flex-col gap-4">
+                          {sessionGroups.map((group) => (
+                            <div key={group.scheduleId} className="flex flex-col gap-2">
+                              {group.sessionLabel ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="inline-flex items-center rounded-full bg-[#EEF3FF] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#00488D]">
+                                    {group.sessionLabel}
+                                  </span>
+                                  {group.shiftName ? (
+                                    <span className="text-[11px] font-semibold text-gray-600">
+                                      {group.shiftName}
+                                    </span>
+                                  ) : null}
+                                  <span className="text-[11px] font-medium text-gray-500">
+                                    {group.rangeLabel}
+                                  </span>
+                                  {group.overnight && (
+                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                                      overnight
+                                    </span>
+                                  )}
+                                  <span className="h-px flex-1 bg-gray-100" />
+                                </div>
+                              ) : null}
+                              <div className="flex flex-wrap gap-2.5">
+                                {group.slots.map((slot) => {
+                                  const isSelected = formData.timeSlot === slot.time;
+                                  const isAvailable = slot.is_available;
+
+                                  return (
+                                    <button
+                                      key={`${group.scheduleId}-${slot.time}`}
+                                      type="button"
+                                      disabled={!isAvailable}
+                                      onClick={() => setFormData((prev) => ({ ...prev, timeSlot: slot.time }))}
+                                      className={`px-4 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold transition-all ${
+                                        isSelected
+                                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                          : isAvailable
+                                            ? "border-gray-200 bg-white text-gray-800 hover:border-blue-400 hover:bg-blue-50/20"
+                                            : "border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-60"
+                                      }`}
+                                    >
+                                      {slot.label || formatSlotLabel(slot.time)}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -2459,9 +2668,11 @@ const branchField = (
                   value={formData.patientVisitType}
                   onValueChange={(val) => {
                     const isAdm = val === "Admission" || val === "Daycare" || val === "Emergency Visit";
+                    const defaultMinutes = val === "New consultation" ? 40 : 10;
                     setFormData((prev) => ({
                       ...prev,
                       patientVisitType: val,
+                      durationMinutes: defaultMinutes,
                       // Ward/bed requests only make sense for Admission/Daycare.
                       ...(!isAdm ? { requestedWardId: "", requestedBedId: "" } : {}),
                       // Daycare starts its expected stay at 0 days by default.
@@ -2477,6 +2688,35 @@ const branchField = (
                   placeholder="Select visit type"
                   disabled={!formData.patientType || isAdmissionEditMode}
                 />
+              </div>
+
+              {/* Consultation Duration Stepper */}
+              <div>
+                <label className={labelClass}>Consultation Duration {requiredStar}</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, durationMinutes: Math.max(5, prev.durationMinutes - 5) }))}
+                    className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 font-bold hover:bg-gray-100 transition-colors shadow-sm"
+                    title="Decrease duration by 5 minutes"
+                  >
+                    -
+                  </button>
+                  <div className="flex items-center justify-center px-4 h-10 border border-gray-200 rounded-xl bg-white min-w-[100px] text-sm font-bold text-gray-900 shadow-sm">
+                    {formData.durationMinutes} mins
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, durationMinutes: Math.min(240, prev.durationMinutes + 5) }))}
+                    className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 font-bold hover:bg-gray-100 transition-colors shadow-sm"
+                    title="Increase duration by 5 minutes"
+                  >
+                    +
+                  </button>
+                  <span className="text-xs text-gray-400">
+                    {formData.patientVisitType === "New consultation" ? "(Default: 40 mins)" : "(Default: 10 mins)"}
+                  </span>
+                </div>
               </div>
 
               {/* Others Free-Text Entry */}
@@ -2884,6 +3124,18 @@ onClick={() => setAddWardOpen(true)}
                 <span className="shrink-0 text-gray-500">Appointment ID</span>
                 <span className="text-right font-semibold text-gray-900">{bookingResult.appointment_id}</span>
               </div>
+              {bookingResult.token_number != null && (
+                <div className="flex items-center justify-between gap-6 py-1">
+                  <span className="shrink-0 text-gray-500">Token ID</span>
+                  <span className="text-right font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-lg border border-blue-100">
+                    #{bookingResult.token_number}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Duration</span>
+                <span className="text-right font-semibold text-gray-900">{formData.durationMinutes} minutes</span>
+              </div>
               <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Visit Type</span>
                 <span className="text-right font-semibold text-gray-900">
@@ -2902,9 +3154,17 @@ onClick={() => setAddWardOpen(true)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-6 py-1">
-                <span className="shrink-0 text-gray-500">Time</span>
+                <span className="shrink-0 text-gray-500">Arrival Window</span>
                 <span className="text-right font-semibold text-gray-900">
-                  {formatSlotLabel(bookingResult.appointment_time)}
+                  {bookingResult.slot_window || (formData.timeSlot ? formatSlotLabel(formData.timeSlot) : "-")}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Estimated Consultation</span>
+                <span className="text-right font-bold text-blue-700">
+                  {bookingResult.estimated_start_time && bookingResult.estimated_end_time
+                    ? `${bookingResult.estimated_start_time} - ${bookingResult.estimated_end_time}`
+                    : formatSlotLabel(bookingResult.appointment_time)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-6 py-1">

@@ -1,6 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Bed as BedIcon, Search, Lock, LockOpen, Loader2, Pencil, Trash2, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Bed as BedIcon, Search, Lock, LockOpen, Loader2, Pencil, Trash2, Sparkles, MoreVertical } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { ipdApi, type BedRecord, type WardRecord } from "@/api/ipd.api";
 import { branchApi, type Branch } from "@/api/branch.api";
 import { useBranches } from "@/hooks/useMasterData";
@@ -458,45 +464,78 @@ useEffect(fetchWards, [branchId]);
           return <span className="text-[#9CA3AF] text-xs italic">Reserved</span>;
         }
         return (
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => {
-                setEditBed(row);
-                setAddBedOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] text-xs font-semibold hover:bg-[#F2F4F6] active:scale-[0.98] transition-all"
-            >
-              <Pencil className="w-3.5 h-3.5" /> Edit
-            </button>
-            <button
-              onClick={() => openDelete("bed", row.bed_id, row.bed_number)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#FEE2E2] bg-white text-[#B91C1C] text-xs font-semibold hover:bg-[#FEF2F2] active:scale-[0.98] transition-all"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Delete
-            </button>
-            {row.status === "CLEANING" && (
-              <button
-                onClick={() => openAction(row, "AVAILABLE")}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-200 bg-[#ECFEFF] text-[#0E7490] text-xs font-semibold hover:bg-cyan-100 active:scale-[0.98] transition-all"
+          <div className="flex items-center justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors outline-none"
+                  aria-label="Actions"
+                >
+                  <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={4}
+                className="w-44 rounded-md border-[#E5E7EB] bg-white p-0 shadow-lg"
               >
-                <Sparkles className="w-3.5 h-3.5" /> Mark Ready
-              </button>
-            )}
-            {row.status === "MAINTENANCE" ? (
-              <button
-                onClick={() => openAction(row, "AVAILABLE")}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] text-xs font-semibold hover:bg-[#DCFCE7] active:scale-[0.98] transition-all"
-              >
-                <LockOpen className="w-3.5 h-3.5" /> Mark Available
-              </button>
-            ) : (
-              <button
-                onClick={() => openAction(row, "MAINTENANCE")}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] text-[#B45309] text-xs font-semibold hover:bg-[#FEF3C7] active:scale-[0.98] transition-all"
-              >
-                <Lock className="w-3.5 h-3.5" /> Mark Maintenance
-              </button>
-            )}
+                {row.status === "AVAILABLE" && can("appointment.create") && (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      navigate("/appointments/add", {
+                        state: {
+                          defaultPatientType: "Inpatient (IPD)",
+                          requestedWardId: row.ward_id,
+                          requestedBedId: row.bed_id,
+                        },
+                      })
+                    }
+                    className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-blue-600 focus:bg-blue-50"
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-2" /> Admit Patient
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setEditBed(row);
+                    setAddBedOpen(true);
+                  }}
+                  className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-[#374151] focus:bg-[#F2F4F6]"
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-2" /> Edit Bed
+                </DropdownMenuItem>
+                {row.status === "CLEANING" && (
+                  <DropdownMenuItem
+                    onSelect={() => openAction(row, "AVAILABLE")}
+                    className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-cyan-600 focus:bg-cyan-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-2" /> Mark Ready
+                  </DropdownMenuItem>
+                )}
+                {row.status === "MAINTENANCE" ? (
+                  <DropdownMenuItem
+                    onSelect={() => openAction(row, "AVAILABLE")}
+                    className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-green-600 focus:bg-green-50"
+                  >
+                    <LockOpen className="w-3.5 h-3.5 mr-2" /> Mark Available
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onSelect={() => openAction(row, "MAINTENANCE")}
+                    className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-amber-600 focus:bg-amber-50"
+                  >
+                    <Lock className="w-3.5 h-3.5 mr-2" /> Mark Maintenance
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onSelect={() => openDelete("bed", row.bed_id, row.bed_number)}
+                  className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-red-600 focus:bg-red-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Bed
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         );
       },
@@ -554,22 +593,39 @@ useEffect(fetchWards, [branchId]);
       headerClassName: "text-right",
       render: (row) =>
         canManageWards ? (
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => {
-                setEditWard(row.ward);
-                setAddWardOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] text-xs font-semibold hover:bg-[#F2F4F6] active:scale-[0.98] transition-all"
-            >
-              <Pencil className="w-3.5 h-3.5" /> Edit
-            </button>
-            <button
-              onClick={() => openDelete("ward", row.ward.ward_id, row.ward.ward_name)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#FEE2E2] bg-white text-[#B91C1C] text-xs font-semibold hover:bg-[#FEF2F2] active:scale-[0.98] transition-all"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Delete
-            </button>
+          <div className="flex items-center justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors outline-none"
+                  aria-label="Actions"
+                >
+                  <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={4}
+                className="w-44 rounded-md border-[#E5E7EB] bg-white p-0 shadow-lg"
+              >
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setEditWard(row.ward);
+                    setAddWardOpen(true);
+                  }}
+                  className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-[#374151] focus:bg-[#F2F4F6]"
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-2" /> Edit Ward
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => openDelete("ward", row.ward.ward_id, row.ward.ward_name)}
+                  className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-red-600 focus:bg-red-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Ward
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         ) : (
           <span className="text-[#9CA3AF] text-xs">—</span>
