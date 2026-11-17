@@ -1,7 +1,7 @@
 import API from "./axios";
 import { labOrderApi } from "./labOrder.api";
 
-export type LabNotificationCategory = "STAT" | "ORDER" | "SAMPLE" | "TESTING" | "REPORT" | "CRITICAL";
+export type LabNotificationCategory = "STAT" | "URGENT" | "ORDER" | "SAMPLE" | "TESTING" | "REPORT" | "CRITICAL";
 
 export interface LabNotificationItem {
   id: string;
@@ -27,6 +27,7 @@ export interface LabNotificationResponse {
   total: number;
   unreadCount: number;
   statCount: number;
+  urgentCount?: number;
 }
 
 const STORAGE_READ_KEY = "hms_lab_notifications_read_v1";
@@ -115,13 +116,14 @@ export const synthesizeLabNotifications = async (): Promise<LabNotificationItem[
         .join(", ") || "Diagnostic Test Panel";
 
       // 1. Order Alert
+      const isUrgentOrStat = isStat || isUrgent;
       alerts.push({
         id: `synth-order-${order.lab_order_id}`,
-        category: isStat ? "STAT" : "ORDER",
-        type: isStat ? "STAT_ALERT" : "NEW_ORDER",
-        title: isStat ? `STAT Test: ${order.lab_order_id}` : `New Order: ${order.lab_order_id}`,
+        category: isUrgentOrStat ? "URGENT" : "ORDER",
+        type: isUrgentOrStat ? "URGENT_ALERT" : "NEW_ORDER",
+        title: isUrgentOrStat ? `Urgent Test: ${order.lab_order_id}` : `New Order: ${order.lab_order_id}`,
         message: `${doctorName} ordered ${testNames} for ${patientName}`,
-        priority: isStat ? "STAT" : isUrgent ? "URGENT" : "ROUTINE",
+        priority: isUrgentOrStat ? "URGENT" : "ROUTINE",
         orderId: order.lab_order_id,
         patientName,
         patientId,
@@ -144,7 +146,7 @@ export const synthesizeLabNotifications = async (): Promise<LabNotificationItem[
           type: "SAMPLE_PENDING",
           title: `Specimen Verification Required (${pendingItems.length})`,
           message: `${pendingItems.length} tube(s) for ${patientName} awaiting accession verification`,
-          priority: isStat ? "STAT" : "ROUTINE",
+          priority: isUrgentOrStat ? "URGENT" : "ROUTINE",
           orderId: order.lab_order_id,
           patientName,
           patientId,
@@ -167,7 +169,7 @@ export const synthesizeLabNotifications = async (): Promise<LabNotificationItem[
           type: "TESTING_READY",
           title: `Ready for Analyzer Testing`,
           message: `${verifiedItems.length} verified sample(s) for ${patientName} ready for execution`,
-          priority: isStat ? "STAT" : "ROUTINE",
+          priority: isUrgentOrStat ? "URGENT" : "ROUTINE",
           orderId: order.lab_order_id,
           patientName,
           patientId,
@@ -189,11 +191,11 @@ export const synthesizeLabNotifications = async (): Promise<LabNotificationItem[
     alerts.push(
       {
         id: "lab-alert-1",
-        category: "STAT",
-        type: "STAT_ALERT",
-        title: "STAT: Cardiac Troponin I Requested",
-        message: "Dr. Sarah Jenkins ordered STAT Troponin-I & CK-MB for Patient John Doe (UHID: P000108). Immediate processing required.",
-        priority: "STAT",
+        category: "URGENT",
+        type: "URGENT_ALERT",
+        title: "URGENT: Cardiac Troponin I Requested",
+        message: "Dr. Sarah Jenkins ordered Urgent Troponin-I & CK-MB for Patient John Doe (UHID: P000108). Immediate processing required.",
+        priority: "URGENT",
         orderId: "ORD-LAB-2026-092",
         barcode: "BC2405001",
         patientName: "John Doe",
@@ -312,7 +314,7 @@ export const labNotificationApi = {
       }));
 
     const unreadCount = visibleAlerts.filter((a) => !a.read).length;
-    const statCount = visibleAlerts.filter(
+    const urgentCount = visibleAlerts.filter(
       (a) => !a.read && (a.priority === "STAT" || a.priority === "URGENT")
     ).length;
 
@@ -320,7 +322,8 @@ export const labNotificationApi = {
       notifications: visibleAlerts,
       total: visibleAlerts.length,
       unreadCount,
-      statCount,
+      statCount: urgentCount,
+      urgentCount,
     };
   },
 

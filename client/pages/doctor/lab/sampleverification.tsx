@@ -29,6 +29,14 @@ import {
   compareBySampleStability,
   SampleStabilityInfo,
 } from "@/utils/sampleStability";
+import { SampleTimerBadge } from "@/components/hms/SampleTimerBadge";
+import { SampleExpiryAlertBanner } from "@/components/hms/SampleExpiryAlertBanner";
+import {
+  isPackageTest,
+  decomposePackageTest,
+  generateSubTestBarcode,
+  getContainerBadgeClass,
+} from "./packageDecomposition";
 import {
   labOrderApi,
   labOrderItemApi,
@@ -85,6 +93,8 @@ interface SampleItem {
   collectedOn: string;
   collectionTimeIso?: string;
   stabilityHours?: number;
+  expiryTimeIso?: string;
+  expiryHours?: number;
   patientId: string;
   patientName: string;
   ageGender: string;
@@ -102,6 +112,11 @@ interface SampleItem {
   rejectionReason?: string;
   targetDate?: string;
   targetDateIso?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  parentOrderItemId?: string;
+  containerType?: string;
+  containerColor?: "purple" | "amber" | "slate" | "blue" | "emerald" | "rose";
 }
 
 const normalizeToIsoDate = (value?: string | null): string | null => {
@@ -443,7 +458,8 @@ export default function SampleVerification() {
           return hasScBarcode || hasRemarksBarcode || hasStatus || hasLocalSync || !!item.barcode;
         });
 
-        const mappedSamples: SampleItem[] = barcodedItems.map((item, idx) => {
+        const mappedSamples: SampleItem[] = [];
+        barcodedItems.forEach((item, idx) => {
           const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
           const pId =
             parentOrder?.patient_history?.patient_id ||
@@ -465,27 +481,23 @@ export default function SampleVerification() {
           const gender = patient?.patient_gender || "Male";
           const ageGender = `${age} Y / ${gender}`;
 
-          const testName =
+          const rawTestName =
             item.lab_test_master?.test_name ||
             item.lab_test_id?.replace(/^LABTEST/, "Test-") ||
             "Diagnostic Test";
 
-          const testCode =
+          const rawTestCode =
             item.lab_test_master?.test_code ||
             item.lab_test_id?.replace(/^LABTEST/, "T") ||
             "TEST";
 
-          const sampleType =
+          const includesDetails = item.lab_test_master?.includes_details;
+
+          const defaultSampleType =
             item.lab_test_master?.sample_type ||
             item.specimen_type ||
             "Whole Blood (EDTA)";
 
-          // Resolve exact collection time
-          // 1. Database sample_collection.collection_datetime
-          // 2. localStorage per-item collection time
-          // 3. localStorage per-order collection time / registered time
-          // 4. Database sample_collection.created_at
-          // 5. item.created_at || parentOrder?.order_datetime
           const dbSc = item.sample_collection?.[0];
           const storedItemColTime =
             typeof window !== "undefined"
@@ -517,7 +529,7 @@ export default function SampleVerification() {
             ? item.remarks.match(/Barcode:\s*([A-Za-z0-9_-]+)/i) || item.remarks.match(/(BC\d+)/i)
             : null;
 
-          const resolvedBarcode =
+          const baseBarcode =
             item.sample_collection?.[0]?.barcode ||
             (barcodeMatch ? barcodeMatch[1] : null) ||
             (typeof window !== "undefined"
@@ -525,28 +537,6 @@ export default function SampleVerification() {
               : null) ||
             item.barcode ||
             `BC${dateDigits}${String(idx + 1).padStart(4, "0")}`;
-
-          const sampleId =
-            item.sample_id ||
-            `SMP-${item.lab_order_item_id.replace(/^LOI/, "").slice(-4) || String(idx + 1).padStart(3, "0")}`;
-          const collectionId = `COLL-${dateDigits}-${String(idx + 1).padStart(3, "0")}`;
-
-          // Status mapping
-          const isLocallyVerified =
-            typeof window !== "undefined" &&
-            (localStorage.getItem(`verified_sample_${item.lab_order_item_id}`) === "true" ||
-              (resolvedBarcode && localStorage.getItem(`verified_sample_barcode_${resolvedBarcode}`) === "true"));
-          const isLocallyRejected =
-            typeof window !== "undefined" &&
-            localStorage.getItem(`rejected_sample_${item.lab_order_item_id}`) === "true";
-
-          const rawStatus = (item.item_status || "").toUpperCase();
-          let status: "VERIFIED" | "PENDING" | "REJECTED" = "PENDING";
-          if (rawStatus === "VERIFIED" || rawStatus === "COMPLETED" || isLocallyVerified) {
-            status = "VERIFIED";
-          } else if (rawStatus === "REJECTED" || rawStatus === "CANCELLED" || isLocallyRejected) {
-            status = "REJECTED";
-          }
 
           const site =
             patient?.patient_type === "IPD"
@@ -557,30 +547,133 @@ export default function SampleVerification() {
           const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
           const targetDateIso = rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined;
 
-          return {
-            id: item.lab_order_item_id,
-            sampleId,
-            collectionId,
-            collectedOn: fullString,
-            collectionTimeIso: colIso,
-            barcode: resolvedBarcode,
-            patientId: pId,
-            patientName: pName,
-            ageGender,
-            requisitionNo: item.lab_order_id,
-            orderedTest: testName,
-            testCode,
-            testName,
-            sampleType,
-            collectionTime: fullString,
-            technician: "Lab Technician",
-            collectionSite: site,
-            remarks: item.remarks || "-",
-            status,
-            rejectionReason: status === "REJECTED" ? (item.remarks || "Sample rejected") : undefined,
-            targetDate: targetDateFormatted,
-            targetDateIso,
-          };
+          // Check if package test requiring sub-test decomposition
+          if (isPackageTest(rawTestName, rawTestCode, includesDetails)) {
+            const subDefs = decomposePackageTest(rawTestName, rawTestCode, includesDetails);
+            subDefs.forEach((st, sIdx) => {
+              const subId = `${item.lab_order_item_id}__${st.key}`;
+              const subSc = (item.sample_collection && item.sample_collection[sIdx]) || dbSc;
+              const subBarcode =
+                (item.sample_collection && item.sample_collection[sIdx]?.barcode) ||
+                (typeof window !== "undefined"
+                  ? localStorage.getItem(`generated_barcode_item_${subId}`) ||
+                    localStorage.getItem(`generated_barcode_item_${item.lab_order_item_id}__${st.key}`) ||
+                    localStorage.getItem(`generated_barcode_item_${item.lab_order_item_id}_${st.code.toLowerCase()}`) ||
+                    undefined
+                  : undefined) ||
+                generateSubTestBarcode(baseBarcode, st.code, sIdx);
+
+              const isLocallyVerified =
+                typeof window !== "undefined" &&
+                (localStorage.getItem(`verified_sample_${subId}`) === "true" ||
+                  localStorage.getItem(`verified_sample_${item.lab_order_item_id}`) === "true" ||
+                  (subBarcode && localStorage.getItem(`verified_sample_barcode_${subBarcode}`) === "true"));
+              const isLocallyRejected =
+                typeof window !== "undefined" &&
+                (localStorage.getItem(`rejected_sample_${subId}`) === "true" ||
+                  localStorage.getItem(`rejected_sample_${item.lab_order_item_id}`) === "true");
+
+              const rawStatus = (item.item_status || "").toUpperCase();
+              let status: "VERIFIED" | "PENDING" | "REJECTED" = "PENDING";
+              if (rawStatus === "VERIFIED" || rawStatus === "COMPLETED" || isLocallyVerified) {
+                status = "VERIFIED";
+              } else if (rawStatus === "REJECTED" || rawStatus === "CANCELLED" || isLocallyRejected) {
+                status = "REJECTED";
+              }
+
+              const dbExpiryDatetime = subSc?.expiry_datetime || dbSc?.expiry_datetime;
+              const stabilityHours = st.stabilityHours;
+
+              mappedSamples.push({
+                id: subId,
+                parentOrderItemId: item.lab_order_item_id,
+                packageName: rawTestName,
+                isSubTest: true,
+                sampleId: `SMP-${item.lab_order_item_id.replace(/^LOI/, "").slice(-4)}-${st.code}`,
+                collectionId: `COLL-${dateDigits}-${String(idx + 1).padStart(2, "0")}-${st.code}`,
+                collectedOn: fullString,
+                collectionTimeIso: colIso,
+                stabilityHours,
+                expiryTimeIso: dbExpiryDatetime ? new Date(dbExpiryDatetime).toISOString() : undefined,
+                expiryHours: stabilityHours,
+                barcode: subBarcode,
+                patientId: pId,
+                patientName: pName,
+                ageGender,
+                requisitionNo: item.lab_order_id,
+                orderedTest: st.name,
+                testCode: st.code,
+                testName: st.name,
+                sampleType: `${st.sampleType} • ${st.containerType}`,
+                containerType: st.containerType,
+                containerColor: st.containerColor,
+                collectionTime: fullString,
+                technician: "Lab Technician",
+                collectionSite: site,
+                remarks: `Package: ${rawTestName}`,
+                status,
+                rejectionReason: status === "REJECTED" ? (item.remarks || "Sample rejected") : undefined,
+                targetDate: targetDateFormatted,
+                targetDateIso,
+              });
+            });
+          } else {
+            const isLocallyVerified =
+              typeof window !== "undefined" &&
+              (localStorage.getItem(`verified_sample_${item.lab_order_item_id}`) === "true" ||
+                (baseBarcode && localStorage.getItem(`verified_sample_barcode_${baseBarcode}`) === "true"));
+            const isLocallyRejected =
+              typeof window !== "undefined" &&
+              localStorage.getItem(`rejected_sample_${item.lab_order_item_id}`) === "true";
+
+            const rawStatus = (item.item_status || "").toUpperCase();
+            let status: "VERIFIED" | "PENDING" | "REJECTED" = "PENDING";
+            if (rawStatus === "VERIFIED" || rawStatus === "COMPLETED" || isLocallyVerified) {
+              status = "VERIFIED";
+            } else if (rawStatus === "REJECTED" || rawStatus === "CANCELLED" || isLocallyRejected) {
+              status = "REJECTED";
+            }
+
+            const dbExpiryDatetime = dbSc?.expiry_datetime;
+            const masterExpiryHours = Number(item.lab_test_master?.expiry_time_hours) || undefined;
+            const stabilityHours = resolveStabilityHours(
+              rawTestName,
+              defaultSampleType,
+              item.lab_test_master?.tat_hours,
+              item.priority,
+              masterExpiryHours
+            );
+
+            mappedSamples.push({
+              id: item.lab_order_item_id,
+              sampleId:
+                item.sample_id ||
+                `SMP-${item.lab_order_item_id.replace(/^LOI/, "").slice(-4) || String(idx + 1).padStart(3, "0")}`,
+              collectionId: `COLL-${dateDigits}-${String(idx + 1).padStart(3, "0")}`,
+              collectedOn: fullString,
+              collectionTimeIso: colIso,
+              stabilityHours,
+              expiryTimeIso: dbExpiryDatetime ? new Date(dbExpiryDatetime).toISOString() : undefined,
+              expiryHours: masterExpiryHours,
+              barcode: baseBarcode,
+              patientId: pId,
+              patientName: pName,
+              ageGender,
+              requisitionNo: item.lab_order_id,
+              orderedTest: rawTestName,
+              testCode: rawTestCode,
+              testName: rawTestName,
+              sampleType: defaultSampleType,
+              collectionTime: fullString,
+              technician: "Lab Technician",
+              collectionSite: site,
+              remarks: item.remarks || "-",
+              status,
+              rejectionReason: status === "REJECTED" ? (item.remarks || "Sample rejected") : undefined,
+              targetDate: targetDateFormatted,
+              targetDateIso,
+            });
+          }
         });
 
         mappedSamples.sort(compareSampleItems);
@@ -673,12 +766,16 @@ export default function SampleVerification() {
       );
       const entry = {
         id,
+        parentOrderItemId: target?.parentOrderItemId,
+        packageName: target?.packageName,
+        isSubTest: target?.isSubTest,
         sampleId: target?.sampleId || id,
         barcode: target?.barcode || "",
         patientId: target?.patientId || "",
         patientName: target?.patientName || "",
         testName: target?.testName || target?.orderedTest || "",
         sampleType: target?.sampleType || "Whole Blood",
+        containerType: target?.containerType,
         collectionTime: target?.collectionTime || "",
         technician: target?.technician || "Lab Technician",
         status: "VERIFIED",
@@ -700,9 +797,10 @@ export default function SampleVerification() {
       description: "Sample passed pre-analytical integrity check.",
     });
 
-    if (!id.startsWith("s") || id.startsWith("LOI")) {
+    const backendId = target?.parentOrderItemId || id;
+    if (!backendId.startsWith("s") || backendId.startsWith("LOI")) {
       try {
-        await labOrderItemApi.update(id, { item_status: "Verified" });
+        await labOrderItemApi.update(backendId, { item_status: "Verified" });
       } catch (err) {
         console.error("Failed to update sample status in backend:", err);
       }
@@ -801,7 +899,7 @@ export default function SampleVerification() {
     handleOpenRejectModal(idOrSample, defaultReason);
   };
 
-    const currentTime = useCurrentTimeTicker(30000);
+  const currentTime = useCurrentTimeTicker(1000);
 
   const sampleStabilityMap = useMemo(() => {
     const map = new Map<string, SampleStabilityInfo>();
@@ -812,7 +910,8 @@ export default function SampleVerification() {
         s.stabilityHours || 2,
         s.status === "VERIFIED" ? "COMPLETED" : s.status,
         currentTime,
-        true
+        true,
+        s.expiryTimeIso
       );
       map.set(s.id, info);
     });
@@ -823,7 +922,15 @@ export default function SampleVerification() {
     return samples.filter((s) => {
       if (s.status === "VERIFIED" || s.status === "REJECTED") return false;
       const info = sampleStabilityMap.get(s.id);
-      return info ? info.urgencyLevel === "CRITICAL" || info.urgencyLevel === "EXPIRED" : false;
+      return info?.isExpiringSoon || false;
+    }).length;
+  }, [samples, sampleStabilityMap]);
+
+  const expiredStabilityCount = useMemo(() => {
+    return samples.filter((s) => {
+      if (s.status === "VERIFIED" || s.status === "REJECTED") return false;
+      const info = sampleStabilityMap.get(s.id);
+      return info?.isExpired || false;
     }).length;
   }, [samples, sampleStabilityMap]);
 
@@ -1241,6 +1348,38 @@ export default function SampleVerification() {
 
 
 
+                  {/* Expiry alerts for selected sample */}
+                  {sampleStabilityMap.get(selectedSample.id)?.isExpiringSoon && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border-l-4 border-l-amber-500 border border-amber-200 flex items-center justify-between text-amber-950 gap-3 shadow-xs">
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="w-5 h-5 text-amber-600 shrink-0 animate-bounce" />
+                        <div>
+                          <p className="text-xs font-bold text-amber-900">
+                            Urgent Specimen Action Required: Under 30 Minutes Remaining!
+                          </p>
+                          <p className="text-[11px] text-amber-800">
+                            Pre-analytical stability countdown expires shortly. Complete verification and load onto analyzer immediately.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {sampleStabilityMap.get(selectedSample.id)?.isExpired && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 border-l-4 border-l-rose-600 border border-rose-200 flex items-center justify-between text-rose-950 gap-3 shadow-xs">
+                      <div className="flex items-center gap-2.5">
+                        <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-rose-900">
+                            Specimen Expired: Stability Duration Exceeded!
+                          </p>
+                          <p className="text-[11px] text-rose-800">
+                            Pre-analytical viability has ended. Complete testing immediately or request recollection.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Card 1: Sample Collected Successfully Banner */}
                   <div
                     className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm md:max-lg:p-4"
@@ -1307,6 +1446,12 @@ export default function SampleVerification() {
                           </div>
                         </div>
                       )}
+                      <div>
+                        <span className="block text-[11px] font-semibold tracking-wider text-slate-400 uppercase mb-1.5">
+                          Specimen Stability &amp; Expiry
+                        </span>
+                        <SampleTimerBadge info={sampleStabilityMap.get(selectedSample.id)} size="sm" showExactTimes />
+                      </div>
                     </div>
                   </div>
 
@@ -3294,6 +3439,16 @@ export default function SampleVerification() {
               </header>
               {/* END: HeaderSection */}
 
+              {/* High Priority Sample Expiry Alerts */}
+              <div className="px-8 mb-4">
+                <SampleExpiryAlertBanner
+                  expiringCount={expiringSoonCount}
+                  expiredCount={expiredStabilityCount}
+                  onFilterUrgent={() => setStatusFilter("PENDING")}
+                  onFilterExpired={() => setStatusFilter("PENDING")}
+                />
+              </div>
+
               {/* BEGIN: TableContent */}
               <div
                 className="overflow-x-auto w-full"
@@ -3321,6 +3476,12 @@ export default function SampleVerification() {
                         COLLECTED TIME
                       </th>
                       <th
+                        className="py-5 px-6 font-bold text-center"
+                        scope="col"
+                      >
+                        STABILITY &amp; EXPIRY
+                      </th>
+                      <th
                         className="py-5 px-8 font-bold text-center"
                         scope="col"
                       >
@@ -3338,7 +3499,7 @@ export default function SampleVerification() {
                     {isLoading ? (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           className="py-16 text-center text-slate-500"
                         >
                           <div className="flex flex-col items-center justify-center gap-3">
@@ -3371,7 +3532,7 @@ export default function SampleVerification() {
                     ) : filteredSamples.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           className="py-16 text-center"
                         >
                           {samples.length === 0 ? (
@@ -3435,16 +3596,26 @@ export default function SampleVerification() {
                             </td>
                             <td className="py-5 px-6 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                <span className="font-medium text-slate-800 block">
+                                <span className="font-semibold text-slate-800 block">
                                   {s.testName}
                                 </span>
+                                {s.isSubTest && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    Sub-Test
+                                  </span>
+                                )}
                                 {isOverdue && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
                                     OVERDUE
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                              {s.packageName && (
+                                <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                  Package: <span className="text-slate-700 font-semibold">{s.packageName}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 flex-wrap">
                                 <span>{s.sampleType}</span>
                                 {s.targetDate && (
                                   <span className={`font-medium ${isOverdue ? "text-rose-700 font-bold" : "text-slate-400"}`}>
@@ -3464,6 +3635,9 @@ export default function SampleVerification() {
                                 </span>
                               )}
                             </div>
+                          </td>
+                          <td className="py-5 px-6 text-center whitespace-nowrap">
+                            <SampleTimerBadge info={sampleStabilityMap.get(s.id)} size="sm" />
                           </td>
                           <td className="py-5 px-8 text-center whitespace-nowrap">
                             {s.status === "VERIFIED" ? (

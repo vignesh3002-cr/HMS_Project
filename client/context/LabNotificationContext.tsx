@@ -9,6 +9,7 @@ interface LabNotificationContextType {
   notifications: LabNotificationItem[];
   unreadCount: number;
   statCount: number;
+  urgentCount: number;
   isLoading: boolean;
   markAsRead: (id: string) => void;
   markAllAsRead: () => Promise<void>;
@@ -25,6 +26,7 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
     total: 0,
     unreadCount: 0,
     statCount: 0,
+    urgentCount: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -43,7 +45,7 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
     setIsLoading(true);
     fetchNotifications();
 
-    // Poll every 25s for new lab orders & STAT alerts
+    // Poll every 25s for new lab orders & urgent alerts
     const interval = setInterval(fetchNotifications, 25000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
@@ -54,11 +56,13 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
       const updated = prev.notifications.map((item) =>
         item.id === id ? { ...item, read: true } : item
       );
+      const urgentCount = updated.filter((item) => !item.read && (item.priority === "STAT" || item.priority === "URGENT")).length;
       return {
         ...prev,
         notifications: updated,
         unreadCount: updated.filter((item) => !item.read).length,
-        statCount: updated.filter((item) => !item.read && (item.priority === "STAT" || item.priority === "URGENT")).length,
+        statCount: urgentCount,
+        urgentCount,
       };
     });
   }, []);
@@ -71,6 +75,7 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
       notifications: prev.notifications.map((item) => ({ ...item, read: true })),
       unreadCount: 0,
       statCount: 0,
+      urgentCount: 0,
     }));
   }, [data.notifications]);
 
@@ -78,12 +83,14 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
     labNotificationApi.dismiss(id);
     setData((prev) => {
       const updated = prev.notifications.filter((item) => item.id !== id);
+      const urgentCount = updated.filter((item) => !item.read && (item.priority === "STAT" || item.priority === "URGENT")).length;
       return {
         ...prev,
         notifications: updated,
         total: updated.length,
         unreadCount: updated.filter((item) => !item.read).length,
-        statCount: updated.filter((item) => !item.read && (item.priority === "STAT" || item.priority === "URGENT")).length,
+        statCount: urgentCount,
+        urgentCount,
       };
     });
   }, []);
@@ -96,6 +103,7 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
       total: 0,
       unreadCount: 0,
       statCount: 0,
+      urgentCount: 0,
     });
   }, [data.notifications]);
 
@@ -104,6 +112,7 @@ export const LabNotificationProvider: React.FC<{ children: React.ReactNode }> = 
       notifications: data.notifications,
       unreadCount: data.unreadCount,
       statCount: data.statCount,
+      urgentCount: data.urgentCount || data.statCount,
       isLoading,
       markAsRead,
       markAllAsRead,
@@ -129,6 +138,7 @@ export const useLabNotifications = (): LabNotificationContextType => {
       notifications: [],
       unreadCount: 0,
       statCount: 0,
+      urgentCount: 0,
       isLoading: false,
       markAsRead: () => {},
       markAllAsRead: async () => {},

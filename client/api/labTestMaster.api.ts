@@ -24,7 +24,15 @@ export interface LabTestMasterRecord {
   reference_range: string | null;
   price: number | string | null;
   tat_hours: number | null;
+  tat_text?: string | null;
+  expiry_time_hours?: number | string | null;
   test_status: number | null;
+  is_outsourced?: boolean | null;
+  outsource_lab?: string | null;
+  result_type?: string | null;
+  walkin_price?: number | string | null;
+  is_panel?: boolean | null;
+  includes_details?: string | null;
   branch_id: string | null;
   user_id: string | null;
   created_at: string;

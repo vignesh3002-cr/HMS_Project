@@ -20,6 +20,7 @@ import {
   resolveStandardParameterRefRange,
   formatGenderReferenceRange,
 } from "@/utils/labReportPdf";
+import { isPackageTest, decomposePackageTest } from "./packageDecomposition";
 import { labReportApi, LabReportRecord } from "@/api/labReport.api";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
@@ -1152,73 +1153,165 @@ export default function ReportTransfer() {
               {/* BEGIN: LaboratoryTestResultsTable */}
               <section
                 aria-label="Diagnostic Results Table"
-                className="overflow-x-auto mb-8"
+                className="overflow-x-auto mb-8 space-y-6"
               >
-                <table className="w-full text-left border border-black text-[13px] border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 font-bold text-black uppercase text-[11px] tracking-wider border border-black">
-                      <th
-                        className="py-2.5 px-4 font-bold border border-black"
-                        scope="col"
-                      >
-                        PARAMETER
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        RESULT
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        UNIT
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        REFERENCE RANGE
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-gray-900 font-medium">
-                    {activeParameters.map((p, idx) => {
-                      const statusLower = String(p.status || "").toLowerCase();
-                      const isCritical = statusLower.includes("crit");
-                      const isAbnormal = !isCritical && (statusLower.includes("abnormal") || statusLower.includes("high") || statusLower.includes("low") || statusLower.includes("warn"));
+                {isPackageTest(selectedTransfer.testProfile) ? (
+                  decomposePackageTest(selectedTransfer.testProfile).map((sec, secIdx) => {
+                    const secParams = activeParameters.filter((p) => sec.filterParameter(p.parameter));
+                    if (secParams.length === 0) return null;
 
-                      return (
-                        <tr
-                          key={idx}
-                          className="hover:bg-slate-50/50 border border-black"
+                    return (
+                      <div key={sec.key || secIdx} className="border border-black overflow-hidden">
+                        {/* Sub-Test Section Header */}
+                        <div className="bg-slate-100 border-b border-black px-4 py-2 flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#00488D]" />
+                            <span className="font-bold text-black text-xs uppercase tracking-wide">
+                              Sub-Test {secIdx + 1}: {sec.name}
+                            </span>
+                            <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 bg-white border border-black rounded">
+                              {sec.code}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-gray-700 font-medium">
+                            <span>{sec.sampleType}</span>
+                            <span>•</span>
+                            <span className="font-semibold text-black">{sec.containerType}</span>
+                          </div>
+                        </div>
+
+                        {/* Parameters Table for this sub-test */}
+                        <table className="w-full text-left text-[13px] border-collapse">
+                          <thead>
+                            <tr className="bg-gray-50 font-bold text-black uppercase text-[10.5px] tracking-wider border-b border-black">
+                              <th className="py-2.5 px-4 font-bold border-r border-black" scope="col">
+                                PARAMETER
+                              </th>
+                              <th className="py-2.5 px-4 text-center font-bold border-r border-black" scope="col">
+                                RESULT
+                              </th>
+                              <th className="py-2.5 px-4 text-center font-bold border-r border-black" scope="col">
+                                UNIT
+                              </th>
+                              <th className="py-2.5 px-4 text-center font-bold" scope="col">
+                                REFERENCE RANGE
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-gray-900 font-medium divide-y divide-black/20">
+                            {secParams.map((p, idx) => {
+                              const statusLower = String(p.status || "").toLowerCase();
+                              const isCritical = statusLower.includes("crit");
+                              const isAbnormal =
+                                !isCritical &&
+                                (statusLower.includes("abnormal") ||
+                                  statusLower.includes("high") ||
+                                  statusLower.includes("low") ||
+                                  statusLower.includes("warn"));
+
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50/50">
+                                  <td className="py-2 px-4 font-semibold text-gray-900 border-r border-black">
+                                    {p.parameter}
+                                  </td>
+                                  <td
+                                    className={`py-2 px-4 text-center font-mono border-r border-black ${
+                                      isCritical
+                                        ? "text-red-600 font-bold"
+                                        : isAbnormal
+                                        ? "text-[#ca8a04] font-bold"
+                                        : "text-black font-medium"
+                                    }`}
+                                  >
+                                    {p.result}
+                                  </td>
+                                  <td className="py-2 px-4 text-center border-r border-black">
+                                    {p.unit || resolveStandardParameterUnit(p.parameter, sec.name) || "—"}
+                                  </td>
+                                  <td className="py-2 px-4 text-center">
+                                    {p.referenceRange ||
+                                      resolveStandardParameterRefRange(
+                                        p.parameter,
+                                        selectedTransfer.patientAgeGender,
+                                        sec.name
+                                      ) ||
+                                      "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <table className="w-full text-left border border-black text-[13px] border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 font-bold text-black uppercase text-[11px] tracking-wider border border-black">
+                        <th
+                          className="py-2.5 px-4 font-bold border border-black"
+                          scope="col"
                         >
-                          <td className="py-2 px-4 font-semibold text-gray-900 border border-black">
-                            {p.parameter}
-                          </td>
-                          <td
-                            className={`py-2 px-4 text-center font-mono border border-black ${
-                              isCritical
-                                ? "text-red-600 font-bold"
-                                : isAbnormal
-                                ? "text-[#ca8a04] font-bold"
-                                : "text-black font-medium"
-                            }`}
+                          PARAMETER
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          RESULT
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          UNIT
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          REFERENCE RANGE
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-gray-900 font-medium">
+                      {activeParameters.map((p, idx) => {
+                        const statusLower = String(p.status || "").toLowerCase();
+                        const isCritical = statusLower.includes("crit");
+                        const isAbnormal = !isCritical && (statusLower.includes("abnormal") || statusLower.includes("high") || statusLower.includes("low") || statusLower.includes("warn"));
+
+                        return (
+                          <tr
+                            key={idx}
+                            className="hover:bg-slate-50/50 border border-black"
                           >
-                            {p.result}
-                          </td>
-                          <td className="py-2 px-4 text-center border border-black">
-                            {p.unit || resolveStandardParameterUnit(p.parameter, selectedTransfer.testProfile) || "—"}
-                          </td>
-                          <td className="py-2 px-4 text-center border border-black">
-                            {p.referenceRange || resolveStandardParameterRefRange(p.parameter, selectedTransfer.patientAgeGender, selectedTransfer.testProfile) || "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="py-2 px-4 font-semibold text-gray-900 border border-black">
+                              {p.parameter}
+                            </td>
+                            <td
+                              className={`py-2 px-4 text-center font-mono border border-black ${
+                                isCritical
+                                  ? "text-red-600 font-bold"
+                                  : isAbnormal
+                                  ? "text-[#ca8a04] font-bold"
+                                  : "text-black font-medium"
+                              }`}
+                            >
+                              {p.result}
+                            </td>
+                            <td className="py-2 px-4 text-center border border-black">
+                              {p.unit || resolveStandardParameterUnit(p.parameter, selectedTransfer.testProfile) || "—"}
+                            </td>
+                            <td className="py-2 px-4 text-center border border-black">
+                              {p.referenceRange || resolveStandardParameterRefRange(p.parameter, selectedTransfer.patientAgeGender, selectedTransfer.testProfile) || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </section>
               {/* END: LaboratoryTestResultsTable */}
 
@@ -1325,6 +1418,26 @@ export default function ReportTransfer() {
                         status: p.status === "CRITICAL" ? "Critical" : p.status === "ABNORMAL" ? "Abnormal" : "Normal",
                         approved: true,
                       }));
+
+                      const isPkg = isPackageTest(selectedTransfer.testProfile);
+                      let transferSections: any = undefined;
+                      if (isPkg) {
+                        const subDefs = decomposePackageTest(selectedTransfer.testProfile);
+                        const sections: any[] = [];
+                        subDefs.forEach((st) => {
+                          const matched = certifiedParameters.filter((p) => st.filterParameter(p.parameter));
+                          if (matched.length > 0) {
+                            sections.push({
+                              title: st.name,
+                              subtitle: `${st.sampleType} • ${st.containerType}`,
+                              code: st.code,
+                              parameters: matched,
+                            });
+                          }
+                        });
+                        if (sections.length > 0) transferSections = sections;
+                      }
+
                       downloadLabReportPdf({
                         reportId: selectedTransfer.reportId,
                         requestId: selectedTransfer.id,
@@ -1347,6 +1460,7 @@ export default function ReportTransfer() {
                         approverName: "Sarah Johnson",
                         approverRole: "Senior Pathologist (MD, DNB)",
                         overallDecision: "Approved",
+                        sections: transferSections,
                         parameters: certifiedParameters,
                       });
                       toast({

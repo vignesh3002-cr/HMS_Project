@@ -14,6 +14,13 @@ export interface LabReportPdfParameter {
   approved?: boolean;
 }
 
+export interface LabReportPdfSection {
+  title: string;
+  subtitle?: string;
+  code?: string;
+  parameters: LabReportPdfParameter[];
+}
+
 export interface LabReportPdfOptions {
   reportId: string;
   requestId?: string;
@@ -43,6 +50,7 @@ export interface LabReportPdfOptions {
   approvalDate?: string;
   signatureUrl?: string | null;
   overallDecision?: string;
+  sections?: LabReportPdfSection[];
   parameters: LabReportPdfParameter[];
 }
 
@@ -915,130 +923,284 @@ export function generateLabReportPdf(options: LabReportPdfOptions): {
   doc.text(options.targetDate || "—", rightValX, 154);
 
   /* ========================================================================= */
-  /* 3. Diagnostic Results Table (Border border-black grid)                    */
+  /* 3. Diagnostic Results Table(s) (Border border-black grid)                */
   /* ========================================================================= */
-  const parametersToUse =
-    options.parameters && options.parameters.length > 0
-      ? options.parameters
-      : getFallbackParametersForPanel(options.testPanel, options.patientAgeGender);
+  const hasSections = Array.isArray(options.sections) && options.sections.length > 0;
+  let finalY = 168;
 
-  const tableData = parametersToUse.map((p) => {
-    const paramName = (p.parameter || "").trim() || "Parameter";
-    const resultVal = p.result !== undefined && p.result !== null ? String(p.result) : "—";
+  if (hasSections) {
+    let currentY = 168;
+    options.sections!.forEach((sec, sIdx) => {
+      const secParams = sec.parameters && sec.parameters.length > 0 ? sec.parameters : [];
+      if (secParams.length === 0) return;
 
-    // 1. Resolve Unit with fallbacks
-    let rawUnit = (
-      p.unit ||
-      (p as any).units ||
-      (p as any).unit_of_measure ||
-      (p as any).uom ||
-      ""
-    ).trim();
-
-    if (!rawUnit || rawUnit === "—" || rawUnit === "-") {
-      rawUnit = resolveStandardParameterUnit(paramName, options.testPanel);
-    }
-
-    // 2. Resolve Reference Range with fallbacks and gender formatting
-    let rawRange = (
-      p.referenceRange ||
-      (p as any).reference_range ||
-      (p as any).ref_range ||
-      (p as any).refRange ||
-      (p as any).expectedRange ||
-      ""
-    ).trim();
-
-    if (
-      !rawRange ||
-      rawRange === "—" ||
-      rawRange === "-" ||
-      rawRange.toLowerCase() === "normal"
-    ) {
-      rawRange = resolveStandardParameterRefRange(
-        paramName,
-        options.patientAgeGender,
-        options.testPanel
-      );
-    } else {
-      rawRange = formatGenderReferenceRange(rawRange, options.patientAgeGender, rawUnit);
-    }
-
-    return [
-      paramName,
-      resultVal,
-      rawUnit || "—",
-      rawRange || "—",
-    ];
-  });
-
-  autoTable(doc, {
-    startY: 168,
-    head: [["PARAMETER", "RESULT", "UNIT", "REFERENCE RANGE"]],
-    body: tableData,
-    theme: "grid",
-    headStyles: {
-      fillColor: [243, 244, 246], // bg-gray-100
-      textColor: [0, 0, 0], // text-black
-      fontStyle: "bold",
-      fontSize: 8.5,
-      lineColor: [0, 0, 0], // border-black
-      lineWidth: 0.75,
-      halign: "center",
-    },
-    styles: {
-      lineColor: [0, 0, 0], // border-black
-      lineWidth: 0.75,
-      fontSize: 8.5,
-      cellPadding: 4.8,
-      textColor: [17, 24, 39],
-    },
-    columnStyles: {
-      0: { halign: "left", fontStyle: "bold", cellWidth: 190 },
-      1: { halign: "center", fontStyle: "normal", cellWidth: 95 },
-      2: { halign: "center", fontStyle: "normal", cellWidth: 80 },
-      3: { halign: "center", fontStyle: "normal", cellWidth: 150 },
-    },
-    alternateRowStyles: {
-      fillColor: [255, 255, 255],
-    },
-    didParseCell: (data) => {
-      if (data.section === "head" && data.column.index === 0) {
-        data.cell.styles.halign = "left";
+      // Check if we need a page break before starting this section banner
+      if (currentY + 65 > pageHeight - 60) {
+        doc.addPage();
+        currentY = 45;
       }
-      if (data.section === "body" && data.column.index === 1) {
-        const param = options.parameters[data.row.index];
-        const statusStr = String(
-          param?.status ||
-          (param as any)?.abnormal_flag ||
-          (param as any)?.flag ||
+
+      // Draw Section Banner Bar (Accredited diagnostic header)
+      doc.setFillColor(243, 244, 246); // slate/gray-100
+      doc.rect(40, currentY, pageWidth - 80, 20, "F");
+
+      // Left blue accent bar
+      doc.setFillColor(0, 72, 141); // #00488D
+      doc.rect(40, currentY, 4, 20, "F");
+
+      // Outer border
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.75);
+      doc.rect(40, currentY, pageWidth - 80, 20, "S");
+
+      // Section Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 72, 141);
+      const titleText = `SUB-TEST ${sIdx + 1}: ${sec.title.toUpperCase()}${sec.code ? ` (${sec.code})` : ""}`;
+      doc.text(titleText, 48, currentY + 13.5);
+
+      // Subtitle (Specimen / Container)
+      if (sec.subtitle) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.setTextColor(75, 85, 99);
+        const subW = doc.getTextWidth(sec.subtitle);
+        doc.text(sec.subtitle, pageWidth - 48 - subW, currentY + 13.5);
+      }
+
+      const secTableData = secParams.map((p) => {
+        const paramName = (p.parameter || "").trim() || "Parameter";
+        const resultVal = p.result !== undefined && p.result !== null ? String(p.result) : "—";
+
+        let rawUnit = (
+          p.unit ||
+          (p as any).units ||
+          (p as any).unit_of_measure ||
           ""
-        ).toLowerCase().trim();
+        ).trim();
 
-        if (statusStr.includes("crit")) {
-          // Critical: Red
-          data.cell.styles.textColor = [220, 38, 38];
-          data.cell.styles.fontStyle = "bold";
-        } else if (
-          statusStr.includes("abnormal") ||
-          statusStr.includes("high") ||
-          statusStr.includes("low") ||
-          statusStr.includes("warn")
-        ) {
-          // Abnormal: Yellow
-          data.cell.styles.textColor = [202, 138, 4];
-          data.cell.styles.fontStyle = "bold";
-        } else {
-          // Normal: Black
-          data.cell.styles.textColor = [0, 0, 0];
-          data.cell.styles.fontStyle = "normal";
+        if (!rawUnit || rawUnit === "—" || rawUnit === "-") {
+          rawUnit =
+            resolveStandardParameterUnit(paramName, sec.title) ||
+            resolveStandardParameterUnit(paramName, options.testPanel);
         }
-      }
-    },
-    margin: { left: 40, right: 40 },
-  });
 
-  const finalY = (doc as any).lastAutoTable?.finalY || 450;
+        let rawRange = (
+          p.referenceRange ||
+          (p as any).reference_range ||
+          (p as any).ref_range ||
+          (p as any).refRange ||
+          ""
+        ).trim();
+
+        if (
+          !rawRange ||
+          rawRange === "—" ||
+          rawRange === "-" ||
+          rawRange.toLowerCase() === "normal"
+        ) {
+          rawRange =
+            resolveStandardParameterRefRange(paramName, options.patientAgeGender, sec.title) ||
+            resolveStandardParameterRefRange(paramName, options.patientAgeGender, options.testPanel);
+        } else {
+          rawRange = formatGenderReferenceRange(rawRange, options.patientAgeGender, rawUnit);
+        }
+
+        return [paramName, resultVal, rawUnit || "—", rawRange || "—"];
+      });
+
+      autoTable(doc, {
+        startY: currentY + 20,
+        head: [["PARAMETER", "RESULT", "UNIT", "REFERENCE RANGE"]],
+        body: secTableData,
+        theme: "grid",
+        headStyles: {
+          fillColor: [243, 244, 246],
+          textColor: [0, 0, 0],
+          fontStyle: "bold",
+          fontSize: 8.5,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.75,
+          halign: "center",
+        },
+        styles: {
+          lineColor: [0, 0, 0],
+          lineWidth: 0.75,
+          fontSize: 8.5,
+          cellPadding: 4.5,
+          textColor: [17, 24, 39],
+        },
+        columnStyles: {
+          0: { halign: "left", fontStyle: "bold", cellWidth: 190 },
+          1: { halign: "center", fontStyle: "normal", cellWidth: 95 },
+          2: { halign: "center", fontStyle: "normal", cellWidth: 80 },
+          3: { halign: "center", fontStyle: "normal", cellWidth: 150 },
+        },
+        alternateRowStyles: {
+          fillColor: [255, 255, 255],
+        },
+        didParseCell: (data) => {
+          if (data.section === "head" && data.column.index === 0) {
+            data.cell.styles.halign = "left";
+          }
+          if (data.section === "body" && data.column.index === 1) {
+            const param = secParams[data.row.index];
+            const statusStr = String(
+              param?.status ||
+              (param as any)?.abnormal_flag ||
+              (param as any)?.flag ||
+              ""
+            ).toLowerCase().trim();
+
+            if (statusStr.includes("crit")) {
+              data.cell.styles.textColor = [220, 38, 38];
+              data.cell.styles.fontStyle = "bold";
+            } else if (
+              statusStr.includes("abnormal") ||
+              statusStr.includes("high") ||
+              statusStr.includes("low") ||
+              statusStr.includes("warn")
+            ) {
+              data.cell.styles.textColor = [202, 138, 4];
+              data.cell.styles.fontStyle = "bold";
+            } else {
+              data.cell.styles.textColor = [0, 0, 0];
+              data.cell.styles.fontStyle = "normal";
+            }
+          }
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      currentY = ((doc as any).lastAutoTable?.finalY || currentY + 100) + 14;
+    });
+
+    finalY = currentY - 14;
+  } else {
+    const parametersToUse =
+      options.parameters && options.parameters.length > 0
+        ? options.parameters
+        : getFallbackParametersForPanel(options.testPanel, options.patientAgeGender);
+
+    const tableData = parametersToUse.map((p) => {
+      const paramName = (p.parameter || "").trim() || "Parameter";
+      const resultVal = p.result !== undefined && p.result !== null ? String(p.result) : "—";
+
+      // 1. Resolve Unit with fallbacks
+      let rawUnit = (
+        p.unit ||
+        (p as any).units ||
+        (p as any).unit_of_measure ||
+        (p as any).uom ||
+        ""
+      ).trim();
+
+      if (!rawUnit || rawUnit === "—" || rawUnit === "-") {
+        rawUnit = resolveStandardParameterUnit(paramName, options.testPanel);
+      }
+
+      // 2. Resolve Reference Range with fallbacks and gender formatting
+      let rawRange = (
+        p.referenceRange ||
+        (p as any).reference_range ||
+        (p as any).ref_range ||
+        (p as any).refRange ||
+        (p as any).expectedRange ||
+        ""
+      ).trim();
+
+      if (
+        !rawRange ||
+        rawRange === "—" ||
+        rawRange === "-" ||
+        rawRange.toLowerCase() === "normal"
+      ) {
+        rawRange = resolveStandardParameterRefRange(
+          paramName,
+          options.patientAgeGender,
+          options.testPanel
+        );
+      } else {
+        rawRange = formatGenderReferenceRange(rawRange, options.patientAgeGender, rawUnit);
+      }
+
+      return [
+        paramName,
+        resultVal,
+        rawUnit || "—",
+        rawRange || "—",
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 168,
+      head: [["PARAMETER", "RESULT", "UNIT", "REFERENCE RANGE"]],
+      body: tableData,
+      theme: "grid",
+      headStyles: {
+        fillColor: [243, 244, 246], // bg-gray-100
+        textColor: [0, 0, 0], // text-black
+        fontStyle: "bold",
+        fontSize: 8.5,
+        lineColor: [0, 0, 0], // border-black
+        lineWidth: 0.75,
+        halign: "center",
+      },
+      styles: {
+        lineColor: [0, 0, 0], // border-black
+        lineWidth: 0.75,
+        fontSize: 8.5,
+        cellPadding: 4.8,
+        textColor: [17, 24, 39],
+      },
+      columnStyles: {
+        0: { halign: "left", fontStyle: "bold", cellWidth: 190 },
+        1: { halign: "center", fontStyle: "normal", cellWidth: 95 },
+        2: { halign: "center", fontStyle: "normal", cellWidth: 80 },
+        3: { halign: "center", fontStyle: "normal", cellWidth: 150 },
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255],
+      },
+      didParseCell: (data) => {
+        if (data.section === "head" && data.column.index === 0) {
+          data.cell.styles.halign = "left";
+        }
+        if (data.section === "body" && data.column.index === 1) {
+          const param = options.parameters[data.row.index];
+          const statusStr = String(
+            param?.status ||
+            (param as any)?.abnormal_flag ||
+            (param as any)?.flag ||
+            ""
+          ).toLowerCase().trim();
+
+          if (statusStr.includes("crit")) {
+            // Critical: Red
+            data.cell.styles.textColor = [220, 38, 38];
+            data.cell.styles.fontStyle = "bold";
+          } else if (
+            statusStr.includes("abnormal") ||
+            statusStr.includes("high") ||
+            statusStr.includes("low") ||
+            statusStr.includes("warn")
+          ) {
+            // Abnormal: Yellow
+            data.cell.styles.textColor = [202, 138, 4];
+            data.cell.styles.fontStyle = "bold";
+          } else {
+            // Normal: Black
+            data.cell.styles.textColor = [0, 0, 0];
+            data.cell.styles.fontStyle = "normal";
+          }
+        }
+      },
+      margin: { left: 40, right: 40 },
+    });
+
+    finalY = (doc as any).lastAutoTable?.finalY || 450;
+  }
 
   /* ========================================================================= */
   /* 4. Clinical Remarks & Digital Signature Section                          */
@@ -1157,6 +1319,21 @@ export function generateLabReportPdf(options: LabReportPdfOptions): {
     40,
     disclaimerY + 22
   );
+
+  // Accredited page numbering footer across all pages
+  const totalPages = (doc as any).internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Report ID: ${options.reportId || "—"}  |  ${options.testPanel || "Diagnostic Report"}  |  Page ${i} of ${totalPages}`,
+      pageWidth / 2,
+      pageHeight - 12,
+      { align: "center" }
+    );
+  }
 
   const pdfBase64 = doc.output("datauristring");
   const pdfBlob = doc.output("blob");
