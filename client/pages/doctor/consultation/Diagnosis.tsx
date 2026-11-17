@@ -60,6 +60,11 @@ import {
 } from "./scoreSummary";
 import { patientApi, type PatientRecord } from "../../../api/patient.api";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import type { GenomicTestRecord } from "../../../api/genomics.api";
+import { NgsReportModal } from "./NgsReportModal";
+import { NgsReportsPanel } from "./NgsReportsPanel";
+import { GeneMasterAdminModal } from "./GeneMasterAdminModal";
+import { diagnosisCancerSite } from "./genomicsForm";
 import {
   findActiveEncounter,
   findLatestStagingDetailId,
@@ -1748,6 +1753,14 @@ const Diagnosis: React.FC<{
   const [currentStagingDetailId, setCurrentStagingDetailId] = useState<
     string | null
   >(null);
+
+  /* NGS / genomic reports: the popup opened from the Survivor row, the row
+     being edited, and a version counter that refreshes the saved-report
+     cards after every save/delete. */
+  const [ngsModalOpen, setNgsModalOpen] = useState(false);
+  const [ngsEditing, setNgsEditing] = useState<GenomicTestRecord | null>(null);
+  const [ngsVersion, setNgsVersion] = useState(0);
+  const [geneMasterOpen, setGeneMasterOpen] = useState(false);
 
   /* Pinned scores, kept per browser (not per patient - a doctor's favourite
      scores are the same whichever patient is open). */
@@ -5124,46 +5137,81 @@ const Diagnosis: React.FC<{
             />
           </div>
 
-          {/* Survivor */}
-          <div>
-            <label className="mb-2 block text-[10px] font-bold text-gray-900">
-              Survivor
-            </label>
+          {/* Survivor + NGS report entry point */}
+          <div className="flex flex-wrap items-end justify-between gap-3 sm:col-span-2">
+            <div>
+              <label className="mb-2 block text-[10px] font-bold text-gray-900">
+                Survivor
+              </label>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "Yes"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "Yes" ? "" : "Yes",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                Yes
-              </label>
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "No"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "No" ? "" : "No",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                No
-              </label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "Yes"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "Yes" ? "" : "Yes",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  Yes
+                </label>
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "No"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "No" ? "" : "No",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  No
+                </label>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setNgsEditing(null);
+                setNgsModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#004785] bg-white px-3.5 py-2 text-[11px] font-bold text-[#004785] shadow-sm transition-all hover:bg-[#F2F4F6] active:scale-[0.98]"
+            >
+              <span className="text-[14px] leading-none">+</span> Add NGS report
+            </button>
           </div>
         </div>
+
+        <NgsReportModal
+          open={ngsModalOpen}
+          onClose={() => {
+            setNgsModalOpen(false);
+            setNgsEditing(null);
+          }}
+          patientId={resolvedPatientId}
+          encounterNo={encounterNo}
+          stagingDetailId={currentStagingDetailId || null}
+          defaultCancerSite={diagnosisCancerSite(
+            formData.type,
+            joinLabels("subType", orderByType(formData.subType))
+          )}
+          editing={ngsEditing}
+          onSaved={() => setNgsVersion((version) => version + 1)}
+        />
+
+        <GeneMasterAdminModal
+          open={geneMasterOpen}
+          onClose={() => setGeneMasterOpen(false)}
+        />
 
         {/* Diagnosis API Error */}
         {diagnosisError && (
@@ -5317,6 +5365,23 @@ const Diagnosis: React.FC<{
           )}
         </div>
 
+           {/* NGS / genomic reports saved against this visit + diagnosis */}
+        <div className="mt-6">
+          <NgsReportsPanel
+            patientId={resolvedPatientId}
+            refreshKey={ngsVersion}
+            onAdd={() => {
+              setNgsEditing(null);
+              setNgsModalOpen(true);
+            }}
+            onEdit={(test) => {
+              setNgsEditing(test);
+              setNgsModalOpen(true);
+            }}
+            onChanged={() => setNgsVersion((version) => version + 1)}
+            onManageGenes={() => setGeneMasterOpen(true)}
+          />
+        </div>
         {/* Footer Action */}
         <div className="mt-12 flex justify-end">
           <button
