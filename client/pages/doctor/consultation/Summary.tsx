@@ -2351,36 +2351,19 @@ const Summary: React.FC<{
     /* ---------- Last page: chemotherapy consent ---------- */
     doc.addPage();
     consentStartPage = doc.getNumberOfPages();
-    const consentTitle = "CONSENT FOR CHEMOTHERAPY TREATMENT";
+
     const drawConsentTitle = () => {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(13);
       doc.setTextColor(...BLACK);
-      doc.text(consentTitle, pageWidth / 2, 50, { align: "center" });
+      doc.text("Chemotherapy Consent form", pageWidth / 2, 50, { align: "center" });
       return 72;
     };
+
     y = drawConsentTitle();
 
-    autoTable(doc, {
-      theme: "plain",
-      startY: y,
-      margin: { left: marginX, right: marginX },
-      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 3, textColor: BLACK },
-      columnStyles: {
-        0: { textColor: GREY, cellWidth: 95 },
-        2: { textColor: GREY, cellWidth: 95 },
-      },
-      body: [
-        ["Patient Name", patientLabel, "UHID", resolvedPatientId || "-"],
-        ["Cancer Type", cancerType || "-", "Diagnosis Date", diagnosisDate || "-"],
-        ["Protocol", protocol || "-", "Duration", duration || "-"],
-        ["Cycle / Day", visitCycleDay || "-", "Planned Date", visitPlannedDate || "-"],
-        ["Date of Admission", doa || "-", "", ""],
-      ],
-    });
-    y = ((doc as any).lastAutoTable?.finalY ?? y) + 16;
-
     const consentWidth = pageWidth - marginX * 2;
+
     const writeConsent = (text: string, options: { bold?: boolean; indent?: number; gap?: number } = {}) => {
       const indent = options.indent ?? 0;
       doc.setFont("helvetica", options.bold ? "bold" : "normal");
@@ -2397,77 +2380,175 @@ const Summary: React.FC<{
       y += lines.length * 13.5 + (options.gap ?? 4);
     };
 
+    const drawFillLine = (label: string, value = "") => {
+      const full = `${label}: ${value || "______________________________________________"}`;
+      const lines = doc.splitTextToSize(full, consentWidth) as string[];
+      if (y + lines.length * 13.5 > contentBottom) {
+        doc.addPage();
+        y = drawConsentTitle();
+      }
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(...BLACK);
+      doc.text(lines, marginX, y);
+      y += lines.length * 13.5 + 6;
+    };
+
+    /* ---- Page 1 ---- */
     writeConsent(
-      "I, the undersigned patient / legal guardian of the above patient, have been informed by the treating oncologist about the diagnosis and the proposed chemotherapy, and I confirm that:",
+      `I ${patientName || "____________________"} Understand that I have been diagnosed with ${visitDiagnosisName || "____________________"} and I will be treated with anticancer therapy potentially including biological agents to try to reduce or possibly eliminate the cancer cells in body.`,
       { gap: 8 }
     );
-    [
-      "The nature of my illness, the chemotherapy protocol, the number of cycles, the schedule and the expected benefits of the treatment have been explained to me in a language I understand.",
-      "I understand that chemotherapy can cause side effects, commonly nausea, vomiting, loss of appetite, hair loss, tiredness, mouth sores, diarrhoea or constipation, and low blood counts with a higher risk of infection, bleeding and anaemia.",
-      "I understand that serious and rarely life-threatening complications may occur, including severe allergic or infusion reactions, damage to the heart, lungs, kidneys, liver or nerves, leakage of the drug outside the vein (extravasation) and severe infection, and that the response to treatment cannot be guaranteed.",
-      "The alternatives to chemotherapy, and the likely outcome without treatment, have been discussed with me.",
-      "I agree to the blood tests, investigations, intravenous access and supportive medicines (anti-sickness, hydration, growth factors and others) needed to give the treatment safely, and to dose changes, delays or stopping of treatment when the doctor considers it necessary.",
-      "I will follow the instructions given to me, take the prescribed medicines, attend the scheduled visits and tests, and report fever, bleeding, breathlessness, severe vomiting, diarrhoea or any new symptom to the hospital immediately.",
-      "I have been advised to avoid pregnancy, or fathering a child, during treatment and for the period advised by the doctor, and to inform the doctor if pregnancy is suspected.",
-      "I have had the opportunity to ask questions and they have been answered to my satisfaction. I understand that I may refuse or withdraw from treatment at any time, and that this will not affect my further care.",
-    ].forEach((statement, index) =>
-      writeConsent(`${index + 1}.  ${statement}`, { indent: 0, gap: 5 })
-    );
+
     writeConsent(
-      "I give my free and voluntary consent to receive chemotherapy as explained above.",
-      { bold: true, gap: 10 }
+      "This consent form authorization is for repeat cycles of the medications listed below. I here by consent to treatment with the following anticancer therapy: (Please list drugs)",
+      { gap: 2 }
     );
 
-    /* Signature blocks: Patient / Guardian, Witness, Treating Doctor. */
-    /* [label, prefilled value] - a blank value gets a line to write on. */
-    const signatureBlocks: [string, [string, string][]][] = [
-      [
-        "Patient / Guardian",
-        [["Signature", ""], ["Name", ""], ["Relationship", ""], ["Date & Time", ""]],
-      ],
-      ["Witness", [["Signature", ""], ["Name", ""], ["Date & Time", ""]]],
-      [
-        "Treating Doctor",
-        [
-          ["Signature", ""],
-          ["Name", doctorInfo.name],
-          ["Reg No.", doctorInfo.regNo],
-          ["Date & Time", ""],
-        ],
-      ],
-    ];
-    const blockHeight = 18 + 4 * 20;
-    if (y + blockHeight > contentBottom) {
+    const consentDrugsList = chemotherapyOrders
+      .map((item) => item.drug)
+      .filter(Boolean)
+      .join(", ");
+    writeConsent(consentDrugsList || "_______________________________________________________________", { gap: 8 });
+
+    writeConsent(
+      "This will be administered under the direction of the oncology consultants at the mentioned facility. The substantial risks/potential side effects from this therapy may include, but are not limited to nausea and vomiting, diarrhea, mouth sores, fatigue, loss of appetite, hair loss, skin rash, constipation, numb fingers or toes, pain, tiredness, chills/fever, sterility, headache, damage to blood vessels, elevated blood sugar, eye irritation, bleeding into the bladder, allergic reaction, damage at the IV site, hearing loss, vision changes, abnormalities in the liver, kidney, lung, heart, pancreas, other organs or brain function, low red blood count which result in loss of energy, low white blood cell count which may increase risk of infection, low platelet count which may cause bruising or bleeding, secondary cancer, complications leading to death & others.",
+      { gap: 4 }
+    );
+
+    writeConsent(
+      "Substantial risks/side effects may be treated with medications for nausea, diarrhea, pain, and high blood sugar and / or bladder problems. The substantial risk/side effects of low blood counts may be treated with antibiotics, other medications, hospitalizations, or transfusion of red blood cells or platelets.",
+      { gap: 4 }
+    );
+
+    writeConsent(
+      "I am aware that therapy may involve substantial risks/side effects to me (or my fetus, if I am pregnant) which cannot be predicted. I have been told to use effective birth control to prevent pregnancy. I will tell my doctor immediately. The potential benefit(s) of this therapy include but are not limited to better control of my cancer, or improvement in symptoms related to my cancer.",
+      { gap: 4 }
+    );
+
+    writeConsent(
+      "I understand that the information I have received about risks is not exhaustive and there may be other more remote risks.",
+      { gap: 4 }
+    );
+
+    writeConsent(
+      "Possibility of loss of life & other late complications of chemotherapy were also explained.",
+      { gap: 8 }
+    );
+
+    /* Signature block #1 */
+    const blockWidth = (consentWidth - 2 * 16) / 3;
+    const sig1Height = 6 + 3 * 20;
+    if (y + sig1Height > contentBottom) {
       doc.addPage();
       y = drawConsentTitle();
     }
-    const blockWidth = (consentWidth - 2 * 16) / 3;
-    signatureBlocks.forEach(([heading, fields], index) => {
-      const x = marginX + index * (blockWidth + 16);
-      let fieldY = y + 6;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.setTextColor(...BLACK);
-      doc.text(heading, x, fieldY);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      fields.forEach(([label, value]) => {
-        fieldY += 20;
-        const labelText = `${label}:`;
-        const valueX = x + doc.getTextWidth(labelText) + 4;
-        doc.setTextColor(...GREY);
-        doc.text(labelText, x, fieldY);
-        if (value) {
-          doc.setTextColor(...BLACK);
-          doc.text(value, valueX, fieldY, { maxWidth: x + blockWidth - valueX });
-        } else {
+    const sig1Rows = [
+      ["Patient Signature", "Witness Signature", "Doctor Signature"],
+      ["Name:", "1. Name:", ""],
+      ["2. Relations:", "", ""],
+    ];
+    sig1Rows.forEach((row, rowIndex) => {
+      const rowY = y + 6 + rowIndex * 20;
+      row.forEach((cell, cellIndex) => {
+        const x = marginX + cellIndex * (blockWidth + 16);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...BLACK);
+        doc.text(cell, x, rowY);
+        if (rowIndex > 0) {
+          const lineX = x + doc.getTextWidth(cell) + 4;
           doc.setDrawColor(160, 160, 160);
           doc.setLineWidth(0.5);
-          doc.line(valueX, fieldY + 1, x + blockWidth, fieldY + 1);
+          doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
         }
       });
     });
-    y += blockHeight;
+    y += sig1Height;
+
+    writeConsent("P.T.O", { gap: 4 });
+
+    /* ---- Page 2 ---- */
+    doc.addPage();
+    y = drawConsentTitle();
+
+    writeConsent("I have had the opportunity to ask questions regarding the proposed treatment(s) and of my questions have been answered to my satisfaction and in terms I understand.", { gap: 4 });
+    writeConsent("I have read or have had read to me this information Consent Form.", { gap: 4 });
+    writeConsent("I have had explained to me and understand the potential benefits and drawbacks, potential problems related to operation the likelihood of success, the possible results of non-treatment, and any medically reasonable alternatives.", { gap: 4 });
+    writeConsent("I have received no guarantees from anyone regarding the results that may be obtained.", { gap: 4 });
+    writeConsent("Consent. I do hereby consent to the above described treatment,", { gap: 4 });
+    writeConsent("I am also informed that Case record, clinical data and biological specimen will be used for further research / Publication purpose.", { gap: 8 });
+
+    writeConsent("The following were also clearly explained,", { bold: true, gap: 4 });
+
+    const treatmentIntentRaw = (context || "").toLowerCase();
+    const intentCurative = treatmentIntentRaw.includes("curative");
+    const intentPalliative = treatmentIntentRaw.includes("palliative");
+
+    const showFertility = patientMeta.age && !isNaN(Number(patientMeta.age)) && Number(patientMeta.age) < 35;
+
+    const reassessAfter = plan?.cycle_interval_days
+      ? `Every ${plan.cycle_interval_days} days`
+      : nextVisitDate || "";
+
+    const ptoFields = [
+      ["Treatment Plan:", protocol || ""],
+      ["HPE:", summaryClinicalFindings || ""],
+      [`Treatment Intent:  ${intentCurative ? "[X] " : "[ ] "}CURATIVE /  ${intentPalliative ? "[X] " : "[ ] "}PALLIATIVE`, ""],
+      ["Stage of Disease:", stage || ""],
+      ["Duration of Treatment:", duration || ""],
+      ["Reassess plan after:", reassessAfter || ""],
+      ...(showFertility ? [["If age less than 35, Sperm Preservation / Fertility Counseling Done:  [ ] Yes  [ ] No  [ ] NA", ""]] : []),
+      ["Is there any doubts on financial aspects / treatment plan  [ ] YES  [ ] NO", ""],
+    ];
+
+    ptoFields.forEach(([label, value]) => {
+      const full = `${label} ${value}`;
+      const lines = doc.splitTextToSize(full, consentWidth) as string[];
+      if (y + lines.length * 13.5 > contentBottom) {
+        doc.addPage();
+        y = drawConsentTitle();
+      }
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(...BLACK);
+      doc.text(lines, marginX, y);
+      y += lines.length * 13.5 + 6;
+    });
+
+    /* Signature block #2 */
+    const sig2Height = 6 + 3 * 20;
+    if (y + sig2Height > contentBottom) {
+      doc.addPage();
+      y = drawConsentTitle();
+    }
+    const sig2Rows = [
+      ["Patient Signature", "Witness Signature", "Doctor Signature"],
+      ["Name:", "1. Name:", "2. Mobile no:"],
+      ["2. Relations:", "", "3. Mobile no:"],
+    ];
+    sig2Rows.forEach((row, rowIndex) => {
+      const rowY = y + 6 + rowIndex * 20;
+      row.forEach((cell, cellIndex) => {
+        const x = marginX + cellIndex * (blockWidth + 16);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...BLACK);
+        doc.text(cell, x, rowY);
+        if (rowIndex > 0) {
+          const lineX = x + doc.getTextWidth(cell) + 4;
+          doc.setDrawColor(160, 160, 160);
+          doc.setLineWidth(0.5);
+          doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+        }
+      });
+    });
+    y += sig2Height;
+
+    /* Representative consent */
+    writeConsent("Signature for consent when given by representative of the patient", { bold: true, gap: 4 });
+    writeConsent("If the patient is unable to consent complete the following", { gap: 2 });
+    writeConsent(`Patient is a minor, or patient is unable to consent because ${"______________________________________________________"}`, { gap: 4 });
 
     } else {
       /* No chemotherapy plan: the visit summary on its own. */
