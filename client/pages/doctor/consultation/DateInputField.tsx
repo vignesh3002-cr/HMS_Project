@@ -19,7 +19,10 @@ const DateInputField: React.FC<{
   error?: string;
   ariaLabel?: string;
   allowPast?: boolean;
-}> = ({ id, value, onChange, error, ariaLabel = "Pick a date", allowPast = false }) => {
+  /* Blocks days after today (report/collection dates). Takes precedence over
+     the default "past disabled" behaviour. */
+  disableFuture?: boolean;
+}> = ({ id, value, onChange, error, ariaLabel = "Pick a date", allowPast = false, disableFuture = false }) => {
   const [open, setOpen] = useState(false);
   const picked = parsePickedDate(value);
 
@@ -59,13 +62,19 @@ const DateInputField: React.FC<{
             selected={picked}
             defaultMonth={picked}
             disabled={
-              allowPast
-                ? undefined
-                : (date) => {
+              disableFuture
+                ? (date) => {
                     const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    return date < today;
+                    today.setHours(23, 59, 59, 999);
+                    return date > today;
                   }
+                : allowPast
+                  ? undefined
+                  : (date) => {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      return date < today;
+                    }
             }
             onSelect={(date) => {
               if (date instanceof Date) {

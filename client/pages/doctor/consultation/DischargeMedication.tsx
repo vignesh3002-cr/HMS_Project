@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ClipboardList, Loader2 } from "lucide-react";
+import { getActiveTimezone } from "@/utils/timezone";
   import API, { getActiveBranchId } from "../../../api/axios";
   import { getUser } from "../../../utils/token";
   import { encounterApi } from "../../../api/encounter.api";
@@ -44,6 +45,7 @@ import { ArrowLeftIcon, BellIcon, DoubleArrowIcon, PhoneIcon } from "./icons";
 import { PharmacySlipModal } from "./PharmacySlipModal";
 import {
   buildSlipSourceRows,
+  formatSlipDuration,
   type SlipDischargeRow,
 } from "./pharmacySlip";
 
@@ -81,6 +83,8 @@ type DischargeMedicationItem = {
   frequency: string;
   instruction: string;
   duration: string;
+  /* Duration unit code from the protocol row (D / Wk / Mo). */
+  durationUnit: string;
 };
 
 /* The edit draft for one row; `medicineId` empty means a typed drug name. */
@@ -92,6 +96,7 @@ type DischargeMedicationDraft = {
   frequency: string;
   instruction: string;
   duration: string;
+  durationUnit: string;
 };
 
 /* Sentinel for "the doctor typed a drug name that isn't in the list", the
@@ -115,7 +120,9 @@ const joinDosage = (dose?: string | number | null, unit?: string | null) =>
   [dose ?? "", unit ?? ""].filter(Boolean).join(" ").trim();
 
 /* One place that turns a saved plan row into a table row, so the load, the
-   save and the edit agree on every field (duration included). */
+   save and the edit agree on every field (duration included).
+   The protocol's own form is copied into `formulation` when a discharge row
+   is edited, so it takes priority over medicine_master (which may disagree). */
 const toTableRow = (
   item: ChemoPlanItem,
   id: number
@@ -125,13 +132,14 @@ const toTableRow = (
   planItemId: item.chemotherapy_plan_item_id,
   drugSequence: item.drug_sequence ?? 0,
   drugName: chemoPlanItemName(item),
-  drugForm: item.medicine_master?.dosage_form ?? item.formulation ?? "",
+  drugForm: item.formulation ?? item.medicine_master?.dosage_form ?? "",
   genericId: item.medicine_master?.generic_id ?? "",
   dosage: joinDosage(item.protocol_dose, item.protocol_dose_unit),
   dosageUnit: item.protocol_dose_unit ?? "",
   frequency: item.frequency || "",
   instruction: item.administration_detail || "",
   duration: item.duration || "",
+  durationUnit: item.duration_days || "",
 });
 
 /* Ids for the patient's own rows, kept clear of the protocol rows' indexes
@@ -451,11 +459,11 @@ const DischargeMedication: React.FC<{
       planItemId: "",
       drugSequence: item.drug_sequence ?? 0,
       drugName:
-        item.medicine_master?.medicine_name ||
         item.medicine_master?.generic_name ||
+        item.medicine_master?.medicine_name ||
         item.drug_name ||
         "",
-      drugForm: item.medicine_master?.dosage_form || "",
+      drugForm: item.drug_from || item.medicine_master?.dosage_form || "",
       genericId: item.medicine_master?.generic_id || "",
       dosage:
         item.patient_dose != null && item.patient_dose !== ""
@@ -468,6 +476,7 @@ const DischargeMedication: React.FC<{
       instruction:
         item.administration_detail || item.comment || item.composition || "",
       duration: item.duration || "",
+      durationUnit: item.duration_days || "",
     });
 
     /* This patient's own discharge rows (saved on their chemo plan). */
@@ -776,6 +785,7 @@ const DischargeMedication: React.FC<{
         frequency: medication.frequency,
         instruction: medication.instruction,
         duration: medication.duration,
+        durationUnit: medication.durationUnit,
       })),
     [medications]
   );
@@ -875,7 +885,11 @@ const DischargeMedication: React.FC<{
     });
   };
 
-  const toPayload = (draft: DischargeMedicationDraft, sequence: number) => {
+  const toPayload = (
+    draft: DischargeMedicationDraft,
+    sequence: number,
+    row: DischargeMedicationItem
+  ) => {
     const { dose, unit } = splitDosage(draft.dosage);
     const numericDose = Number(dose);
 
@@ -885,13 +899,20 @@ const DischargeMedication: React.FC<{
       medicine_id: draft.medicineId || null,
       drug_name: draft.medicineId ? null : draft.drugName.trim(),
       drug_sequence: sequence,
+      /* The protocol's form (drug_from) for this row. Keeping it on the plan
+         item stops an edited discharge row falling back to a different
+         medicine_master dosage form in the pharmacy slip. */
+      formulation: row.drugForm.trim() || null,
       dosage: dose && !Number.isNaN(numericDose) ? numericDose : null,
       dosage_unit: draft.medicineId
         ? (draft.dosageUnit || unit || undefined)
         : undefined,
       frequency: draft.frequency.trim() || null,
       administration_detail: draft.instruction.trim() || null,
-      duration: draft.duration.trim() || null,
+      /* Plan items have no duration unit column, so the unit travels inside
+         the duration text ("30 D"). */
+      duration:
+        formatSlipDuration(draft.duration, draft.durationUnit) || null,
     };
   };
 
@@ -908,6 +929,7 @@ const DischargeMedication: React.FC<{
       frequency: row.frequency,
       instruction: row.instruction,
       duration: row.duration,
+      durationUnit: row.durationUnit,
     });
   };
 
@@ -928,6 +950,7 @@ const DischargeMedication: React.FC<{
       frequency: "",
       instruction: "",
       duration: "",
+      durationUnit: "",
     };
     setMedications((current) => [...current, row]);
     setNewRowIdRef(row.id);
@@ -998,7 +1021,7 @@ const DischargeMedication: React.FC<{
       setSavingEdit(true);
       setEditError("");
 
-      const payload = toPayload(editDraft, sequence);
+      const payload = toPayload(editDraft, sequence, row);
 
       const response = isNew
         ? await chemotherapyApi.addPlanDischargeMedicine(planId, payload)
@@ -1426,7 +1449,9 @@ const DischargeMedication: React.FC<{
 
       <td className="px-8 py-6">{medication.instruction}</td>
 
-      <td className="px-8 py-6">{medication.duration}</td>
+      <td className="px-8 py-6">
+        {formatSlipDuration(medication.duration, medication.durationUnit)}
+      </td>
 
       <td className="whitespace-nowrap px-6 py-6 text-right">
         <div className="flex items-center justify-end gap-3 text-gray-500">
@@ -1611,6 +1636,7 @@ if (embedded) {
         planId={slipContext.planId}
         cycleNumber={slipContext.cycle}
         cycleDay={slipContext.day}
+        patientId={resolvedPatientId}
         encounterNo={encounterNo ?? null}
         appointmentId={appointmentId ?? null}
         sourceRows={slipSourceRows}
@@ -1636,7 +1662,7 @@ if (embedded) {
           <div className="grid grid-cols-1 gap-5 p-8 sm:grid-cols-2">
             {ipdDischargeDone && (
               <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-[10px] font-semibold text-emerald-800">
-                Discharge details saved{activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}. The patient stays admitted until the admin confirms the discharge. You can still edit and save again.
+                Discharge details saved{activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}` : ""}. The patient stays admitted until the admin confirms the discharge. You can still edit and save again.
               </div>
             )}
             {(
@@ -1712,7 +1738,7 @@ if (embedded) {
                     <label className="text-[10px] font-semibold text-gray-700">Next Visit Date (from Follow Up)</label>
                     <div className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[10px] text-gray-700">
                       {ipdReviewDate
-                        ? new Date(ipdReviewDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                        ? new Date(ipdReviewDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
                         : "Not set -- add it in the Follow Up step"}
                     </div>
                   </div>

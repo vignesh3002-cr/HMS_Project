@@ -13,6 +13,7 @@ import {
 import HmsTable from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
@@ -192,7 +193,7 @@ const AppointmentPage: React.FC = () => {
   // Date selection
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const dateStr = dayKeyOf(selectedDate);
   const branchKey = isAllBranches ? "all" : (selectedBranchId || "all");
 
   const {
@@ -461,8 +462,8 @@ const AppointmentPage: React.FC = () => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Appointment Schedule",
-        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Appointment No", cell: (r: Appointment) => r.id },
           { header: "Token", cell: (r: Appointment) => r.tokenId },
@@ -628,13 +629,13 @@ const AppointmentPage: React.FC = () => {
                       <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                         <PopoverTrigger asChild>
                           <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                            {isToday(selectedDate)
+                            {isTodayInActiveTimezone(selectedDate)
                               ? "Today"
-                              : isYesterday(selectedDate)
+                              : isYesterdayInActiveTimezone(selectedDate)
                                 ? "Yesterday"
-                                : isTomorrow(selectedDate)
+                                : isTomorrowInActiveTimezone(selectedDate)
                                   ? "Tomorrow"
-                                  : format(selectedDate, "dd/MM/yyyy")}
+                                  : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                           </button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">

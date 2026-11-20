@@ -20,6 +20,7 @@ import {
   Filter,
 } from "lucide-react";
 import { format, differenceInDays, addYears } from "date-fns";
+import { formatInBranchTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -497,8 +498,8 @@ export default function ProtocolMaster() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Chemotherapy Protocols",
-        subtitle: `${source.length} protocol${source.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `protocols-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${source.length} protocol${source.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `protocols-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Protocol ID", cell: (r: any) => r.protocol_id },
           { header: "Protocol Name", cell: (r: any) => r.name },
@@ -506,7 +507,7 @@ export default function ProtocolMaster() {
           { header: "Cycle Days", cell: (r: any) => r.cycle_days },
           { header: "Status", cell: (r: any) => r.status },
           { header: "Updated By", cell: (r: any) => r.updated_by },
-          { header: "Updated At", cell: (r: any) => format(new Date(r.updated_at), "dd/MM/yyyy") },
+          { header: "Updated At", cell: (r: any) => formatInBranchTimezone(new Date(r.updated_at), "dd/MM/yyyy") },
         ],
         rows: source,
       });
@@ -524,7 +525,7 @@ export default function ProtocolMaster() {
           r.cycle_days,
           r.status,
           r.updated_by,
-          format(new Date(r.updated_at), "dd/MM/yyyy"),
+          formatInBranchTimezone(new Date(r.updated_at), "dd/MM/yyyy"),
         ]
           .map((v) => `"${String(v).replace(/"/g, '""')}"`)
           .join(",")
@@ -535,7 +536,7 @@ export default function ProtocolMaster() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `protocols-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      a.download = `protocols-${getTodayInActiveTimezone()}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -877,7 +878,7 @@ export default function ProtocolMaster() {
                         <div>
                           <div className="text-[#424752] text-sm font-medium">{r.updated_by}</div>
                           <div className="hms-id-text">
-                            {validDate ? format(new Date(r.updated_at), "MMM d, yyyy") : "—"}
+                            {validDate ? formatInBranchTimezone(new Date(r.updated_at), "MMM d, yyyy") : "—"}
                           </div>
                         </div>
                       );
@@ -963,7 +964,7 @@ export default function ProtocolMaster() {
                         </div>
                         <div className="flex items-center shrink-0">
                           <span className="text-[10px] font-semibold text-[#6B7280]">
-                            {validDate ? format(new Date(r.updated_at), "MMM d") : "—"}
+                            {validDate ? formatInBranchTimezone(new Date(r.updated_at), "MMM d") : "—"}
                           </span>
                         </div>
                       </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import CalendarPicker from "@/components/hms/Calender";
 import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Search, Plus, Loader2, List, LayoutGrid, MoreVertical, User } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
@@ -668,8 +669,8 @@ export default function Staff() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Staff Management",
-        subtitle: `${sortedData.length} staff member${sortedData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `staff-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${sortedData.length} staff member${sortedData.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `staff-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Staff ID", cell: (r: any) => r.id },
           { header: "Name", cell: (r: any) => r.name },
@@ -836,13 +837,13 @@ export default function Staff() {
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium drop-shadow-[0px_1px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isToday(selectedDate)
+                        {isTodayInActiveTimezone(selectedDate)
                           ? "Today"
-                          : isYesterday(selectedDate)
+                          : isYesterdayInActiveTimezone(selectedDate)
                             ? "Yesterday"
-                            : isTomorrow(selectedDate)
+                            : isTomorrowInActiveTimezone(selectedDate)
                               ? "Tomorrow"
-                              : format(selectedDate, "dd/MM/yyyy")}
+                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">

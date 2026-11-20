@@ -153,6 +153,86 @@ const strengthOf = (item: PharmacyMasterItem): StrengthOption | null => {
 export const formatNumber = (value: number) =>
   String(Number(value.toFixed(4)));
 
+/* ---------------------------------------------------------------
+   Frequency / duration (the slip's F/D column)
+
+   chemotherapy_discharge_instructions stores the duration as a number
+   (`duration`) plus a unit code (`duration_days`: D / Wk / Mo). The slip
+   prints both, e.g. "1-0-2 / 4 D". A plan row may already carry the unit
+   inside `duration` (patient rows have no duration_days column), so the
+   unit is never added twice.
+--------------------------------------------------------------- */
+
+const DURATION_UNIT_CODES: Record<string, string> = {
+  d: "D",
+  day: "D",
+  days: "D",
+  "day's": "D",
+  wk: "Wk",
+  wks: "Wk",
+  week: "Wk",
+  weeks: "Wk",
+  "week's": "Wk",
+  mo: "Mo",
+  mos: "Mo",
+  month: "Mo",
+  months: "Mo",
+  "month's": "Mo",
+  yr: "Yr",
+  yrs: "Yr",
+  year: "Yr",
+  years: "Yr",
+};
+
+/* "D" / "day" / "D " -> "D"; an unknown code is kept as typed. */
+export function normalizeDurationCode(unit?: string | null): string {
+  const raw = text(unit);
+  if (!raw) return "";
+  return DURATION_UNIT_CODES[raw.toLowerCase()] ?? raw;
+}
+
+/* "4" + "D" -> "4 D"; "4 D" + "D" -> "4 D". */
+export function formatSlipDuration(
+  value: string | number | null | undefined,
+  unit?: string | null
+): string {
+  const raw = text(value);
+  if (!raw) return "";
+
+  const code = normalizeDurationCode(unit);
+  if (!code) return raw;
+
+  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alreadyHasUnit = new RegExp(`(^|\\s)${escaped}$`, "i").test(raw);
+
+  return alreadyHasUnit ? raw : `${raw} ${code}`;
+}
+
+/* "1-0-2" + "4" + "D" -> "1-0-2 / 4 D"; one side alone is enough. */
+export function formatFrequencyDuration(
+  frequency: string | null | undefined,
+  duration: string | null | undefined,
+  durationUnit?: string | null
+): string {
+  const freq = text(frequency);
+  const dur = formatSlipDuration(duration, durationUnit);
+
+  if (freq && dur) return `${freq} / ${dur}`;
+  return freq || dur;
+}
+
+/* The F/D column only applies to take-home (Discharge) rows; every other
+   medicine type leaves it blank. */
+export function slipFrequencyDuration(
+  role: string | null | undefined,
+  frequency: string | null | undefined,
+  duration: string | null | undefined,
+  durationUnit?: string | null
+): string {
+  if (text(role).toUpperCase() !== "DISCHARGE") return "";
+  return formatFrequencyDuration(frequency, duration, durationUnit);
+}
+
 export function buildBrandOptions(
   row: Pick<SlipSourceRow, "medicineId" | "genericId" | "drugForm">,
   masterItems: PharmacyMasterItem[]
@@ -341,6 +421,9 @@ export type SlipSourceRow = {
   route: string;
   frequency: string;
   duration: string;
+  /* chemotherapy_discharge_instructions.duration_days ("D" / "Wk" / "Mo").
+     Absent on rows added directly to a plan. */
+  durationUnit?: string;
   instructions: string;
 };
 
@@ -353,6 +436,15 @@ export type SlipDraftRow = SlipSourceRow & {
   pharmacyItemId: string;
   quantityOverride: string;
   extraQuantityOverride: string;
+  /* Stable key persisted with the row's slip lines, so a reopened slip can
+     rebuild the exact rows (including the doctor's added copies). */
+  sourceRowKey: string;
+  /* The ordered source row this draft row came from. */
+  originKey: string;
+  /* True when the doctor added this row with the popup's ADD button. */
+  isAdded: boolean;
+  /* True when the doctor removed this row's automatic top-up line. */
+  extraSuppressed: boolean;
 };
 
 const planItemDose = (item: ChemoPlanItem) => {
@@ -391,10 +483,11 @@ export function buildSlipSourceRows({
         medicineId: text(item.medicine_id),
         genericId: text(medicine?.generic_id),
         drugName:
+          text(medicine?.generic_name) ||
           text(medicine?.medicine_name) ||
           text(item.drug_name) ||
           "",
-        drugForm: text(medicine?.dosage_form) || text(item.formulation),
+        drugForm: text(item.formulation) || text(medicine?.dosage_form),
         patientDose,
         patientDoseValue: dose.value,
         patientDoseUnit: dose.unit,
@@ -402,6 +495,7 @@ export function buildSlipSourceRows({
         route: text(item.administration_route),
         frequency: text(item.frequency),
         duration: text(item.duration),
+        durationUnit: text(item.duration_days),
         instructions: text(item.administration_detail || item.remarks),
       },
     });
@@ -434,6 +528,7 @@ export function buildSlipSourceRows({
       route: "",
       frequency: text(row.frequency),
       duration: text(row.duration),
+      durationUnit: text(row.durationUnit),
       instructions: text(row.instruction),
     };
   });
@@ -452,6 +547,8 @@ export type SlipDischargeRow = {
   frequency: string;
   instruction: string;
   duration: string;
+  /* Unit code from the protocol row, when known. */
+  durationUnit?: string;
 };
 
 /* The brand + strength a row opens with: the strength closest to the
@@ -513,6 +610,25 @@ export function createDraftRow(
     pharmacyItemId: strength?.pharmacyItemId ?? "",
     quantityOverride: "",
     extraQuantityOverride: "",
+    sourceRowKey: source.key,
+    originKey: source.key,
+    isAdded: false,
+    extraSuppressed: false,
+  };
+}
+
+/* A copy the doctor added with the popup's ADD button: same medicine, form,
+   patient dose, brand, F/D and type; the dosage and quantity stay editable. */
+export function cloneDraftRow(row: SlipDraftRow, key: string): SlipDraftRow {
+  return {
+    ...row,
+    key,
+    sourceRowKey: key,
+    originKey: row.originKey || row.key,
+    isAdded: true,
+    quantityOverride: "",
+    extraQuantityOverride: "",
+    extraSuppressed: false,
   };
 }
 
@@ -570,13 +686,16 @@ export function toSlipOrderItems(rows: SlipDraftRow[]): PharmacySlipOrderItemPay
       drug_role: row.role,
       route: row.route || null,
       frequency: row.frequency || null,
-      duration: row.duration || null,
+      duration: formatSlipDuration(row.duration, row.durationUnit) || null,
       instructions: row.instructions || null,
       pharmacy_item_id: row.pharmacyItemId || null,
+      source_row_key: row.sourceRowKey || row.key,
+      is_top_up: false,
+      extra_suppressed: row.extraSuppressed,
     });
 
     const extraQuantity = effectiveExtraQuantity(row, plan);
-    if (extraQuantity !== null && plan.extra) {
+    if (extraQuantity !== null && plan.extra && !row.extraSuppressed) {
       items.push({
         medicine_id: row.medicineId || null,
         drug_name: row.drugName || null,
@@ -589,9 +708,12 @@ export function toSlipOrderItems(rows: SlipDraftRow[]): PharmacySlipOrderItemPay
         drug_role: row.role,
         route: row.route || null,
         frequency: row.frequency || null,
-        duration: row.duration || null,
+        duration: formatSlipDuration(row.duration, row.durationUnit) || null,
         instructions: row.instructions || null,
         pharmacy_item_id: plan.extra.strength.pharmacyItemId || null,
+        source_row_key: row.sourceRowKey || row.key,
+        is_top_up: true,
+        extra_suppressed: false,
       });
     }
   }
@@ -695,6 +817,10 @@ export type SlipDisplayRow = {
   brand: string;
   dose: string;
   quantity: string;
+  /* Discharge-only "1-0-2 / 4 D"; blank for every other medicine type. */
+  frequencyDuration: string;
+  /* The discharge instruction, printed as a small line under the name. */
+  instructions: string;
   type: string;
   role: string;
   isExtra: boolean;
@@ -720,6 +846,13 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
       brand: row.brand,
       dose: `${row.selectedDose}${row.selectedUnit ? ` ${row.selectedUnit}` : ""}`.trim(),
       quantity: baseQuantity === null ? "" : String(baseQuantity),
+      frequencyDuration: slipFrequencyDuration(
+        row.role,
+        row.frequency,
+        row.duration,
+        row.durationUnit
+      ),
+      instructions: row.instructions,
       type: slipRoleLabel(row.role),
       role: row.role,
       isExtra: false,
@@ -727,7 +860,7 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
     });
 
     const extraQuantity = effectiveExtraQuantity(row, plan);
-    if (plan.extra && extraQuantity !== null) {
+    if (plan.extra && extraQuantity !== null && !row.extraSuppressed) {
       display.push({
         key: `${row.key}:extra`,
         rowKey: row.key,
@@ -740,6 +873,13 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
           plan.extra.strength.unit ? ` ${plan.extra.strength.unit}` : ""
         }`.trim(),
         quantity: String(extraQuantity),
+        frequencyDuration: slipFrequencyDuration(
+          row.role,
+          row.frequency,
+          row.duration,
+          row.durationUnit
+        ),
+        instructions: row.instructions,
         type: slipRoleLabel(row.role),
         role: row.role,
         isExtra: true,
@@ -748,4 +888,231 @@ export function toDisplayRows(rows: SlipDraftRow[]): SlipDisplayRow[] {
   }
 
   return display;
+}
+
+/* ---------------------------------------------------------------
+   Rebuild a saved slip's draft rows
+
+   Every line saved by the popup carries `source_row_key` (the draft row it
+   belongs to) and `is_top_up` (the automatic top-up line). Grouping by that
+   key rebuilds the exact rows the doctor left on screen, including the copies
+   they added and any top-up line they removed. Source rows that are neither
+   on the saved slip nor in its `removed_row_keys` are medicines added to the
+   order after the slip was saved, so they are appended with defaults.
+--------------------------------------------------------------- */
+
+export const savedSlipHasRowKeys = (
+  items: PharmacySlipItem[] | null | undefined
+): boolean => Boolean(items?.some((item) => text(item.source_row_key)));
+
+const savedItemKey = (item: PharmacySlipItem) =>
+  text(item.source_row_key) ||
+  `${text(item.medicine_id) || text(item.drug_name).toLowerCase()}|${text(
+    item.drug_role
+  ).toUpperCase()}`;
+
+const genericIdForMedicine = (
+  medicineId: string | null | undefined,
+  masterItems: PharmacyMasterItem[]
+) =>
+  masterItems.find(
+    (item) => item.medicine_id === text(medicineId) && item.generic_id
+  )?.generic_id ?? "";
+
+/* The saved line's own values as a source row, for a medicine that is no
+   longer on the order (its master data still comes from the pharmacy master). */
+const savedSourceRow = (
+  key: string,
+  item: PharmacySlipItem,
+  masterItems: PharmacyMasterItem[]
+): SlipSourceRow => {
+  const dose = parseDoseText(item.patient_dose);
+  return {
+    key,
+    medicineId: text(item.medicine_id),
+    genericId: genericIdForMedicine(item.medicine_id, masterItems),
+    drugName: text(item.drug_name),
+    drugForm: text(item.dosage_form),
+    patientDose: text(item.patient_dose),
+    patientDoseValue: dose.value,
+    patientDoseUnit: dose.unit,
+    role: text(item.drug_role) || "DISCHARGE",
+    route: text(item.route),
+    frequency: text(item.frequency),
+    /* Saved durations already carry their unit ("4 D"). */
+    duration: text(item.duration),
+    durationUnit: "",
+    instructions: text(item.instructions),
+  };
+};
+
+const findSourceForSaved = (
+  item: PharmacySlipItem,
+  sourceRows: SlipSourceRow[]
+): SlipSourceRow | undefined => {
+  const medicineId = text(item.medicine_id);
+  const drugName = text(item.drug_name).toLowerCase();
+  const form = norm(item.dosage_form);
+  const role = text(item.drug_role).toUpperCase();
+
+  return (
+    sourceRows.find(
+      (row) =>
+        row.role === role &&
+        ((medicineId && row.medicineId === medicineId) ||
+          (!medicineId && row.drugName.toLowerCase() === drugName)) &&
+        (!form || norm(row.drugForm) === form)
+    ) ??
+    sourceRows.find(
+      (row) =>
+        (medicineId && row.medicineId === medicineId) ||
+        (!medicineId && row.drugName.toLowerCase() === drugName)
+    )
+  );
+};
+
+export function buildDraftRowsFromSaved({
+  sourceRows,
+  savedItems,
+  removedKeys = [],
+  masterItems,
+}: {
+  sourceRows: SlipSourceRow[];
+  savedItems: PharmacySlipItem[];
+  removedKeys?: string[] | null;
+  masterItems: PharmacyMasterItem[];
+}): SlipDraftRow[] {
+  type SavedGroup = {
+    key: string;
+    base?: PharmacySlipItem;
+    extra?: PharmacySlipItem;
+  };
+
+  const groups: SavedGroup[] = [];
+  const byKey = new Map<string, SavedGroup>();
+
+  for (const item of savedItems) {
+    const key = savedItemKey(item);
+    let group = byKey.get(key);
+
+    if (!group) {
+      group = { key };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+
+    if (item.is_top_up) {
+      if (!group.extra) group.extra = item;
+    } else if (!group.base) {
+      group.base = item;
+    } else {
+      /* Defensive: a repeated base with the same key still becomes its own
+         row instead of being lost. */
+      const repeated: SavedGroup = { key, base: item };
+      groups.push(repeated);
+    }
+  }
+
+  const rows: SlipDraftRow[] = [];
+
+  for (const group of groups) {
+    const base = group.base ?? group.extra;
+    if (!base) continue;
+
+    const source =
+      sourceRows.find((row) => row.key === group.key) ??
+      findSourceForSaved(base, sourceRows);
+
+    const brandOptions = buildBrandOptions(
+      source ?? {
+        medicineId: text(base.medicine_id),
+        genericId: genericIdForMedicine(base.medicine_id, masterItems),
+        drugForm: text(base.dosage_form),
+      },
+      masterItems
+    );
+
+    const draft = createDraftRow(
+      source ?? savedSourceRow(group.key, base, masterItems),
+      brandOptions
+    );
+
+    const brand =
+      base.brand_name &&
+      brandOptions.some((option) => option.label === base.brand_name)
+        ? base.brand_name
+        : draft.brand;
+
+    const strengths =
+      brandOptions.find((option) => option.label === brand)?.strengths ?? [];
+    const dose = asNumber(base.dose);
+    const matchedStrength =
+      strengths.find(
+        (strength) =>
+          strength.value === dose && norm(strength.unit) === norm(base.dose_unit)
+      ) ?? strengths.find((strength) => strength.value === dose);
+
+    const plan = allocateQuantity({
+      patientDose: draft.patientDoseValue,
+      patientDoseUnit: draft.patientDoseUnit,
+      selectedDose: dose,
+      selectedUnit: base.dose_unit ?? matchedStrength?.unit ?? "",
+      strengths,
+    });
+
+    const row: SlipDraftRow = {
+      ...draft,
+      brand,
+      strengthLabel: matchedStrength?.label ?? "",
+      selectedDose: base.dose ?? "",
+      selectedUnit: base.dose_unit ?? matchedStrength?.unit ?? "",
+      pharmacyItemId: base.pharmacy_item_id ?? matchedStrength?.pharmacyItemId ?? "",
+      quantityOverride:
+        base.quantity === null || base.quantity === undefined
+          ? ""
+          : plan.baseQuantity === null || base.quantity !== plan.baseQuantity
+            ? String(base.quantity)
+            : "",
+      extraQuantityOverride: "",
+      extraSuppressed: Boolean(base.extra_suppressed),
+      sourceRowKey: group.key,
+      originKey: source?.key ?? group.key,
+      isAdded: !sourceRows.some((row) => row.key === group.key),
+    };
+
+    if (group.extra && !row.extraSuppressed) {
+      const extraPlan = suggestionFor(row);
+      row.extraSuppressed = false;
+      row.extraQuantityOverride =
+        group.extra.quantity !== null &&
+        group.extra.quantity !== undefined &&
+        extraPlan.extra &&
+        group.extra.quantity !== extraPlan.extra.quantity
+          ? String(group.extra.quantity)
+          : "";
+    }
+
+    rows.push(row);
+  }
+
+  const savedKeys = new Set(groups.map((group) => group.key));
+  const removed = new Set((removedKeys ?? []).map((key) => text(key)).filter(Boolean));
+
+  /* Medicines added to the order after the slip was saved still appear. */
+  for (const source of sourceRows) {
+    if (savedKeys.has(source.key) || removed.has(source.key)) continue;
+    rows.push(createDraftRow(source, buildBrandOptions(source, masterItems)));
+  }
+
+  return rows;
+}
+
+/* The draft row keys the doctor removed: known when the popup opened, minus
+   the rows that are still on screen. */
+export function computeRemovedRowKeys(
+  knownKeys: Iterable<string>,
+  rows: SlipDraftRow[]
+): string[] {
+  const current = new Set(rows.map((row) => row.sourceRowKey || row.key));
+  return [...knownKeys].filter((key) => !current.has(key));
 }

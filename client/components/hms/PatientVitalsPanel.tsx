@@ -11,7 +11,7 @@ import {
   ThumbsUp,
   Weight,
 } from "lucide-react";
-import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 
 type Tone = "danger" | "warning" | "success" | "purple" | "accent";
@@ -240,7 +240,7 @@ export default function PatientVitalsPanel({
               key: String(idx),
               label:
                 entry.recorded_at && !isNaN(new Date(entry.recorded_at).getTime())
-                  ? format(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
+                  ? formatInBranchTimezone(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
                   : `Reading ${idx + 1}`,
               data: entry,
             }));
@@ -288,7 +288,7 @@ export default function PatientVitalsPanel({
               key: e.encounter_no,
               label:
                 e.created_at && !isNaN(new Date(e.created_at).getTime())
-                  ? format(new Date(e.created_at), "dd MMM yyyy")
+                  ? formatInBranchTimezone(new Date(e.created_at), "dd MMM yyyy")
                   : "—",
               data: e,
             }));

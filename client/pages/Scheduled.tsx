@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
+import { getTodayInActiveTimezone, dayKeyOf, formatInBranchTimezone } from "@/utils/timezone";
 import { parseDate, calculateYearsSince } from "@/utils/parseDate";
 import { formatLicenseNo, formatMobile } from "@/utils/formatters";
 import {
@@ -326,11 +327,12 @@ export default function DoctorProfile() {
   const totalExperience = priorExperience + yearsSinceJoining;
   const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
-    ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
+    ? formatInBranchTimezone(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
   const doctorGender = (doctorEmployee as any)?.gender || "—";
 
-  const todayIso = format(new Date(), "yyyy-MM-dd");
+  // "Today" in the ACTIVE BRANCH timezone, never the viewer's laptop date.
+  const todayIso = getTodayInActiveTimezone();
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
   const scheduleByDay = useMemo(() => {
@@ -2016,7 +2018,7 @@ export default function DoctorProfile() {
                     {conflict.patientName}
                   </p>
                   <p className="text-[#6B7280]">
-                    {format(new Date(conflict.appointment_date), "dd/MM/yyyy")}
+                    {formatInBranchTimezone(new Date(conflict.appointment_date), "dd/MM/yyyy")}
                     {formatTimeOfDay(conflict.appointment_time)
                       ? ` · ${formatTimeOfDay(conflict.appointment_time)}`
                       : ""}

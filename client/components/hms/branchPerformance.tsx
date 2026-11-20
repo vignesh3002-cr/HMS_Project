@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { format, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
-import { PopoverContent } from "@/components/ui/popover";
-import type { DateRange as CalendarDateRange } from "@/components/hms/Calender";
+import { dayKeyOf } from "@/utils/timezone";
+import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import CalendarPicker, { type DateRange as CalendarDateRange } from "@/components/hms/Calender";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { branchApi } from "@/api/branch.api";
 import PerformanceChart, { type PerformanceChartItem } from "./performanceChart";
@@ -80,6 +82,13 @@ function formatTrend(t: Trend): string {
 }
 
 function getBranchPerfRangeDates(range: BranchPerfRange, base: Date, customRange?: CalendarDateRange | null): BranchPerfRangeResult {
+  // Anchor "base" to its CALENDAR DAY in the active branch timezone: a Date
+  // picker value keeps the day as picked, while "now" (the default) resolves
+  // to the BRANCH's day - so every derived day/week/month range below follows
+  // the branch's calendar, never the viewer's laptop clock.
+  const [anchorY, anchorM, anchorD] = dayKeyOf(base).split("-").map(Number);
+  base = new Date(anchorY, anchorM - 1, anchorD);
+
   const weekStart = startOfWeek(base, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(base, { weekStartsOn: 1 });
   const lastWeekStart = subWeeks(weekStart, 1);
@@ -353,7 +362,7 @@ export default function BranchPerformance({ selectedDate = new Date(), compact =
   const [isHoverDetailsLoading, setIsHoverDetailsLoading] = useState(false);
 
   const branchPerfQuery = useQuery({
-    queryKey: ["dashboard-branch-perf", branchPerfRange, format(selectedDate, "yyyy-MM-dd"), customDateRange],
+    queryKey: ["dashboard-branch-perf", branchPerfRange, dayKeyOf(selectedDate), customDateRange],
     queryFn: async () => {
       const branchRes = await branchApi.getAll();
       const branchList = branchRes.data?.data || [];

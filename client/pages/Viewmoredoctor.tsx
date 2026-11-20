@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { parseDate, calculateYearsSince } from "@/utils/parseDate";
 import { formatAadhaar, formatPan, formatLicenseNo, formatPassportNo, formatMobile } from "@/utils/formatters";
 import {
@@ -70,7 +71,7 @@ const formatDateOnly = (iso?: string | null): string => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
-  return format(d, "MM/dd/yyyy");
+  return formatInBranchTimezone(d, "MM/dd/yyyy");
 };
 
 const calculateAge = (dob?: string | null): string => {
@@ -195,7 +196,7 @@ export default function ViewEmployee() {
   const yearsSinceJoining = calculateYearsSince(joiningDate);
   const totalExperience = priorExperience + yearsSinceJoining;
   const experience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
-  const dob = (employee as any)?.dob ? format(new Date((employee as any).dob), "dd MMM yyyy") : "—";
+  const dob = (employee as any)?.dob ? formatInBranchTimezone(new Date((employee as any).dob), "dd MMM yyyy") : "—";
   const age = calculateAge((employee as any)?.dob);
   const gender = (employee as any)?.gender || "—";
 

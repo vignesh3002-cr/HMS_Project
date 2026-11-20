@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ChevronLeft,
   ChevronRight,
@@ -65,11 +66,13 @@ function formatSampleDate(dateInput?: string | Date): {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: getActiveTimezone(),
   });
   const formattedTime = dateObj.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone: getActiveTimezone(),
   });
   return {
     formattedDate,

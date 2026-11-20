@@ -86,8 +86,8 @@ const escapeRegExp = (value: string) =>
 
 /* The medicine the plan names, else the generic, else the typed name. */
 export const medicineName = (item: PrintableMedicine): string =>
-  item.medicine_master?.medicine_name ||
   item.medicine_master?.generic_name ||
+  item.medicine_master?.medicine_name ||
   item.drug_name ||
   "";
 
@@ -133,6 +133,30 @@ export const protocolDoseText = (item: PrintableMedicine): string => {
   const unit =
     item.protocol_dose_unit || item.calculated_dose_unit || "";
   return `${Number(item.protocol_dose)} ${unit}`.trim();
+};
+
+/* The actual amount unit for a chemotherapy medicine: the protocol unit
+   with a per-BSA basis dropped ("mg/m²" -> "mg"), since the printed line
+   shows the medicine's own dose, not the per-m² protocol dose. */
+const medicineDoseUnit = (item: PrintableMedicine): string => {
+  const unit = (
+    item.protocol_dose_unit ||
+    item.calculated_dose_unit ||
+    ""
+  ).trim();
+  if (!unit) return "";
+  const perArea = unit.match(/^(.*?)\s*\/\s*(?:m2|m²|m\^2|sqm)$/i);
+  if (perArea) return perArea[1].trim() || "mg";
+  return unit;
+};
+
+/* "75 mg": the medicine's own (protocol) dose in its actual amount unit. */
+export const medicineDoseText = (item: PrintableMedicine): string => {
+  if (item.protocol_dose === null || item.protocol_dose === undefined) {
+    return "";
+  }
+  const unit = medicineDoseUnit(item);
+  return `${Number(item.protocol_dose)}${unit ? ` ${unit}` : ""}`.trim();
 };
 
 /* "297.5 mg": the Dose Cal result (chemotherapy drugs only), "" if none. */
@@ -327,9 +351,11 @@ export const buildAdministrationPhrase = (
   return parts.filter(Boolean).join(" ");
 };
 
-/* One readable sentence, e.g.
-   "Inj. Pertuzumab - patient dose 79.6 mg (protocol dose 40 mg), given IV
-   in 250 mL NS over 60 minutes."
+/* One readable sentence. Chemotherapy (PRIMARY) drugs print the medicine's
+   own dose in brackets, then the patient dose, then the administration:
+   "Inj. Pertuzumab (40 mg) - 79.6 mg, given IV in 250 mL NS over 60
+   minutes". Other drug types keep the plain dose sentence:
+   "Inj. Ondansetron - dose 8 mg, given IV, once".
    The caller adds the number and the final full stop. */
 export const buildMedicineSentence = (
   item: PrintableMedicine,
@@ -339,21 +365,6 @@ export const buildMedicineSentence = (
   const protocolDose = protocolDoseText(item);
   const patientDose = patientDoseText(item);
 
-  let doseText = "";
-  if (role === "PRIMARY") {
-    if (patientDose && protocolDose) {
-      doseText = `patient dose ${patientDose} (protocol dose ${protocolDose})`;
-    } else if (patientDose) {
-      doseText = `patient dose ${patientDose}`;
-    } else if (protocolDose) {
-      doseText = `protocol dose ${protocolDose}`;
-    }
-  } else if (protocolDose) {
-    doseText = `dose ${protocolDose}`;
-  } else if (patientDose) {
-    doseText = `dose ${patientDose}`;
-  }
-
   const administration = buildAdministrationPhrase(item, options);
   const extras = [item.frequency, item.timing_relative_to_primary]
     .map((value) => (value ?? "").trim())
@@ -362,11 +373,27 @@ export const buildMedicineSentence = (
       (value) =>
         !administration.toLowerCase().includes(value.toLowerCase())
     );
+  const name = medicineWithForm(item);
+
+  if (role === "PRIMARY") {
+    const medicineDose = medicineDoseText(item);
+    const tail = [administration, ...extras].filter(Boolean).join(", ");
+    const doseTag = medicineDose ? ` (${medicineDose})` : "";
+    const patientTag = patientDose ? ` - ${patientDose}` : "";
+    if (!name) return [patientDose, tail].filter(Boolean).join(", ");
+    return `${name}${doseTag}${patientTag}${tail ? `, ${tail}` : ""}`;
+  }
+
+  let doseText = "";
+  if (protocolDose) {
+    doseText = `dose ${protocolDose}`;
+  } else if (patientDose) {
+    doseText = `dose ${patientDose}`;
+  }
 
   const details = [doseText, administration, ...extras]
     .filter(Boolean)
     .join(", ");
-  const name = medicineWithForm(item);
 
   if (!name) return details;
   return `${name}${details ? ` - ${details}` : ""}`;

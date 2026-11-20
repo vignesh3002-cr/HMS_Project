@@ -11,6 +11,11 @@ import {
 } from "../../../components/ui/popover";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
 import VoiceToText from "@/components/ui/voicetotext";
+import { SingleSelectDropdown } from "@/components/ui/single-select-dropdown";
+import {
+  consultationApi,
+  type LineOfTherapyRecord,
+} from "../../../api/consultation.api";
 import type { ConsultationState, MeasurementValues } from "./types";
 import {
   createChemotherapyPlanForPatient,
@@ -124,6 +129,14 @@ const TreatmentPlan: React.FC<{
   const [lineOfTherapy, setLineOfTherapy] =
     useState("");
 
+  const [lineOfTherapyOptions, setLineOfTherapyOptions] =
+    useState<LineOfTherapyRecord[]>([]);
+
+  const [lineOfTherapyLoading, setLineOfTherapyLoading] =
+    useState<boolean>(false);
+
+  const [lineOfTherapyError, setLineOfTherapyError] = useState("");
+
   const [plannedStartDate, setPlannedStartDate] =
     useState("");
 
@@ -198,6 +211,44 @@ const TreatmentPlan: React.FC<{
     planDraftKey,
     resolvedPatientId,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLineOfTherapies = async () => {
+      setLineOfTherapyLoading(true);
+      setLineOfTherapyError("");
+
+      try {
+        const response = await consultationApi.getLineOfTherapies();
+        if (!cancelled) {
+          setLineOfTherapyOptions(response.data.data ?? []);
+          if (response.data.data?.length === 0) {
+            setLineOfTherapyError(
+              "No line of therapy options found. Contact your administrator to seed the master list."
+            );
+          }
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setLineOfTherapyError(
+            error?.response?.data?.message ||
+              "Failed to load line of therapy options. Please try again."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLineOfTherapyLoading(false);
+        }
+      }
+    };
+
+    loadLineOfTherapies();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const treatmentOptions: TreatmentType[] = [
     "Chemotherapy",
@@ -397,6 +448,76 @@ const TreatmentPlan: React.FC<{
 
   const handleViewProfile = () => {
     console.log("View Full Profile clicked");
+  };
+
+  /* Create a custom line of therapy when the doctor types a value that is
+     not in the master list (mirrors the Immunization "+ Add" flow), then
+     select it. Backend failure still respects the typed value locally. */
+  const addLineOfTherapy = async (typed: string) => {
+    try {
+      const record = await consultationApi.createCustomLineOfTherapy({
+        name: typed,
+      });
+      const created = record.data.data;
+      setLineOfTherapyOptions((previous) =>
+        previous.some(
+          (option) => option.name.toLowerCase() === created.name.toLowerCase()
+        )
+          ? previous
+          : [...previous, created]
+      );
+      setLineOfTherapy(created.name);
+      setSaveError("");
+    } catch (error: any) {
+      setSaveError(
+        error?.response?.data?.message ??
+          "Failed to add the line of therapy. Please try again."
+      );
+    }
+  };
+
+  /* Protocol single-select change: preserves every existing side effect
+     (localStorage id/name, protocol-changed CustomEvent, and the immediate
+     sync of the selected protocol onto any existing chemo plan). */
+  const handleProtocolChange = (value: string) => {
+    setProtocol(value);
+    if (value) {
+      localStorage.setItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`,
+        value
+      );
+      const selected = protocols.find(
+        (p) => p.protocol_id === value
+      );
+      if (selected) {
+        const label = `${selected.regimen_code} - ${selected.regimen_name}`;
+        localStorage.setItem(
+          `hms_selected_protocol_name_${resolvedPatientId}`,
+          label
+        );
+        window.dispatchEvent(
+          new CustomEvent("protocol-changed", {
+            detail: { patientId: resolvedPatientId, protocolName: label },
+          })
+        );
+      }
+      /* Push the newly selected protocol onto any existing plan immediately
+         so patient-details shows the new protocol + days/cycle without
+         waiting for the step to be saved. */
+      void syncExistingPlanProtocol(resolvedPatientId, value);
+    } else {
+      localStorage.removeItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      localStorage.removeItem(
+        `hms_selected_protocol_name_${resolvedPatientId}`
+      );
+      window.dispatchEvent(
+        new CustomEvent("protocol-changed", {
+          detail: { patientId: resolvedPatientId, protocolName: "" },
+        })
+      );
+    }
   };
 
   /* =========================================================
@@ -685,30 +806,25 @@ const TreatmentPlan: React.FC<{
               Line of Therapy
             </label>
 
-            <div className="relative">
+            <SingleSelectDropdown
+              options={lineOfTherapyOptions.map((option) => option.name)}
+              value={lineOfTherapy}
+              onValueChange={setLineOfTherapy}
+              onCreateOption={addLineOfTherapy}
+              createLabel="+ Add"
+              placeholder={
+                lineOfTherapyLoading ? "Loading..." : "Select Line of Therapy"
+              }
+              disabled={lineOfTherapyLoading}
+              className="text-[10px]"
+            />
 
-              <select
-                id="lineOfTherapy"
-                value={lineOfTherapy}
-                onChange={(event) =>
-                  setLineOfTherapy(event.target.value)
-                }
-                className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-[10px] text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-              >
-                <option value="First Line">
-                  First Line
-                </option>
-
-                <option value="Second Line">
-                  Second Line
-                </option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
-                <ChevronDownIcon />
+            {lineOfTherapyError && (
+              <div className="mt-2 text-[10px] font-medium text-red-600">
+                {lineOfTherapyError}
               </div>
+            )}
 
-            </div>
           </div>
 
           {/* Planned Start Date */}
@@ -804,76 +920,19 @@ const TreatmentPlan: React.FC<{
 
           </div>
 
-          <div className="relative">
-
-            <select
-              id="protocol"
-              value={protocol}
-              onChange={(event) => {
-                const value = event.target.value;
-                setProtocol(value);
-                if (value) {
-                  localStorage.setItem(
-                    `hms_selected_protocol_id_${resolvedPatientId}`,
-                    value
-                  );
-                  const selected = protocols.find(
-                    (p) => p.protocol_id === value
-                  );
-                  if (selected) {
-                    const label = `${selected.regimen_code} - ${selected.regimen_name}`;
-                    localStorage.setItem(
-                      `hms_selected_protocol_name_${resolvedPatientId}`,
-                      label
-                    );
-                    window.dispatchEvent(
-                      new CustomEvent("protocol-changed", {
-                        detail: { patientId: resolvedPatientId, protocolName: label },
-                      })
-                    );
-                  }
-                  /* Push the newly selected protocol onto any existing
-                     plan immediately so patient-details shows the new
-                     protocol + days/cycle without waiting for the step
-                     to be saved. */
-                  void syncExistingPlanProtocol(resolvedPatientId, value);
-                } else {
-                  localStorage.removeItem(
-                    `hms_selected_protocol_id_${resolvedPatientId}`
-                  );
-                  localStorage.removeItem(
-                    `hms_selected_protocol_name_${resolvedPatientId}`
-                  );
-                  window.dispatchEvent(
-                    new CustomEvent("protocol-changed", {
-                      detail: { patientId: resolvedPatientId, protocolName: "" },
-                    })
-                  );
-                }
-              }}
-              className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-[10px] text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="">
-                {protocolsLoading
-                  ? "Loading protocols"
-                  : "Select Protocol"}
-              </option>
-
-              {protocols.map((item) => (
-                <option
-                  key={item.protocol_id}
-                  value={item.protocol_id}
-                >
-                  {item.regimen_code} - {item.regimen_name}
-                </option>
-              ))}
-            </select>
-
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
-              <ChevronDownIcon />
-            </div>
-
-          </div>
+          <SingleSelectDropdown
+            options={protocols.map((item) => ({
+              label: `${item.regimen_code} - ${item.regimen_name}`,
+              value: item.protocol_id,
+            }))}
+            value={protocol}
+            onValueChange={handleProtocolChange}
+            placeholder={
+              protocolsLoading ? "Loading protocols" : "Select Protocol"
+            }
+            disabled={protocolsLoading}
+            className="text-[10px]"
+          />
 
           {protocolsError && (
             <div className="mt-2 text-[10px] font-medium text-red-600">

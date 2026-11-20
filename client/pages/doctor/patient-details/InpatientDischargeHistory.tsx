@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ipdApi, type AdmissionRecord, type DischargeTypeRecord } from "../../../api/ipd.api";
 import { EncounterDocuments } from "@/components/hms/EncounterDocuments";
+import { getActiveTimezone } from "@/utils/timezone";
 
 /*
  * History tab: this patient's inpatient stays -- discharged ones, plus a
@@ -11,11 +12,21 @@ import { EncounterDocuments } from "@/components/hms/EncounterDocuments";
  * nothing here is entered by hand. Attachments are the stay's own
  * (encounter-scoped) documents.
  */
+/*
+ * admission_date mixes two shapes: planned rows are stored as UTC midnight
+ * (a calendar date), real admissions are true instants. Midnight renders as
+ * a plain date (UTC pin); clock times render in the branch's timezone.
+ */
+const displayTz = (d: Date): string =>
+  d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
+    ? "UTC"
+    : getActiveTimezone();
+
 const fmtDateTime = (value?: string | null) =>
-  value ? new Date(value).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  value ? new Date(value).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: displayTz(new Date(value)) }) : "—";
 
 const fmtDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 
 const label = (value?: string | null) =>
   value ? value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "—";

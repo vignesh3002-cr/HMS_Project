@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { CalendarDays, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
@@ -33,7 +34,10 @@ function formatDateValue(value: string | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
 
-  return format(parsed, "MM, dd, yyyy");
+  // Date-only filter values are stored/compared as calendar days - keep the
+  // day exactly as entered (UTC-anchored "yyyy-MM-dd" parses to UTC midnight),
+  // never shift it into the viewer's zone.
+  return formatInBranchTimezone(parsed, "MM, dd, yyyy");
 }
 
 export function FilterField({ field, value, onChange }: FilterFieldProps) {

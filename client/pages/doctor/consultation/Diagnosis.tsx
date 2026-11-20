@@ -2,7 +2,23 @@
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
+import { chemotherapyApi } from "../../../api/chemotherapy.api";
+import {
+  labTestMasterApi,
+  type LabTestMasterRecord,
+} from "../../../api/labTestMaster.api";
 import { getUser } from "../../../utils/token";
+import { stagingApi } from "../../../api/staging.api";
+import StagingCard, { type StagingAutofill } from "./StagingCard";
+import {
+  EMPTY_STAGE_IHC,
+  normalizeStageDrafts,
+  normalizeStageIhc,
+  stageMirrorValues,
+  stageRecordsToDrafts,
+  stageRuleCodesFor,
+  stageSavePayload,
+} from "./stagingDraft";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
@@ -13,7 +29,53 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../../components/ui/popover";
-import type { ConsultationState, FormData } from "./types";
+import type {
+  ConsultationState,
+  FormData,
+  ScoreVariable,
+  ScoreGroup,
+} from "./types";
+import {
+  buildScoreDefinition,
+  emptyAssessment,
+  evaluateScore,
+  findGroup,
+  hydrateAssessment,
+  methodLabel,
+  resolveVariableValue,
+  serializeAssessment,
+  type ScoreAssessment,
+  type ScoreDefinition,
+  type VariableValue,
+} from "./scoreEngine";
+import {
+  applyDerivedScores,
+  labKeyFor,
+  stageNumberFromText,
+  suggestVariableValues,
+  type AutoFillContext,
+  type LabValue,
+} from "./scoreAutofill";
+import { ScoreWorkspace, type CatalogueEntry, type CataloguePatch } from "./ScoreWorkspace";
+import {
+  scoreFingerprint,
+  scoreFingerprintFromStored,
+} from "./scoreFingerprint";
+import {
+  readScoreHistory,
+  scoreResultText,
+  scoreWarnings,
+  scoresToCsv,
+  type ScoreHistory,
+  type ScoreHistoryEntry,
+} from "./scoreSummary";
+import { patientApi, type PatientRecord } from "../../../api/patient.api";
+import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import type { GenomicTestRecord } from "../../../api/genomics.api";
+import { NgsReportModal } from "./NgsReportModal";
+import { NgsReportsPanel } from "./NgsReportsPanel";
+import { GeneMasterAdminModal } from "./GeneMasterAdminModal";
+import { diagnosisCancerSite } from "./genomicsForm";
 import {
   findActiveEncounter,
   findLatestStagingDetailId,
@@ -83,6 +145,8 @@ const hasDraftContent = (raw: string): boolean => {
       "tStage",
       "nStage",
       "mStage",
+      "stages",
+      "assessmentBased",
     ];
     if (
       arrayKeys.some((key) => {
@@ -1222,6 +1286,7 @@ const EMPTY_FORM_DATA: FormData = {
   secondPrimaryDate: "",
   preDiagnosis: "",
   diseaseStatus: "",
+  assessmentBased: [],
   laterality: [],
   bodySite: [],
   survivor: "",
@@ -1235,6 +1300,8 @@ const EMPTY_FORM_DATA: FormData = {
   tStage: [],
   nStage: [],
   mStage: [],
+  stages: [],
+  stageIhc: { ...EMPTY_STAGE_IHC },
   icdCode: "",
   notes: "",
   investigationReportDate: "",
@@ -1264,6 +1331,9 @@ const normalizeStoredForm = (data: Partial<FormData>): Partial<FormData> => ({
   tStage: asStringArray(data.tStage),
   nStage: asStringArray(data.nStage),
   mStage: asStringArray(data.mStage),
+  stages: normalizeStageDrafts(data.stages),
+  stageIhc: normalizeStageIhc(data.stageIhc),
+  assessmentBased: asStringArray(data.assessmentBased),
   valueEdits:
     data.valueEdits &&
     typeof data.valueEdits === "object" &&
@@ -1352,6 +1422,8 @@ const formStateSignature = (state: DiagnosisFormState) => {
         ];
       }
       if (key === "cancerTypes") return [key, asStringArray(value)];
+      if (key === "stages") return [key, JSON.stringify(value ?? [])];
+      if (key === "stageIhc") return [key, JSON.stringify(value ?? {})];
       if (Array.isArray(value)) return [key, value.map(String).sort()];
       return [key, typeof value === "string" ? value.trim() : value ?? ""];
     });
@@ -1390,6 +1462,10 @@ type StagingDetailRecord = {
   icd10_code?: string | null;
   metastasis_sites?: unknown;
   form_state?: unknown;
+  score_variables?: unknown;
+  score_result?: string | null;
+  risk_group?: string | null;
+  score_points?: number | null;
   cancer_types?: { cancer_type: string } | null;
   cancer_subtypes?: { subtype_name: string } | null;
   oncology_staging_additional_cancers?: {
@@ -1554,6 +1630,14 @@ type CancerScoreItem = {
   score_value: string;
   input_type: string | null;
   subtype_keywords: string | null;
+  /* Catalogue metadata (present on the list rows, used by the browser). */
+  purpose?: string | null;
+  when_to_record?: string | null;
+  score_range?: string | null;
+  risk_groups?: string | null;
+  score_status?: string | null;
+  score_reference?: string | null;
+  developer_note?: string | null;
 };
 
 /* An Investigation Results test of a cancer type (investigation_parameter):
@@ -1649,6 +1733,118 @@ const Diagnosis: React.FC<{
 
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM_DATA);
 
+  /* Every selected score keeps its own typed definition and assessment, so
+     several scores can be recorded at once and each uses its own method. */
+  const [scoreDefinitions, setScoreDefinitions] = useState<
+    Record<string, ScoreDefinition>
+  >({});
+  const [scoreAssessments, setScoreAssessments] = useState<
+    Record<string, ScoreAssessment>
+  >({});
+  const [scoreDetailsLoading, setScoreDetailsLoading] = useState<
+    Record<string, boolean>
+  >({});
+  /* Guard concurrent loads and hydrate the saved values only once. */
+  const scoreDefinitionRequestsRef = useRef<Set<string>>(new Set());
+  const hydratedScoreIdsRef = useRef<Set<string>>(new Set());
+  const pendingScoreVariablesRef = useRef<unknown>(null);
+
+  /* Auto-fill inputs: the patient's registration data and this visit's
+     encounter (vitals). Both are branch-independent lookups, so they work
+     for multi-branch doctors without an active branch selection. */
+  const [autoFillPatient, setAutoFillPatient] = useState<PatientRecord | null>(
+    null
+  );
+  const [autoFillEncounter, setAutoFillEncounter] =
+    useState<EncounterRecord | null>(null);
+  const [autoFillBusy, setAutoFillBusy] = useState(false);
+  const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
+  /* Snapshot taken before an auto-fill so "Undo auto-fill" restores every
+     assessment exactly as it was. */
+  const [autoFillUndo, setAutoFillUndo] = useState<Record<
+    string,
+    ScoreAssessment
+  > | null>(null);
+
+  /* Cross-visit score history (read-only) for comparison and CSV export. */
+  const [stagingHistoryRows, setStagingHistoryRows] = useState<unknown[]>([]);
+  const [currentStagingDetailId, setCurrentStagingDetailId] = useState<
+    string | null
+  >(null);
+
+  /* NGS / genomic reports: the popup opened from the Survivor row, the row
+     being edited, and a version counter that refreshes the saved-report
+     cards after every save/delete. */
+  const [ngsModalOpen, setNgsModalOpen] = useState(false);
+  const [ngsEditing, setNgsEditing] = useState<GenomicTestRecord | null>(null);
+  const [ngsVersion, setNgsVersion] = useState(0);
+  const [geneMasterOpen, setGeneMasterOpen] = useState(false);
+
+  /* Pinned scores, kept per browser (not per patient - a doctor's favourite
+     scores are the same whichever patient is open). */
+  const [favouriteScores, setFavouriteScores] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("hms_score_favourites");
+      const parsed = JSON.parse(raw ?? "[]");
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setAutoFillPatient(null);
+      return;
+    }
+    let cancelled = false;
+    patientApi
+      .getById(resolvedPatientId)
+      .then((response) => {
+        if (!cancelled) setAutoFillPatient(response.data.data ?? null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Auto-fill: patient lookup failed", error);
+          setAutoFillPatient(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setAutoFillEncounter(null);
+      return;
+    }
+    let cancelled = false;
+    encounterApi
+      .getLatest(resolvedPatientId, 10)
+      .then((response) => {
+        if (cancelled) return;
+        const list = response.data.data?.encounters ?? [];
+        /* Prefer the visit still open; otherwise the newest recorded one. */
+        const current =
+          list.find((item) => item.status === "OPEN") ?? list[0] ?? null;
+        setAutoFillEncounter(current);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoFillEncounter(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
+  const scoreHistory: ScoreHistory = React.useMemo(
+    () => readScoreHistory(stagingHistoryRows),
+    [stagingHistoryRows]
+  );
+
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
 
   useEffect(() => {
@@ -1700,6 +1896,10 @@ const Diagnosis: React.FC<{
     }
   };
   const visitContextReadyRef = useRef(false);
+  /* The encounter the hydrate pass resolved, for the score draft. Starts
+     from the prop so a draft written before the lookup finishes still
+     carries the visit. */
+  const visitEncounterRef = useRef(encounterNo ?? "");
 
   /* The staging detail the form was filled from and its selections: Save
      reuses it when nothing changed, else records this visit's own row. */
@@ -1707,7 +1907,30 @@ const Diagnosis: React.FC<{
     stagingDetailId: string;
     ownVisit: boolean;
     signature: string;
+    /* The score assessments stored on that row, in the same canonical form
+       as scoreFingerprint. null = legacy payload that cannot be compared. */
+    scoreSignature: string | null;
   } | null>(null);
+
+  /* Values typed in the score workspace that are not in formData, kept with
+     the visit so switching steps does not lose them. */
+  const scoreDraftKey = `hms_diagnosis_scores_${resolvedPatientId}`;
+  const pendingDraftScoresRef = useRef<unknown>(null);
+  const scoreDraftReadyRef = useRef(false);
+  const scoreDraftPatientRef = useRef(resolvedPatientId);
+  /* The visit the prefilled score values came from (badge in the workspace). */
+  const [restoredScoreVisit, setRestoredScoreVisit] = useState<string | null>(
+    null
+  );
+
+  /* p16 / p40 changes on a later IHC report invalidate a saved schema; the
+     server returns the banners with the stage records. */
+  const [stagingAlerts, setStagingAlerts] = useState<
+    { severity: string; message: string }[]
+  >([]);
+  /* Whether the loaded staging detail already had stage records, so removing
+     the last one still clears the server copy. */
+  const stagingHadRecordsRef = useRef(false);
 
   /* The cancer type catalog, and the types whose options still have to
      load once it arrives (a prefill that landed before it). */
@@ -1753,12 +1976,18 @@ const Diagnosis: React.FC<{
      becomes the baseline Save compares against. */
   useEffect(() => {
     if (!resolvedPatientId) return;
-    /* Read now: the draft-save effect below rewrites it after this render. */
+    /* Read now: the draft-save effects below rewrite them after this render. */
     const rawDraft = localStorage.getItem(diagnosisDraftKey);
+    const rawScoreDraft = localStorage.getItem(scoreDraftKey);
+    if (scoreDraftPatientRef.current !== resolvedPatientId) {
+      scoreDraftPatientRef.current = resolvedPatientId;
+      scoreDraftReadyRef.current = false;
+    }
     let cancelled = false;
     const hydrate = async () => {
       try {
         const visitEncounterNo = await resolveVisitEncounterNo().catch(() => "");
+        visitEncounterRef.current = visitEncounterNo;
         const ownStagingId = visitEncounterNo
           ? await findStagingDetailForEncounter(resolvedPatientId, visitEncounterNo)
           : "";
@@ -1781,6 +2010,48 @@ const Diagnosis: React.FC<{
           ? context?.encounterNo === visitEncounterNo && rawDraft !== null
           : Boolean(rawDraft && hasDraftContent(rawDraft));
 
+        /* The doctor's unsaved score values for this same visit win over the
+           saved row (the workspace hydrates them once the definitions
+           arrive). */
+        let scoreDraft: { encounterNo: string; scores: unknown } | null = null;
+        try {
+          const parsed = JSON.parse(rawScoreDraft ?? "null");
+          if (parsed && typeof parsed === "object" && parsed.scores) {
+            scoreDraft = {
+              encounterNo: String((parsed as Record<string, unknown>).encounterNo ?? ""),
+              scores: (parsed as Record<string, unknown>).scores,
+            };
+          }
+        } catch {
+          /* A corrupt draft is ignored. */
+        }
+        const draftBelongsToVisit =
+          scoreDraft !== null &&
+          (visitEncounterNo
+            ? scoreDraft.encounterNo === visitEncounterNo
+            : keepDraft);
+
+        /* Keep the saved score values; the workspace hydrates them once the
+           score definitions arrive (the master lists load asynchronously).
+           A same-visit draft is restored even when the patient has no saved
+           staging detail yet. */
+        pendingDraftScoresRef.current = draftBelongsToVisit
+          ? scoreDraft?.scores ?? null
+          : null;
+        if (detail) {
+          pendingScoreVariablesRef.current = detail.score_variables ?? null;
+          hydratedScoreIdsRef.current = new Set();
+          /* Only this visit's own row is the one to exclude from "previous
+             visit" comparisons; a row borrowed from an earlier visit stays a
+             valid comparison point. */
+          setCurrentStagingDetailId(ownStagingId ? detail.staging_detail_id : null);
+          setRestoredScoreVisit(
+            !ownStagingId && !draftBelongsToVisit && detail.visit_date
+              ? toPickedDateValue(detail.visit_date)
+              : null
+          );
+        }
+
         if (keepDraft) {
           setMetastasisSites(context?.metastasisSites ?? []);
         } else if (state) {
@@ -1791,6 +2062,24 @@ const Diagnosis: React.FC<{
             : undefined;
           if (visitDate && onVisitDateChange) {
             onVisitDateChange(formatPickedDate(visitDate));
+          }
+        }
+
+        /* Stage records are the authority (form_state can lag behind a
+           second browser), so the card is filled from them. A same-visit
+           draft keeps the doctor's unsaved work instead. */
+        if (sourceStagingId) {
+          try {
+            const staged = await stagingApi.records(sourceStagingId);
+            if (cancelled) return;
+            setStagingAlerts(staged.alerts ?? []);
+            if (!keepDraft && staged.records.length > 0) {
+              const drafts = stageRecordsToDrafts(staged.records);
+              setFormData((previous) => ({ ...previous, stages: drafts }));
+            }
+            stagingHadRecordsRef.current = staged.records.length > 0;
+          } catch (stageError) {
+            console.error("Failed to load the saved stage records:", stageError);
           }
         }
         localStorage.setItem(
@@ -1810,6 +2099,9 @@ const Diagnosis: React.FC<{
                 stagingDetailId: detail.staging_detail_id,
                 ownVisit: Boolean(ownStagingId),
                 signature: formStateSignature(state),
+                scoreSignature: scoreFingerprintFromStored(
+                  detail.score_variables
+                ),
               }
             : null;
       } catch (error) {
@@ -2144,6 +2436,10 @@ const Diagnosis: React.FC<{
   >([]);
   const [investigationVisitNo, setInvestigationVisitNo] = useState("");
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
+  /* Lab-test master names offered as assessment-based options. Loaded once
+     on mount from /lab-test-master (no oncology reference route exists for
+     them); the doctor can also type a value that isn't in the list. */
+  const [labTestOptions, setLabTestOptions] = useState<string[]>([]);
   /* Metastasis Sites aren't in the draft: kept with the visit context so
      they survive switching steps (once the context belongs to this visit). */
   useEffect(() => {
@@ -2160,6 +2456,35 @@ const Diagnosis: React.FC<{
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
+
+  /* Every visit that recorded a score, for the comparison and export panels.
+     Refetched after a save so the visit just written appears immediately. */
+  useEffect(() => {
+    if (!resolvedPatientId) {
+      setStagingHistoryRows([]);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: unknown[] }>("/oncology/staging-details", {
+      params: { patient_id: resolvedPatientId, page: 1, limit: 50 },
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setStagingHistoryRows(
+            Array.isArray(response.data.data) ? response.data.data : []
+          );
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Failed to load the score history:", error);
+          setStagingHistoryRows([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, savingDiagnosis]);
 
   const diagnosisRequestRef = useRef(0);
   const stagingRequestRef = useRef(0);
@@ -2581,6 +2906,36 @@ const Diagnosis: React.FC<{
 
   useEffect(() => {
     let cancelled = false;
+    labTestMasterApi.getAll()
+      .then((response) => {
+        if (cancelled) return;
+        const names = (response.data.data ?? [])
+          .map((record: LabTestMasterRecord) => record.test_name)
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        /* De-duplicate case-insensitively. */
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        for (const name of names) {
+          const key = name.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(name);
+          }
+        }
+        setLabTestOptions(deduped);
+      })
+      .catch((error) => {
+        console.error("Failed to load lab tests:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
 
     loadDiagnosisCatalog()
       .then((diagnoses) => {
@@ -2687,6 +3042,14 @@ const Diagnosis: React.FC<{
       : formData.type
         ? [formData.type]
         : [];
+
+  /* The staging card's blocks, in selection order (primary first). */
+  const stagingCancerTypes = optionTypes
+    .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+    .filter(
+      (item): item is CancerTypeItem => Boolean(item?.cancer_type_id)
+    )
+    .map((item) => ({ id: item.cancer_type_id, name: item.cancer_type }));
 
   /* "<Type>|<label>" values in the order their cancer types were selected
      (not the order they were ticked); within one type the ticked order
@@ -2957,6 +3320,651 @@ const Diagnosis: React.FC<{
     )?.score_system;
   };
 
+  /* The catalogue row behind a picked score value. */
+  const scoreItemOf = (qualified: string) => {
+    const { cancerType, raw } = splitQualified(qualified);
+    return scoreMasterOptions.find(
+      (score) => score.cancerType === cancerType && score.score_value === raw
+    );
+  };
+
+  /* Load a score's definition once, then keep it (and its assessment) in
+     state. Several scores may be open at the same time. */
+  const ensureScoreDefinition = async (scoreId: string, name: string) => {
+    if (scoreDefinitions[scoreId]) return;
+    if (scoreDefinitionRequestsRef.current.has(scoreId)) return;
+    scoreDefinitionRequestsRef.current.add(scoreId);
+    setScoreDetailsLoading((previous) => ({ ...previous, [scoreId]: true }));
+    try {
+      const [detailRes, variablesRes, groupsRes] = await Promise.all([
+        chemotherapyApi.getScoreDetail(scoreId),
+        chemotherapyApi.listScoreVariables(scoreId),
+        chemotherapyApi.listScoreGroups(scoreId),
+      ]);
+      const detail = detailRes.data.data;
+      const variables: ScoreVariable[] = (variablesRes.data.data ?? []).map(
+        (v: any) => ({
+          ...v,
+          selected_criterion: null,
+          selected_points: null,
+          source_value: null,
+          resolved_meaning: null,
+        })
+      );
+      const groups: ScoreGroup[] = groupsRes.data.data ?? [];
+      const definition = buildScoreDefinition({
+        scoreId,
+        name: detail?.score_name ?? name,
+        detail,
+        variables,
+        groups,
+      });
+      setScoreDefinitions((previous) =>
+        previous[scoreId] ? previous : { ...previous, [scoreId]: definition }
+      );
+      setScoreAssessments((previous) =>
+        previous[scoreId]
+          ? previous
+          : { ...previous, [scoreId]: emptyAssessment(definition) }
+      );
+    } catch (error) {
+      console.error("Failed to load score details:", error);
+    } finally {
+      scoreDefinitionRequestsRef.current.delete(scoreId);
+      setScoreDetailsLoading((previous) => {
+        const next = { ...previous };
+        delete next[scoreId];
+        return next;
+      });
+    }
+  };
+
+  /* Load a definition for every picked score (also after the masters arrive
+     from a restored visit), then hydrate the values saved with the visit. */
+  useEffect(() => {
+    for (const value of orderByType(formData.score)) {
+      const item = scoreItemOf(value);
+      if (item) void ensureScoreDefinition(item.score_id, item.score_value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.score, scoreMasterOptions]);
+
+  useEffect(() => {
+    const raw = pendingScoreVariablesRef.current;
+    const draftRaw = pendingDraftScoresRef.current;
+    if (!raw && !draftRaw) {
+      scoreDraftReadyRef.current = true;
+      return;
+    }
+    const items = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+    if (items.length === 0) {
+      scoreDraftReadyRef.current = true;
+      return;
+    }
+
+    /* A draft is the v2 payload of this visit's unsaved work; it restores
+       per score, falling back to the saved row for scores it does not
+       contain. */
+    const draftHasScore = (scoreId: string): boolean => {
+      if (!draftRaw || typeof draftRaw !== "object") return false;
+      const source = draftRaw as Record<string, unknown>;
+      if (Array.isArray(source.scores)) {
+        return source.scores.some(
+          (item) => (item as { scoreId?: string })?.scoreId === scoreId
+        );
+      }
+      return source.scoreId === scoreId;
+    };
+
+    let unresolved = 0;
+    for (const item of items) {
+      if (hydratedScoreIdsRef.current.has(item.score_id)) continue;
+      const definition = scoreDefinitions[item.score_id];
+      if (!definition) {
+        unresolved++;
+        continue;
+      }
+      const assessment = hydrateAssessment(
+        draftHasScore(item.score_id) ? draftRaw : raw,
+        definition
+      );
+      setScoreAssessments((previous) => ({
+        ...previous,
+        [item.score_id]: assessment,
+      }));
+      hydratedScoreIdsRef.current.add(item.score_id);
+    }
+    if (unresolved === 0) {
+      pendingScoreVariablesRef.current = null;
+      pendingDraftScoresRef.current = null;
+      scoreDraftReadyRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoreDefinitions, formData.score, scoreMasterOptions]);
+
+  /* Keep typed score values with the visit, exactly like the form draft, so
+     switching to another step and back does not lose them before Save. */
+  useEffect(() => {
+    if (!resolvedPatientId || !scoreDraftReadyRef.current) return;
+
+    const entries = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+
+    /* Wait until every selected score has loaded its assessment, otherwise
+       an early render would overwrite the stored draft with empty values. */
+    if (entries.some((item) => !scoreAssessments[item.score_id])) return;
+    /* Also wait for the saved/typed values to be hydrated when the hydrate
+       pass has one (pendingScoreVariablesRef/pendingDraftScoresRef). */
+    if (
+      (pendingScoreVariablesRef.current || pendingDraftScoresRef.current) &&
+      entries.some((item) => !hydratedScoreIdsRef.current.has(item.score_id))
+    ) {
+      return;
+    }
+
+    localStorage.setItem(
+      scoreDraftKey,
+      JSON.stringify({
+        encounterNo: visitEncounterRef.current,
+        scores: {
+          version: 2,
+          scores: entries.map((item) => {
+            const assessment = scoreAssessments[item.score_id];
+            const definition = scoreDefinitions[item.score_id];
+            return {
+              ...serializeAssessment(assessment),
+              status: definition
+                ? evaluateScore(definition, assessment).status
+                : assessment.status,
+            };
+          }),
+        },
+      })
+    );
+  }, [
+    scoreAssessments,
+    scoreDefinitions,
+    formData.score,
+    scoreDraftKey,
+    resolvedPatientId,
+    scoreMasterOptions,
+  ]);
+
+  const handleAssessmentChange = (
+    scoreId: string,
+    assessment: ScoreAssessment
+  ) => {
+    /* A manual edit invalidates the auto-fill undo snapshot, so "Undo" can
+       never silently revert values typed after the auto-fill. */
+    setAutoFillUndo(null);
+    setScoreAssessments((previous) => ({
+      ...previous,
+      [scoreId]: assessment,
+    }));
+  };
+
+  /* ---- Auto-fill from data the consultation already holds ---- */
+  const toNumberOrNull = (value: unknown): number | null => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+
+  const patientAge = (patient: PatientRecord | null): number | null => {
+    if (!patient) return null;
+    const recorded = toNumberOrNull(patient.patient_age);
+    if (recorded != null) return recorded;
+    if (patient.patient_dob) {
+      const dob = new Date(patient.patient_dob);
+      if (!Number.isNaN(dob.getTime())) {
+        const now = new Date();
+        let age = now.getFullYear() - dob.getFullYear();
+        const month = now.getMonth() - dob.getMonth();
+        if (month < 0 || (month === 0 && now.getDate() < dob.getDate())) age--;
+        if (age >= 0 && age < 130) return age;
+      }
+    }
+    return null;
+  };
+
+  /* This visit's values (typed in the Investigation Results section) fall
+     back to the newest saved result for each test. */
+  const buildAutoFillLabs = (): Record<string, LabValue> => {
+    const labs: Record<string, LabValue> = {};
+    const parameters = new Map<string, InvestigationParameterItem>();
+    investigationParameters.forEach((parameter) =>
+      parameters.set(parameter.parameter_id, parameter)
+    );
+    investigationHistory.forEach((row) => {
+      if (row.investigation_parameter) {
+        parameters.set(row.parameter_id, row.investigation_parameter);
+      }
+    });
+
+    const newest = new Map<string, InvestigationResultRecord>();
+    for (const row of investigationHistory) {
+      const previous = newest.get(row.parameter_id);
+      if (
+        !previous ||
+        String(row.report_date).localeCompare(String(previous.report_date)) > 0
+      ) {
+        newest.set(row.parameter_id, row);
+      }
+    }
+
+    for (const [parameterId, parameter] of parameters) {
+      const typed = String(
+        formData.investigationResults[parameterId] ?? ""
+      ).trim();
+      const row = newest.get(parameterId);
+      const raw = typed || String(row?.value_text ?? "").trim();
+      if (!raw) continue;
+      const value = Number(raw.replace(/[^0-9.+-]/g, ""));
+      if (!Number.isFinite(value)) continue;
+      const key = labKeyFor(parameter.parameter_name);
+      if (!key) continue;
+      const date = row?.report_date ?? null;
+      const existing = labs[key];
+      if (existing?.date && date && existing.date > date) continue;
+      labs[key] = {
+        value,
+        unit: parameter.unit ?? null,
+        normalMin: toNumberOrNull(parameter.normal_min),
+        normalMax: toNumberOrNull(parameter.normal_max),
+        date,
+      };
+    }
+    return labs;
+  };
+
+  const buildAutoFillContext = (): AutoFillContext => {
+    const primaryType = selectedCancerTypes[0] ?? formData.type ?? "";
+    const primaryValue = (values: string[]): string | null => {
+      const ordered = orderByType(values);
+      const match =
+        ordered.find(
+          (value) =>
+            !primaryType || splitQualified(value).cancerType === primaryType
+        ) ?? ordered[0];
+      return match ? splitQualified(match).raw : null;
+    };
+
+    const stageText = primaryValue(formData.cancerStage);
+
+    /* The staging card is the source of the stage now; the legacy arrays are
+       only a fallback for drafts saved before it existed. */
+    const cancerTypeId =
+      cancerTypes.find((item) => item.cancer_type === primaryType)
+        ?.cancer_type_id ?? "";
+    const stageMirror = stageMirrorValues(formData.stages, cancerTypeId);
+
+    const derivedScores: AutoFillContext["derivedScores"] = {};
+    const selectedScoreItems = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item));
+    for (const item of selectedScoreItems) {
+      const definition = scoreDefinitions[item.score_id];
+      const assessment = scoreAssessments[item.score_id];
+      if (!definition || !assessment || assessment.status === "not_applicable") {
+        continue;
+      }
+      const evaluation = evaluateScore(definition, assessment);
+      /* Partial entries must not feed another score: a half-filled B01 would
+         otherwise suggest a premature NPI grade. */
+      if (evaluation.status !== "complete") continue;
+      derivedScores[item.score_id] = {
+        total: evaluation.total,
+        groupLabel: evaluation.groupLabel ?? null,
+        groupRange: evaluation.group?.group_range ?? null,
+      };
+    }
+
+    return {
+      age: patientAge(autoFillPatient),
+      sex: autoFillPatient?.patient_gender ?? null,
+      heightCm: toNumberOrNull(autoFillEncounter?.height),
+      weightKg: toNumberOrNull(autoFillEncounter?.weight),
+      bmi: toNumberOrNull(autoFillEncounter?.BMI),
+      systolic: toNumberOrNull(autoFillEncounter?.systolic_bp),
+      diastolic: toNumberOrNull(autoFillEncounter?.diastolic_bp),
+      labs: buildAutoFillLabs(),
+      stageNumber: stageNumberFromText(stageText),
+      stageText: stageMirror.stage ?? stageText,
+      tStage: stageMirror.t ?? primaryValue(formData.tStage),
+      nStage: stageMirror.n ?? primaryValue(formData.nStage),
+      mStage: stageMirror.m ?? primaryValue(formData.mStage),
+      derivedScores,
+    };
+  };
+
+  /* Values the staging card can pre-fill: age, PSA, prostate grade group,
+     histologic grade and the NET primary site. The clinician confirms each
+     one in the card. */
+  const stagingAutofill: StagingAutofill = React.useMemo(() => {
+    const primaryType = selectedCancerTypes[0] ?? formData.type ?? "";
+    const firstFor = (values: string[]): string | null => {
+      const ordered = orderByType(values);
+      const match =
+        ordered.find(
+          (value) =>
+            !primaryType || splitQualified(value).cancerType === primaryType
+        ) ?? ordered[0];
+      return match ? splitQualified(match).raw : null;
+    };
+
+    const labs = buildAutoFillLabs();
+
+    let gradeGroup: string | null = null;
+    for (const value of orderByType(formData.score)) {
+      const item = scoreItemOf(value);
+      const definition = item ? scoreDefinitions[item.score_id] : undefined;
+      const assessment = item ? scoreAssessments[item.score_id] : undefined;
+      if (!definition || !assessment) continue;
+      if (
+        !/grade group|gleason/i.test(
+          `${definition.name} ${definition.method ?? ""}`
+        )
+      ) {
+        continue;
+      }
+      const evaluation = evaluateScore(definition, assessment);
+      const digits = String(evaluation.groupLabel ?? "").match(/\b([1-5])\b/);
+      if (digits) {
+        gradeGroup = digits[1];
+        break;
+      }
+    }
+
+    return {
+      age: patientAge(autoFillPatient),
+      psa: labs.psa?.value ?? null,
+      gradeGroup,
+      grade: firstFor(formData.grade),
+      site: firstFor(formData.bodySite),
+      ki67: labs.ki67?.value ?? null,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    autoFillPatient,
+    formData.bodySite,
+    formData.grade,
+    formData.score,
+    formData.type,
+    formData.investigationResults,
+    investigationHistory,
+    selectedCancerTypes,
+    scoreDefinitions,
+    scoreAssessments,
+  ]);
+
+  /* Live derivation: once a source score is complete (B01 for NPI's Grade,
+     M01 for the IPI scores, ...), fill the linked variable immediately
+     instead of waiting for the preview button. Manual entries stay put and
+     a derived value is dropped when its source becomes incomplete. */
+  useEffect(() => {
+    const definitions = orderByType(formData.score)
+      .map((value) => scoreItemOf(value))
+      .filter((item): item is ForCancerType<CancerScoreItem> => Boolean(item))
+      .map((item) => scoreDefinitions[item.score_id])
+      .filter((definition): definition is ScoreDefinition => Boolean(definition));
+    if (definitions.length === 0) return;
+
+    const next = applyDerivedScores(
+      definitions,
+      scoreAssessments,
+      buildAutoFillContext()
+    );
+    if (next) setScoreAssessments(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoreAssessments, scoreDefinitions, formData.score, scoreMasterOptions]);
+
+  /* Write the exact rows the doctor ticked in the workspace preview. Every
+     selected row is applied (the preview already excluded values the doctor
+     chose to keep) and a snapshot is kept so the change can be undone. */
+  const applyAutoFillSelection = (
+    selection: { scoreId: string; variableIds: string[] }[]
+  ) => {
+    const target = selection.filter(
+      (item) =>
+        item.variableIds.length > 0 &&
+        scoreDefinitions[item.scoreId] &&
+        scoreAssessments[item.scoreId]
+    );
+    if (target.length === 0) {
+      setAutoFillNotice("No values were selected to auto-fill.");
+      return;
+    }
+
+    setAutoFillBusy(true);
+    setAutoFillNotice(null);
+    try {
+      const context = buildAutoFillContext();
+      const nextAssessments = { ...scoreAssessments };
+      let filled = 0;
+
+      for (const item of target) {
+        const definition = scoreDefinitions[item.scoreId];
+        const assessment = nextAssessments[item.scoreId];
+        if (!definition || !assessment || assessment.status === "not_applicable") {
+          continue;
+        }
+        const wanted = new Set(item.variableIds);
+        const suggestions = suggestVariableValues(definition, context).filter(
+          (suggestion) => wanted.has(suggestion.variableId)
+        );
+        if (suggestions.length === 0) continue;
+
+        const values = { ...assessment.values };
+        for (const suggestion of suggestions) {
+          const variable = definition.variables.find(
+            (candidate) => candidate.id === suggestion.variableId
+          );
+          if (!variable) continue;
+          values[variable.id] = {
+            ...resolveVariableValue(variable, suggestion.raw, "auto"),
+            autoSource: suggestion.source,
+            reason: suggestion.reason,
+          };
+          filled++;
+        }
+
+        nextAssessments[item.scoreId] = {
+          ...assessment,
+          values,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      if (filled > 0) setAutoFillUndo({ ...scoreAssessments });
+      setScoreAssessments(nextAssessments);
+      setAutoFillNotice(
+        filled > 0
+          ? `Auto-filled ${filled} value${filled === 1 ? "" : "s"}. Use “Undo auto-fill” to restore the previous values.`
+          : "The selected values were already up to date."
+      );
+    } catch (error) {
+      console.error("Auto-fill failed:", error);
+      setAutoFillNotice(
+        "Auto-fill could not read the patient data. Enter the values manually."
+      );
+    } finally {
+      setAutoFillBusy(false);
+    }
+  };
+
+  /* Fallback for callers without a preview: fill every empty/auto value. */
+  const applyAutoFill = (scoreIds?: string[]) => {
+    const targetIds = (scoreIds ?? Object.keys(scoreDefinitions)).filter(
+      (scoreId) => scoreDefinitions[scoreId] && scoreAssessments[scoreId]
+    );
+    if (targetIds.length === 0) {
+      setAutoFillNotice("Pick a score first, then auto-fill its values.");
+      return;
+    }
+
+    setAutoFillBusy(true);
+    setAutoFillNotice(null);
+    try {
+      const context = buildAutoFillContext();
+      const nextAssessments = { ...scoreAssessments };
+      let filled = 0;
+      let kept = 0;
+      let empty = 0;
+
+      for (const scoreId of targetIds) {
+        const definition = scoreDefinitions[scoreId];
+        const assessment = nextAssessments[scoreId];
+        if (assessment.status === "not_applicable") {
+          empty++;
+          continue;
+        }
+        const suggestions = suggestVariableValues(definition, context);
+        if (suggestions.length === 0) {
+          empty++;
+          continue;
+        }
+
+        const values = { ...assessment.values };
+        for (const suggestion of suggestions) {
+          const variable = definition.variables.find(
+            (item) => item.id === suggestion.variableId
+          );
+          if (!variable) continue;
+          const current = values[variable.id];
+          const hasTypedValue =
+            Boolean(current?.raw?.trim()) && current?.source !== "auto";
+          if (hasTypedValue) {
+            kept++;
+            continue;
+          }
+          values[variable.id] = {
+            ...resolveVariableValue(variable, suggestion.raw, "auto"),
+            autoSource: suggestion.source,
+            reason: suggestion.reason,
+          };
+          filled++;
+        }
+
+        nextAssessments[scoreId] = {
+          ...assessment,
+          values,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      if (filled > 0) setAutoFillUndo({ ...scoreAssessments });
+      setScoreAssessments(nextAssessments);
+      setAutoFillNotice(
+        filled > 0
+          ? `Filled ${filled} value${filled === 1 ? "" : "s"} from patient data${
+              kept > 0
+                ? `, kept ${kept} value${kept === 1 ? "" : "s"} you entered`
+                : ""
+            }.`
+          : "No matching patient data found for this score. Enter the values manually."
+      );
+    } catch (error) {
+      console.error("Auto-fill failed:", error);
+      setAutoFillNotice(
+        "Auto-fill could not read the patient data. Enter the values manually."
+      );
+    } finally {
+      setAutoFillBusy(false);
+    }
+  };
+
+  const handleUndoAutoFill = () => {
+    if (!autoFillUndo) return;
+    setScoreAssessments(autoFillUndo);
+    setAutoFillUndo(null);
+    setAutoFillNotice("Auto-fill undone. Your earlier values are back.");
+  };
+
+  /* Copy the previous visit's values for one score into this visit. */
+  const handleCopyPreviousScore = (
+    scoreId: string,
+    entry: ScoreHistoryEntry
+  ) => {
+    const definition = scoreDefinitions[scoreId];
+    const assessment = scoreAssessments[scoreId];
+    if (!definition || !assessment) return;
+
+    const values: Record<string, VariableValue> = {};
+    for (const variable of definition.variables) {
+      const stored = entry.values[variable.id];
+      if (!stored?.raw?.trim()) continue;
+      values[variable.id] = {
+        ...resolveVariableValue(variable, stored.raw, "manual"),
+        autoSource: undefined,
+        reason: undefined,
+      };
+    }
+    if (Object.keys(values).length === 0) {
+      setAutoFillNotice(
+        `The previous ${definition.name} has no stored values to copy.`
+      );
+      return;
+    }
+
+    const group = entry.group
+      ? findGroup(definition.groups, entry.group)
+      : null;
+
+    setAutoFillUndo({ ...scoreAssessments });
+    setScoreAssessments((previous) => ({
+      ...previous,
+      [scoreId]: {
+        ...assessment,
+        values,
+        selectedGroup: group?.score_group_id ?? assessment.selectedGroup,
+        note: assessment.note.trim() ? assessment.note : entry.note,
+        status:
+          assessment.status === "not_applicable"
+            ? "incomplete"
+            : assessment.status,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+    setAutoFillNotice(
+      `Copied the previous ${definition.name} values from ${entry.date ?? "the last visit"}.`
+    );
+  };
+
+  const handleToggleFavourite = (scoreId: string) => {
+    setFavouriteScores((previous) => {
+      const next = previous.includes(scoreId)
+        ? previous.filter((item) => item !== scoreId)
+        : [...previous, scoreId];
+      localStorage.setItem("hms_score_favourites", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleExportScoresCsv = () => {
+    const csv = scoresToCsv(scoreHistory);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `scores_${resolvedPatientId ?? "patient"}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleScoreRemove = (scoreId: string) => {
+    const value = formData.score.find(
+      (item) => scoreItemOf(item)?.score_id === scoreId
+    );
+    if (value) handleScoreToggle(value, false);
+  };
+
   /* Multiple scores may be picked, but only one value per score system per
      cancer type (e.g. one IPI value), mirroring the T/N/M one-per-type rule. */
   const handleScoreToggle = (
@@ -2965,31 +3973,33 @@ const Diagnosis: React.FC<{
     /* The system of a score just added, not yet in scoreMasterOptions. */
     knownSystem?: string
   ) => {
-    setFormData((previous) => {
-      const present = previous.score.includes(value);
-      const adding = select ?? !present;
-      if (!adding) {
-        return {
-          ...previous,
-          score: previous.score.filter((item) => item !== value),
-        };
-      }
-      if (present) return previous;
-      const system = knownSystem ?? scoreSystemOf(value);
-      const { cancerType } = splitQualified(value);
-      return {
+    const present = formData.score.includes(value);
+    const adding = select ?? !present;
+
+    if (!adding) {
+      setFormData((previous) => ({
         ...previous,
-        score: [
-          ...previous.score.filter(
-            (item) =>
-              !system ||
-              splitQualified(item).cancerType !== cancerType ||
-              scoreSystemOf(item) !== system
-          ),
-          value,
-        ],
-      };
-    });
+        score: previous.score.filter((item) => item !== value),
+      }));
+      return;
+    }
+    if (present) return;
+    const system = knownSystem ?? scoreSystemOf(value);
+    const { cancerType } = splitQualified(value);
+    setFormData((previous) => ({
+      ...previous,
+      score: [
+        ...previous.score.filter(
+          (item) =>
+            !system ||
+            splitQualified(item).cancerType !== cancerType ||
+            scoreSystemOf(item) !== system
+        ),
+        value,
+      ],
+    }));
+    const item = scoreItemOf(value);
+    if (item) void ensureScoreDefinition(item.score_id, item.score_value);
   };
 
   /* ---- Values the doctor adds from a dropdown ----
@@ -3109,6 +4119,21 @@ const Diagnosis: React.FC<{
       handleMultiToggle(field)(`${cancerType}|${row.stage_value}`, true);
     };
 
+  const handleCreateAssessmentBased = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const exists = labTestOptions.some(
+      (option) => option.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (exists) return;
+    setFormData((previous) => {
+      const current = previous.assessmentBased ?? [];
+      if (current.some((value) => value.toLowerCase() === trimmed.toLowerCase()))
+        return previous;
+      return { ...previous, assessmentBased: [...current, trimmed] };
+    });
+  };
+
   const handleAddDiseaseStatus = async (text: string) => {
     const row = await addReferenceValue<DiseaseStatusItem>("disease-statuses", {
       value: text,
@@ -3158,6 +4183,49 @@ const Diagnosis: React.FC<{
     if (!hasAnyData) {
       setDiagnosisError(
         "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
+
+    /* Save-time score validation: a range/entry error blocks the save (the
+       doctor sees it inline in the workspace). Incomplete scores are shown as
+       warnings but may still be saved. */
+    const scoreEntriesForValidation = orderByType(formData.score)
+      .map((value) => {
+        const item = scoreItemOf(value);
+        const definition = item ? scoreDefinitions[item.score_id] : undefined;
+        const assessment = item ? scoreAssessments[item.score_id] : undefined;
+        return definition && assessment
+          ? {
+              definition,
+              assessment,
+              evaluation: evaluateScore(definition, assessment),
+            }
+          : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          definition: ScoreDefinition;
+          assessment: ScoreAssessment;
+          evaluation: ReturnType<typeof evaluateScore>;
+        } => Boolean(entry)
+      );
+    const scoreValidation = scoreWarnings(
+      scoreEntriesForValidation.map((entry) => ({
+        definition: entry.definition,
+        evaluation: entry.evaluation,
+      }))
+    );
+    const blockingScoreErrors = scoreValidation.filter(
+      (warning) => warning.severity === "error"
+    );
+    if (blockingScoreErrors.length > 0) {
+      setDiagnosisError(
+        `Please fix the score values before saving. ${blockingScoreErrors
+          .map((warning) => warning.message)
+          .join(" ")}`
       );
       return;
     }
@@ -3330,23 +4398,29 @@ const Diagnosis: React.FC<{
     }
 
     /* What is saved for the text columns: the doctor's wording of each
-       picked value. */
-    const clinicalStageText = joinLabels(
-      "cancerStage",
-      orderByType(formData.cancerStage)
-    );
+       picked value. The stage comes from the Staging card; the server
+       overwrites this mirror with its own authoritative copy when the stage
+       records are saved. */
+    const primaryTypeId =
+      cancerTypes.find((item) => item.cancer_type === formData.type)
+        ?.cancer_type_id ?? "";
+    const primaryMirror = stageMirrorValues(formData.stages, primaryTypeId);
+    const clinicalStageText = primaryMirror.stage
+      ? `Stage ${primaryMirror.stage}`
+      : "";
     const siteText = joinLabels("bodySite", orderByType(formData.bodySite));
     const gradeText = joinLabels("grade", orderByType(formData.grade));
     const scoreText = joinLabels("score", orderByType(formData.score));
     const diseaseStatusText = formData.diseaseStatus
       ? labelOf("diseaseStatus", formData.diseaseStatus)
       : "";
+    const assessmentBasedText = formData.assessmentBased.join(", ");
     const tooLong = (
       [
-        ["Cancer Stage", clinicalStageText],
         ["Body Site", siteText],
         ["Grade", gradeText],
         ["Disease Status", diseaseStatusText],
+        ["Assessment Based", assessmentBasedText],
       ] as const
     ).find(([, text]) => text.length > 100);
     if (tooLong) {
@@ -3373,19 +4447,22 @@ const Diagnosis: React.FC<{
         .filter((item): item is CancerTypeItem =>
           Boolean(item?.cancer_type_id)
         )
-        .map((item) => ({
-          cancer_type_id: item.cancer_type_id,
-          cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
-          histopathology: histopathologyFor(item.cancer_type),
-          laterality: lateralityFor(item.cancer_type) ?? null,
-          t_stage: valueFor(formData.tStage, item.cancer_type, "tStage") ?? null,
-          n_stage: valueFor(formData.nStage, item.cancer_type, "nStage") ?? null,
-          m_stage: valueFor(formData.mStage, item.cancer_type, "mStage") ?? null,
-        }));
+        .map((item) => {
+          const codes = stageRuleCodesFor(formData.stages, item.cancer_type_id);
+          return {
+            cancer_type_id: item.cancer_type_id,
+            cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
+            histopathology: histopathologyFor(item.cancer_type),
+            laterality: lateralityFor(item.cancer_type) ?? null,
+            t_stage: codes.t,
+            n_stage: codes.n,
+            m_stage: codes.m,
+          };
+        });
 
-      const primaryTStage = valueFor(formData.tStage, formData.type, "tStage");
-      const primaryNStage = valueFor(formData.nStage, formData.type, "nStage");
-      const primaryMStage = valueFor(formData.mStage, formData.type, "mStage");
+      const primaryTStage = primaryMirror.t;
+      const primaryNStage = primaryMirror.n;
+      const primaryMStage = primaryMirror.m;
       const primaryLaterality = lateralityFor(formData.type);
 
       const diagnosisId = await resolveDiagnosisId(
@@ -3411,6 +4488,101 @@ const Diagnosis: React.FC<{
         orderByType(formData.score).map(scoreSystemOf)
       );
 
+      /* Saving while a score's definition is still loading would persist an
+         empty/partial assessment over real data, so wait for all of them. */
+      const pendingScoreValues = orderByType(formData.score).filter((value) => {
+        const item = scoreItemOf(value);
+        /* A score whose master row is gone cannot be loaded or unselected;
+           skip it rather than blocking Save forever. */
+        if (!item) return false;
+        return (
+          !scoreDefinitions[item.score_id] ||
+          !scoreAssessments[item.score_id]
+        );
+      });
+      if (pendingScoreValues.length > 0) {
+        setDiagnosisError(
+          "Score details are still loading. Wait a moment, then save again so every score is recorded."
+        );
+        return;
+      }
+
+      /* Every picked score keeps its own typed assessment (v2). The first
+         complete one also fills the legacy single-value columns. */
+      const selectedScoreEntries = orderByType(formData.score)
+        .map((value) => {
+          const item = scoreItemOf(value);
+          const definition = item ? scoreDefinitions[item.score_id] : undefined;
+          const assessment = item ? scoreAssessments[item.score_id] : undefined;
+          if (!definition || !assessment) return null;
+          return {
+            definition,
+            assessment,
+            evaluation: evaluateScore(definition, assessment),
+          };
+        })
+        .filter(
+          (
+            entry
+          ): entry is {
+            definition: ScoreDefinition;
+            assessment: ScoreAssessment;
+            evaluation: ReturnType<typeof evaluateScore>;
+          } => Boolean(entry)
+        );
+
+      const scoreSignature = scoreFingerprint(
+        selectedScoreEntries.map((entry) => ({
+          assessment: entry.assessment,
+          status: entry.evaluation.status,
+        }))
+      );
+
+      const primaryScore =
+        selectedScoreEntries.find(
+          (entry) => entry.evaluation.status !== "not_applicable"
+        ) ??
+        selectedScoreEntries[0] ??
+        null;
+
+      const scoreVariablesJson =
+        selectedScoreEntries.length > 0
+          ? {
+              version: 2,
+              scores: selectedScoreEntries.map((entry) => ({
+                ...serializeAssessment(entry.assessment),
+                status: entry.evaluation.status,
+                name: entry.definition.name,
+                methodLabel: methodLabel(entry.definition.method),
+                total: entry.evaluation.total,
+                totalLabel: entry.evaluation.totalLabel,
+                group: entry.evaluation.groupLabel,
+                groupReason: entry.evaluation.groupReason,
+                summary: scoreResultText(
+                  entry.evaluation.total,
+                  entry.evaluation.totalLabel,
+                  entry.evaluation.groupLabel
+                ),
+              })),
+            }
+          : null;
+
+      const resultParts: string[] = [];
+      if (primaryScore) {
+        if (primaryScore.evaluation.total != null) {
+          resultParts.push(String(primaryScore.evaluation.total));
+        }
+        if (primaryScore.evaluation.groupLabel) {
+          resultParts.push(primaryScore.evaluation.groupLabel);
+        }
+      }
+      const legacyScoreResultText =
+        resultParts.length > 0
+          ? resultParts.join(" - ")
+          : primaryScore?.evaluation.status === "not_applicable"
+            ? "Not applicable"
+            : null;
+
       const visitDateIso = toIsoDate(visitDate);
       const formState = buildFormState();
 
@@ -3428,11 +4600,20 @@ const Diagnosis: React.FC<{
       };
       /* null = empty: clears the value when this visit's row is updated
          (e.g. a value unticked), left out when a new row is created. */
+      /* The stage columns are only written when this visit actually records a
+         stage: an older staging detail keeps its legacy stage text if the
+         doctor saves the form without opening the staging card. The stage
+         records' own mirror (below) is authoritative when they exist. */
+      const stageFields =
+        formData.stages.length > 0
+          ? {
+              clinical_stage: clinicalStageText || null,
+              t_stage: primaryTStage || null,
+              n_stage: primaryNStage || null,
+              m_stage: primaryMStage || null,
+            }
+          : {};
       const clearableFields: Record<string, unknown> = {
-        clinical_stage: clinicalStageText || null,
-        t_stage: primaryTStage || null,
-        n_stage: primaryNStage || null,
-        m_stage: primaryMStage || null,
         metastasis_sites: metastasisSites.length > 0 ? metastasisSites : null,
         pre_diagnosis: formData.preDiagnosis || null,
         disease_status: diseaseStatusText || null,
@@ -3442,6 +4623,10 @@ const Diagnosis: React.FC<{
         grade_system: gradeSystems || null,
         score: scoreText || null,
         score_system: scoreSystems || null,
+        score_variables: scoreVariablesJson ?? null,
+        score_result: legacyScoreResultText,
+        risk_group: primaryScore?.evaluation.groupLabel ?? null,
+        score_points: primaryScore?.evaluation.total ?? null,
         diagnosis_date: diagnosisDateIso || null,
         progression_date: progressionDateIso || null,
         relapse_date: relapseDateIso || null,
@@ -3470,7 +4655,13 @@ const Diagnosis: React.FC<{
          their diagnosis in the patient's history. */
       const baseline = baselineRef.current;
       const signature = formStateSignature(formState);
-      const unchanged = baseline !== null && baseline.signature === signature;
+      /* The form's selections and the score assessments both count: editing
+         only a criterion (same score picked) is still a change. */
+      const unchanged =
+        baseline !== null &&
+        baseline.signature === signature &&
+        baseline.scoreSignature !== null &&
+        baseline.scoreSignature === scoreSignature;
 
       let stagingDetailId = unchanged
         ? baseline.stagingDetailId
@@ -3480,7 +4671,7 @@ const Diagnosis: React.FC<{
         try {
           await API.put(
             `/oncology/staging-details/${existingStagingDetailId}`,
-            { ...stagingFields, ...clearableFields }
+            { ...stagingFields, ...stageFields, ...clearableFields }
           );
         } catch (updateError: any) {
           if (updateError?.response?.status === 404) {
@@ -3499,6 +4690,7 @@ const Diagnosis: React.FC<{
           patient_id: resolvedPatientId,
           ...(visitEncounterNo ? { encounter_no: visitEncounterNo } : {}),
           ...stagingFields,
+          ...stageFields,
           ...Object.fromEntries(
             Object.entries(clearableFields).filter(([, value]) => value !== null)
           ),
@@ -3507,11 +4699,47 @@ const Diagnosis: React.FC<{
       }
 
       if (stagingDetailId) {
+        /* The server re-derives every stage (so the stored group cannot
+           disagree with the rules), mirrors the definitive one onto the
+           legacy columns and moves anything the card no longer shows to
+           history. */
+        const stageRecords = stageSavePayload(formData.stages);
+        if (stageRecords.length > 0 || stagingHadRecordsRef.current) {
+          await stagingApi.saveRecords(stagingDetailId, stageRecords, true);
+          stagingHadRecordsRef.current = stageRecords.length > 0;
+          setStagingAlerts([]);
+        }
+
+        /* p16 / p40 typed beside the card go on the IHC report. Best effort:
+           recording a stage does not require the IHC permission. */
+        const ihcDraft = formData.stageIhc;
+        if (ihcDraft.p16Status || ihcDraft.p40Status || ihcDraft.p16Percent) {
+          try {
+            await stagingApi.saveIhc(stagingDetailId, {
+              p16_status: ihcDraft.p16Status || null,
+              p16_percent:
+                ihcDraft.p16Percent === ""
+                  ? null
+                  : Number(ihcDraft.p16Percent),
+              p40_status: ihcDraft.p40Status || null,
+            });
+          } catch (ihcError: any) {
+            console.error(
+              "Failed to save p16/p40 beside the stage:",
+              ihcError?.response?.data?.message ?? ihcError?.message
+            );
+          }
+        }
+
         baselineRef.current = {
           stagingDetailId,
           ownVisit: unchanged ? baseline.ownVisit : true,
           signature,
+          scoreSignature,
         };
+        setCurrentStagingDetailId(stagingDetailId);
+        /* Saved values now come from the row, not the local draft. */
+        localStorage.removeItem(scoreDraftKey);
       }
 
       if (stagingDetailId) {
@@ -3606,6 +4834,116 @@ const Diagnosis: React.FC<{
     window.history.back();
   };
 
+  const scoreWorkspaceEntries = orderByType(formData.score)
+    .map((value) => {
+      const item = scoreItemOf(value);
+      const definition = item ? scoreDefinitions[item.score_id] : undefined;
+      const assessment = item ? scoreAssessments[item.score_id] : undefined;
+      return definition && assessment ? { definition, assessment } : null;
+    })
+    .filter(
+      (
+        entry
+      ): entry is { definition: ScoreDefinition; assessment: ScoreAssessment } =>
+        Boolean(entry)
+    );
+
+  /* The catalogue browser lists the scores available for the picked cancer
+     types, with their metadata, so the doctor can pin or add one. A score
+     shared by several types is listed once. */
+  const catalogueById = new Map<string, CatalogueEntry>();
+  for (const score of scoreMasterOptions) {
+    if (catalogueById.has(score.score_id)) continue;
+    catalogueById.set(score.score_id, {
+      scoreId: score.score_id,
+      name: score.score_value,
+      system: score.score_system,
+      method: score.input_type,
+      purpose: score.purpose ?? null,
+      whenToRecord: score.when_to_record ?? null,
+      range: score.score_range ?? null,
+      riskGroups: score.risk_groups ?? null,
+      status: score.score_status ?? null,
+      reference: score.score_reference ?? null,
+      developerNote: score.developer_note ?? null,
+      cancerType: score.cancerType,
+      selected: orderByType(formData.score).some(
+        (value) => scoreItemOf(value)?.score_id === score.score_id
+      ),
+    });
+  }
+  const scoreCatalogueEntries = Array.from(catalogueById.values());
+
+  const handleAddCatalogueScore = (entry: CatalogueEntry) => {
+    if (!entry.cancerType) {
+      setAutoFillNotice("Pick a cancer type before adding a score.");
+      return;
+    }
+    handleScoreToggle(
+      `${entry.cancerType}|${entry.name}`,
+      true,
+      entry.system ?? undefined
+    );
+  };
+
+  /* Save the catalogue metadata edited in the workspace browser. Returns an
+     error message for the dialog, or null on success. */
+  const handleUpdateCatalogueScore = async (
+    scoreId: string,
+    patch: CataloguePatch
+  ): Promise<string | null> => {
+    try {
+      const response = await chemotherapyApi.updateScore(scoreId, patch);
+      const updated = response.data.data;
+
+      /* The same score is listed under every cancer type that uses it. */
+      setScoreMasterOptions((previous) =>
+        previous.map((item) =>
+          item.score_id === scoreId
+            ? {
+                ...item,
+                score_system: updated.score_name ?? item.score_system,
+                purpose: updated.purpose ?? null,
+                when_to_record: updated.when_to_record ?? null,
+                score_range: updated.range ?? null,
+                risk_groups: updated.risk_groups ?? null,
+                score_status: updated.status ?? null,
+                score_reference: updated.reference ?? null,
+                developer_note: updated.developer_note ?? null,
+              }
+            : item
+        )
+      );
+
+      /* Keep the loaded definition (the score card) in step with the edit. */
+      setScoreDefinitions((previous) => {
+        const current = previous[scoreId];
+        if (!current) return previous;
+        return {
+          ...previous,
+          [scoreId]: {
+            ...current,
+            purpose: updated.purpose ?? null,
+            whenToRecord: updated.when_to_record ?? null,
+            range: updated.range ?? null,
+            riskGroups: updated.risk_groups ?? null,
+            status: updated.status ?? null,
+            reference: updated.reference ?? null,
+            developerNote: updated.developer_note ?? null,
+          },
+        };
+      });
+
+      setAutoFillNotice("Score catalogue metadata saved.");
+      return null;
+    } catch (error) {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? "The catalogue metadata could not be saved.";
+      return message;
+    }
+  };
+
   const content = (
     <section className="flex w-full flex-1 flex-col">
       <h2 className="mb-8 text-[10px] font-bold text-[#334155]">
@@ -3673,7 +5011,7 @@ const Diagnosis: React.FC<{
               htmlFor="preDiagnosis"
               className="mb-2 block text-[10px] font-bold text-gray-900"
             >
-              Pre Diagnosis
+              Provision Diagnosis
             </label>
 
             <div className="relative">
@@ -3685,6 +5023,34 @@ const Diagnosis: React.FC<{
                 onChange={handleChange}
                 placeholder="Type the pre diagnosis..."
                 className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Assessment Based */}
+          <div>
+            <label
+              htmlFor="assessmentBased"
+              className="mb-2 block text-[10px] font-bold text-gray-900"
+            >
+              Assessment Based
+            </label>
+
+            <div className="relative">
+              <MultiSelectDropdown
+                options={labTestOptions.map((name) => ({
+                  label: name,
+                  value: name,
+                }))}
+                value={formData.assessmentBased}
+                onValueChange={(values) =>
+                  setFormData((previous) => ({
+                    ...previous,
+                    assessmentBased: values,
+                  }))
+                }
+                onCreateOption={handleCreateAssessmentBased}
+                placeholder="Select or add a lab test..."
               />
             </div>
           </div>
@@ -3794,17 +5160,7 @@ const Diagnosis: React.FC<{
             </div>
           </div>*/}
 
-          {/* Cancer Stage */}
-          <DiagnosisCheckboxList
-            title="Cancer Stage"
-            groups={buildCheckboxGroups(stageLabels)}
-            selected={orderByType(formData.cancerStage)}
-            onToggle={handleMultiToggle("cancerStage")}
-            loading={diagnosisLoading}
-            addTypes={optionTypes}
-            onAdd={handleAddStage}
-            {...editProps("cancerStage")}
-          />
+          {/* Cancer Stage is derived by the Staging card below. */}
 
           {/* Grade */}
           <DiagnosisCheckboxList
@@ -3831,50 +5187,60 @@ const Diagnosis: React.FC<{
             loading={diagnosisLoading}
             {...editProps("score")}
           />
+          <ScoreWorkspace
+            entries={scoreWorkspaceEntries}
+            loading={scoreDetailsLoading}
+            autoFillBusy={autoFillBusy}
+            autoFillNotice={autoFillNotice}
+            autoFillContext={buildAutoFillContext()}
+            history={scoreHistory}
+            currentStagingDetailId={currentStagingDetailId}
+            restoredFromVisit={restoredScoreVisit}
+            autoFillUndoAvailable={Boolean(autoFillUndo)}
+            favourites={favouriteScores}
+            catalogue={scoreCatalogueEntries}
+            onAutoFillAll={() => applyAutoFill()}
+            onAutoFillOne={(scoreId) => applyAutoFill([scoreId])}
+            onApplyAutoFill={applyAutoFillSelection}
+            onUndoAutoFill={handleUndoAutoFill}
+            onCopyPrevious={handleCopyPreviousScore}
+            onToggleFavourite={handleToggleFavourite}
+            onAddCatalogue={handleAddCatalogueScore}
+            onUpdateCatalogue={handleUpdateCatalogueScore}
+            onExportCsv={handleExportScoresCsv}
+            onAssessmentChange={handleAssessmentChange}
+            onRemove={handleScoreRemove}
+          />
 
           {/* TNM Staging */}
-          <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
-            {/* T Stage */}
-            <DiagnosisCheckboxList
-              title="T Stage"
-              groups={buildCheckboxGroups(tOptions)}
-              selected={orderByType(formData.tStage)}
-              onToggle={handleMultiToggle("tStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("T")}
-              {...editProps("tStage")}
-            />
-
-{/* N Stage */}
-            <DiagnosisCheckboxList
-              title="N Stage"
-              groups={buildCheckboxGroups(nOptions)}
-              selected={orderByType(formData.nStage)}
-              onToggle={handleMultiToggle("nStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("N")}
-              {...editProps("nStage")}
-            />
-
-            {/* M Stage */}
-            <DiagnosisCheckboxList
-              title="M Stage"
-              groups={buildCheckboxGroups(mOptions)}
-              selected={orderByType(formData.mStage)}
-              onToggle={handleMultiToggle("mStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("M")}
-              {...editProps("mStage")}
-            />
-          </div>
+          <StagingCard
+            patientId={resolvedPatientId}
+            cancerTypes={stagingCancerTypes}
+            value={formData.stages}
+            onChange={(next) =>
+              setFormData((previous) => ({ ...previous, stages: next }))
+            }
+            autofill={stagingAutofill}
+            defaultStageDate={
+              toDateInputValue(formData.diagnosisDate) || undefined
+            }
+            disabled={savingDiagnosis}
+            ihc={formData.stageIhc}
+            onIhcChange={(next) =>
+              setFormData((previous) => ({ ...previous, stageIhc: next }))
+            }
+            alerts={stagingAlerts}
+          />
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
-          {formData.mStage.some((stage) =>
-            labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
-          ) && (
+          {(formData.stages.some((record) =>
+            String(record.derived?.mCode ?? record.m ?? "")
+              .toUpperCase()
+              .startsWith("M1")
+          ) ||
+            formData.mStage.some((stage) =>
+              labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
+            )) && (
             <div className="col-span-full">
               <label className="mb-2 block text-[10px] font-bold text-gray-900">
                 Metastasis Sites
@@ -3916,46 +5282,81 @@ const Diagnosis: React.FC<{
             />
           </div>
 
-          {/* Survivor */}
-          <div>
-            <label className="mb-2 block text-[10px] font-bold text-gray-900">
-              Survivor
-            </label>
+          {/* Survivor + NGS report entry point */}
+          <div className="flex flex-wrap items-end justify-between gap-3 sm:col-span-2">
+            <div>
+              <label className="mb-2 block text-[10px] font-bold text-gray-900">
+                Survivor
+              </label>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "Yes"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "Yes" ? "" : "Yes",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                Yes
-              </label>
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "No"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "No" ? "" : "No",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                No
-              </label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "Yes"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "Yes" ? "" : "Yes",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  Yes
+                </label>
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "No"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "No" ? "" : "No",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  No
+                </label>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setNgsEditing(null);
+                setNgsModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#004785] bg-white px-3.5 py-2 text-[11px] font-bold text-[#004785] shadow-sm transition-all hover:bg-[#F2F4F6] active:scale-[0.98]"
+            >
+              <span className="text-[14px] leading-none">+</span> Add NGS report
+            </button>
           </div>
         </div>
+
+        <NgsReportModal
+          open={ngsModalOpen}
+          onClose={() => {
+            setNgsModalOpen(false);
+            setNgsEditing(null);
+          }}
+          patientId={resolvedPatientId}
+          encounterNo={encounterNo}
+          stagingDetailId={currentStagingDetailId || null}
+          defaultCancerSite={diagnosisCancerSite(
+            formData.type,
+            joinLabels("subType", orderByType(formData.subType))
+          )}
+          editing={ngsEditing}
+          onSaved={() => setNgsVersion((version) => version + 1)}
+        />
+
+        <GeneMasterAdminModal
+          open={geneMasterOpen}
+          onClose={() => setGeneMasterOpen(false)}
+        />
 
         {/* Diagnosis API Error */}
         {diagnosisError && (
@@ -4109,6 +5510,23 @@ const Diagnosis: React.FC<{
           )}
         </div>
 
+           {/* NGS / genomic reports saved against this visit + diagnosis */}
+        <div className="mt-6">
+          <NgsReportsPanel
+            patientId={resolvedPatientId}
+            refreshKey={ngsVersion}
+            onAdd={() => {
+              setNgsEditing(null);
+              setNgsModalOpen(true);
+            }}
+            onEdit={(test) => {
+              setNgsEditing(test);
+              setNgsModalOpen(true);
+            }}
+            onChanged={() => setNgsVersion((version) => version + 1)}
+            onManageGenes={() => setGeneMasterOpen(true)}
+          />
+        </div>
         {/* Footer Action */}
         <div className="mt-12 flex justify-end">
           <button

@@ -5,16 +5,12 @@ import { X, Clock, Loader2 } from "lucide-react";
 import { appointmentApi } from "@/api/appointment.api";
 import { cn } from "@/lib/utils";
 
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
-const getNowInIST = () => new Date(Date.now() + IST_OFFSET_MS);
-const getTodayInIST = () => {
-  const d = getNowInIST();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-};
-const getNowMinutesInIST = () => {
-  const d = getNowInIST();
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-};
+// "Today"/"now" for the past-slot filter follow the ACTIVE BRANCH's timezone
+// (published by BranchFilterContext), falling back to Asia/Kolkata.
+import {
+  getNowMinutesInActiveTimezone,
+  getTodayInActiveTimezone,
+} from "@/utils/timezone";
 
 export type SlotTime = string;
 
@@ -156,8 +152,8 @@ const AvailableSlotsPopoverComponent = ({
     return () => clearInterval(id);
   }, [open]);
 
-  const isToday = date ? date === getTodayInIST() : false;
-  const nowMinutes = open && isToday ? getNowMinutesInIST() : null;
+  const isToday = date ? date === getTodayInActiveTimezone() : false;
+  const nowMinutes = open && isToday ? getNowMinutesInActiveTimezone() : null;
 
   const filteredBranchesSlots = useMemo(() => {
     if (!open || !activeBranchesSlots || !isToday || nowMinutes === null) return activeBranchesSlots;

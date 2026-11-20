@@ -12,7 +12,13 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react"
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns"
+import { format, addDays, subDays } from "date-fns"
+import {
+  formatInBranchTimezone,
+  isTodayInActiveTimezone,
+  isYesterdayInActiveTimezone,
+  isTomorrowInActiveTimezone,
+} from "@/utils/timezone"
 import { usePermission } from "@/context/PermissionContext"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import CalendarPicker from "@/components/hms/Calender"
@@ -294,13 +300,13 @@ export function KpiSection({
                       className="flex items-center justify-center h-[28px] px-2.5 text-xs font-semibold text-slate-700 hover:bg-[#F2F4F6] transition-colors border-x border-[#E5E7EB]"
                     >
                       <Activity className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-                      {isToday(selectedDate)
+                      {isTodayInActiveTimezone(selectedDate)
                         ? "Today"
-                        : isYesterday(selectedDate)
+                        : isYesterdayInActiveTimezone(selectedDate)
                           ? "Yesterday"
-                          : isTomorrow(selectedDate)
+                          : isTomorrowInActiveTimezone(selectedDate)
                             ? "Tomorrow"
-                            : format(selectedDate, "dd/MM/yyyy")}
+                            : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">

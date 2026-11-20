@@ -1,3 +1,5 @@
+import type { StageIhcDraft, StagingDraftRecord } from "./stagingDraft";
+
 export interface ConsultationState {
   patientId?: string;
   appointmentId?: string;
@@ -52,6 +54,9 @@ export type FormData = {
   secondPrimaryDate: string;
   preDiagnosis: string;
   diseaseStatus: string;
+  /* Lab-test master values the doctor picks or types for this patient's
+     assessment (stored as an array in form_state JSON; no DB column). */
+  assessmentBased: string[];
   /* Laterality / Body Site / Grade / Score are grouped per selected cancer
      type like T/N/M; values are qualified as `${cancerType}|${label}`. */
   laterality: string[];
@@ -68,6 +73,12 @@ export type FormData = {
   tStage: string[];
   nStage: string[];
   mStage: string[];
+  /* TNM staging module: one draft stage per cancer type + context, saved on
+     Save & Next. The legacy T/N/M arrays above are kept only so older drafts
+     and staging details still load. */
+  stages: StagingDraftRecord[];
+  /* p16 / p40 typed beside the staging card; saved on the IHC report. */
+  stageIhc: StageIhcDraft;
   icdCode: string;
   notes: string;
   /* Investigation Results: the visit's Report Date (DD-MM-YYYY; empty
@@ -78,6 +89,66 @@ export type FormData = {
      (the master tables keep theirs): `${field}|${selectedValue}` ->
      edited text. The selection itself keeps the master value. */
   valueEdits: Record<string, string>;
+};
+
+/* A prognostic score variable (one measurable item a score is built from). */
+export type ScoreVariable = {
+  score_variable_id: string;
+  score_id: string;
+  variable_name: string;
+  criterion: string | null;
+  points: string | null;
+  source: string;
+  auto_filled: boolean;
+  source_field: string | null;
+  display_order: number;
+  /* Runtime selections */
+  selected_criterion?: string | null;
+  selected_points?: number | null;
+  source_value?: string | null;   // auto-filled or clinician-entered value
+  resolved_meaning?: string | null; // meaning for the selected criterion (from groups)
+};
+
+/* A prognostic score risk group (total-points band -> meaning). */
+export type ScoreGroup = {
+  score_group_id: string;
+  score_id: string;
+  group_range: string;
+  meaning: string | null;
+  sort_order: number;
+};
+
+/* Full catalogue detail for a score (purpose, method, risk groups, ...). */
+export type ScoreCatalogueDetail = {
+  score_id: string;
+  score_name: string | null;
+  cancer_type_id: string | null;
+  applies_to: string | null;
+  purpose: string | null;
+  when_to_record: string | null;
+  method: string | null;
+  range: string | null;
+  risk_groups: string | null;
+  status: string | null;
+  reference: string | null;
+  developer_note: string | null;
+  variables: number;
+  auto_filled: number;
+  auto_fill_percent: string | null;
+  variables_list: ScoreVariable[];
+  groups: ScoreGroup[];
+};
+
+/* One selected score with its variables, groups and computed result. */
+export type ScoreSelection = {
+  score_id: string;
+  score_system: string;
+  score_value: string;
+  catalogue?: ScoreCatalogueDetail | null;
+  variables: ScoreVariable[];
+  groups: ScoreGroup[];
+  total_points: number | null;
+  risk_group: string | null;
 };
 
 /* Row shape returned by
@@ -94,6 +165,8 @@ export type DischargeMedicineRecord = {
   frequency?: string | null;
   composition?: string | null;
   duration?: string | null;
+  /* The duration's unit code (D / Wk / Mo), stored separately. */
+  duration_days?: string | null;
   patient_dose?: number | string | null;
   patient_dose_unit?: string | null;
   administration_detail?: string | null;

@@ -3,6 +3,7 @@ import type {
   ChemoAdministrationItem,
   ChemoAdverseEventRecord,
 } from "@/api/chemotherapy.api";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   escapeHtml,
   fields,
@@ -123,7 +124,7 @@ export const buildAdministrationMarHtml = (data: AdministrationMarData) => {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Asia/Kolkata",
+    timeZone: getActiveTimezone(),
   });
 
   const patientBlock = `<dl class="patient">${[

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday } from "date-fns";
+import { getTodayInActiveTimezone, formatInBranchTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import {
   ArrowDownUp,
   CalendarPlus,
@@ -182,14 +183,14 @@ function shiftIsoDay(iso: string, days: number): string {
 }
 
 function todayIso(): string {
-  return pickerDateToKey(new Date());
+  // Today in the ACTIVE BRANCH timezone, never the viewer's laptop date.
+  return getTodayInActiveTimezone();
 }
 
 function isBeforeToday(dateStr: string): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const apptDate = new Date(dateStr);
-  return apptDate < today;
+  // "Before today" = earlier than TODAY IN THE BRANCH'S timezone, never the
+  // viewer's laptop calendar.
+  return String(dateStr).slice(0, 10) < getTodayInActiveTimezone();
 }
 
 function toPatient(a: AppointmentRecord): Patient {
@@ -1354,8 +1355,8 @@ export default function AppointmentPage() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Appointments",
-        subtitle: `${filtered.length} appointment${filtered.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${filtered.length} appointment${filtered.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Token #", cell: (r: any) => (r.tokenNumber != null ? `#${r.tokenNumber}` : "—") },
           { header: "Patient Name", cell: (r: any) => r.name },
@@ -1583,13 +1584,13 @@ export default function AppointmentPage() {
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
                         {(() => {
                           const d = isoToPickerDate(selectedDateKey);
-                          return isToday(d)
+                          return isTodayInActiveTimezone(d)
                             ? "Today"
-                            : isYesterday(d)
+                            : isYesterdayInActiveTimezone(d)
                               ? "Yesterday"
-                              : isTomorrow(d)
+                              : isTomorrowInActiveTimezone(d)
                                 ? "Tomorrow"
-                                : format(d, "dd/MM/yyyy");
+                                : formatInBranchTimezone(d, "dd/MM/yyyy");
                         })()}
                       </button>
                     </PopoverTrigger>

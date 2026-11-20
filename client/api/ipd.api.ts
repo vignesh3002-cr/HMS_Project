@@ -460,8 +460,9 @@ export const ipdApi = {
       params: branchId ? { branchId } : undefined,
     }),
 
+  /** Alias of getTodayStats: today's admitted count for a branch (backend getAdmittedPatientsToday). */
   getAdmittedPatientsToday: (branchId?: string) =>
-    API.get<{ success: boolean; message: string; data: any }>("/ipd/stats/patients-today", {
+    API.get<{ success: boolean; message: string; data: { totalPatients: number } }>("/ipd/stats/patients-today", {
       params: branchId ? { branchId } : undefined,
     }),
 

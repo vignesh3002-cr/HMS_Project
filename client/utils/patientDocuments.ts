@@ -7,6 +7,7 @@
 
 import API from "../api/axios";
 import { getToken, getUser } from "./token";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export interface PatientDocumentItem {
   id: string;
@@ -271,9 +272,10 @@ async function savePatientDocumentToIndexedDB(
       day: "2-digit",
       month: "short",
       year: "numeric",
+      timeZone: getActiveTimezone(),
     }) +
     ", " +
-    now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() });
 
   const storedRecord: StoredDocumentRecord = {
     id,
@@ -371,9 +373,10 @@ function mapBackendRecord(
       day: "2-digit",
       month: "short",
       year: "numeric",
+      timeZone: getActiveTimezone(),
     }) +
     ", " +
-    createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() });
   const dateOnly = uploadDate.split(",")[0] || uploadDate;
 
   const viewUrl = `${backendBase}/patient-documents/${encodeURIComponent(docId)}/view${tokenQuery}`;
@@ -543,9 +546,10 @@ export async function savePatientDocument(
           day: "2-digit",
           month: "short",
           year: "numeric",
+          timeZone: getActiveTimezone(),
         }) +
         ", " +
-        createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() });
       const dateOnly = uploadDate.split(",")[0] || uploadDate;
       const viewUrl = `${backendBase}/patient-documents/${encodeURIComponent(docId)}/view${tokenQuery}`;
 

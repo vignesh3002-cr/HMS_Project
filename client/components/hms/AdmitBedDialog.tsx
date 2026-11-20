@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bed as BedIcon, CalendarClock, Loader2 } from "lucide-react";
 import { ipdApi, type AdmissionRecord, type BedRecord, type WardRecord } from "@/api/ipd.api";
+import { getActiveTimezone } from "@/utils/timezone";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -37,6 +38,18 @@ function isSelectable(bed: BedRecord, admissionId: string) {
     bed.status === "AVAILABLE" ||
     (bed.status === "RESERVED" && bed.reserved_admission_id === admissionId)
   );
+}
+
+// admission_date is UTC midnight (a calendar date) for planned rows and a
+// true instant once admitted: midnight keeps the plain date, anything else
+// renders in the branch's local timezone.
+function displayTz(d: Date): string {
+  const isMidnight =
+    d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0;
+  return isMidnight ? "UTC" : getActiveTimezone();
 }
 
 /**
@@ -118,8 +131,16 @@ export function AdmitBedDialog({ open, onOpenChange, mode, admission, onDone }: 
         .join(" ")
     : "";
 
+  // admission_date is a calendar date (UTC midnight) for planned rows and a
+  // true instant once admitted - midnight keeps the plain date, anything else
+  // shows the branch-local date.
   const plannedDate = admission?.admission_date
-    ? new Date(admission.admission_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    ? new Date(admission.admission_date).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        timeZone: displayTz(new Date(admission.admission_date)),
+      })
     : "";
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-quer
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, FlaskConical, CheckCircle2, XCircle, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ChevronDown, Bed, BedDouble } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -343,37 +344,37 @@ export default function Dashboard() {
 
 
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-employees", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-employees", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return cached?.doctors ?? null;
   });
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-employees", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-employees", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return cached?.staff ?? null;
   });
 
   const [patientCount, setPatientCount] = useState<number>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-patients", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-patients", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return typeof cached === "number" ? cached : 0;
   });
 
   // Real appointments fetched from the backend. Cached per branch + date.
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return cached?.rows ?? null;
   });
   const [appointmentCount, setAppointmentCount] = useState<number>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return cached?.total ?? 0;
   });
 
   const [prescriptionCount, setPrescriptionCount] = useState<number>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-prescriptions", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-prescriptions", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return typeof cached === "number" ? cached : 0;
   });
 
   // IPD snapshot -- currently admitted inpatients + bed occupancy (branch-scoped).
   const [ipdOverview, setIpdOverview] = useState<{ totalPatients: number; bedsOccupied: number; totalBeds: number }>(() => {
-    const cached: any = queryClient.getQueryData(["dashboard-ipd-overview", isAllBranches ? "all" : selectedBranchId, format(new Date(), "yyyy-MM-dd")]);
+    const cached: any = queryClient.getQueryData(["dashboard-ipd-overview", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
     return cached ?? { totalPatients: 0, bedsOccupied: 0, totalBeds: 0 };
   });
 
@@ -395,12 +396,12 @@ export default function Dashboard() {
   // Refreshing the branch filter or date re-fetches in the background while the
   // previous data stays on-screen (stale-while-revalidate) -> snappier navigation.
   const employeesQuery = useQuery({
-    queryKey: ["dashboard-employees", isAllBranches ? "all" : selectedBranchId, format(selectedDate, "yyyy-MM-dd")],
+    queryKey: ["dashboard-employees", isAllBranches ? "all" : selectedBranchId, dayKeyOf(selectedDate)],
     queryFn: async () => {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
-        date: format(selectedDate, "yyyy-MM-dd"),
+        date: dayKeyOf(selectedDate),
       });
       const all = res.data?.data?.employees || [];
       const doctors = all.filter((e) => e.user_table?.role_type === "DOCTOR");
@@ -429,14 +430,14 @@ export default function Dashboard() {
 
   // React Query-backed appointments fetch. Cached per branch + date so switching
   const appointmentsQuery = useQuery({
-    queryKey: ["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, format(selectedDate, "yyyy-MM-dd")],
+    queryKey: ["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, dayKeyOf(selectedDate)],
     queryFn: async () => {
       const res = await appointmentApi.getAll({
         limit: 100,
         sortBy: "appointment_date",
         sortOrder: "desc",
         branchId: isAllBranches ? undefined : selectedBranchId,
-        date: format(selectedDate, "yyyy-MM-dd"),
+        date: dayKeyOf(selectedDate),
       });
       const rows = res.data?.data?.appointments || [];
       return { rows: rows.map(mapAppointmentRecord), total: res.data?.data?.total ?? rows.length };
@@ -605,7 +606,7 @@ export default function Dashboard() {
     void refreshCriticalEncounters();
   }, [appointmentsQuery.refetch, refreshCriticalEncounters]);
 
-  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const dateStr = dayKeyOf(selectedDate);
   const patientsQuery = useQuery({
     queryKey: ["dashboard-patients", isAllBranches ? "all" : selectedBranchId, dateStr],
     queryFn: async () => {
@@ -1647,13 +1648,13 @@ export default function Dashboard() {
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isToday(selectedDate)
+                        {isTodayInActiveTimezone(selectedDate)
                           ? "Today"
-                          : isYesterday(selectedDate)
+                          : isYesterdayInActiveTimezone(selectedDate)
                             ? "Yesterday"
-                            : isTomorrow(selectedDate)
+                            : isTomorrowInActiveTimezone(selectedDate)
                               ? "Tomorrow"
-                              : format(selectedDate, "dd/MM/yyyy")}
+                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
