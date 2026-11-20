@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import API, { getActiveBranchId } from "../../../api/axios";
+import { getActiveTimezone } from "@/utils/timezone";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import { getUser } from "../../../utils/token";
 import {
@@ -202,7 +203,7 @@ function buildTreatmentTrends(
 const formatTrendValue = (value: number) =>
   value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 const formatTrendDate = (date: Date) =>
-  date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 
 /* Where the latest reading sits against the normal range - an icon and a
    word with the color, never the color alone. */
@@ -1145,7 +1146,7 @@ const HistoryTab: React.FC<{
     if (!value) return "";
     const d = typeof value === "string" ? new Date(value) : value;
     if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
   };
 
   const historyTimelineRange = (() => {
@@ -1163,11 +1164,11 @@ const HistoryTab: React.FC<{
     if (plan?.treatment_start_date) {
       const d = new Date(plan.treatment_start_date);
       if (!Number.isNaN(d.getTime())) {
-        const startMonthYear = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+        const startMonthYear = d.toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
         if ((plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" && plan?.expected_end_date) {
           const endD = new Date(plan.expected_end_date);
           const endMonthYear = !Number.isNaN(endD.getTime())
-            ? endD.toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+            ? endD.toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })
             : "";
           return endMonthYear ? `${startMonthYear} - ${endMonthYear}` : `${startMonthYear} - Present`;
         }
@@ -1404,7 +1405,7 @@ const HistoryTab: React.FC<{
       `<tr><td colspan="4" style="background:#f0f4f8;font-weight:700;padding:8px 12px;font-size:11px;">${group.cancerType}</td></tr>` +
       group.charts.map((chart) =>
         chart.points.map((pt) =>
-          `<tr><td>${chart.name}${chart.unit ? ` (${chart.unit})` : ""}</td><td>${pt.date instanceof Date ? pt.date.toLocaleDateString() : String(pt.date)}</td><td>${pt.value}</td><td>${pt.status ?? "—"}</td></tr>`
+          `<tr><td>${chart.name}${chart.unit ? ` (${chart.unit})` : ""}</td><td>${pt.date instanceof Date ? pt.date.toLocaleDateString(undefined, { timeZone: "UTC" }) : String(pt.date)}</td><td>${pt.value}</td><td>${pt.status ?? "—"}</td></tr>`
         ).join("")
       ).join("")
     ).join("");
@@ -1969,7 +1970,7 @@ const HistoryTab: React.FC<{
                               )}
                             </div>
                             <div className="text-[10px] text-red-600">
-                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : '—'}
+                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString(undefined, { timeZone: "UTC" }) : '—'}
                             </div>
                           </div>
                         <div className="flex items-center justify-end gap-2">

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   List,
@@ -82,8 +83,8 @@ function formatMobile(mobile: string | null, nationality: string | null): string
   return trimmed;
 }
 
-// Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status —
-// all real patient_bio_data columns.
+// Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status
+// plus the derived diagnosis — all real patient_bio_data columns otherwise.
 function mapToGridPatient(p: PatientRecord) {
   return {
     id: p.patient_id,
@@ -92,6 +93,7 @@ function mapToGridPatient(p: PatientRecord) {
     gender: formatGender(p.patient_gender),
     mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
     bloodGroup: p.patient_blood_group ?? "—",
+    diagnose: p.diagnosis_name?.trim() || "Not recorded",
     photo: p.patient_photo_url ?? "",
     status: getPatientStatus(p),
   };
@@ -175,8 +177,10 @@ function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<strin
 
 // List view additionally shows diagnose + assigned doctor. Assigned doctor
 // comes from the patient's own appointment history (see
-// buildAssignedDoctorMap above); there's no diagnosis field exposed by any
-// existing endpoint yet, so that stays a clear placeholder rather than a guess.
+// buildAssignedDoctorMap above); diagnose is the API's derived
+// `diagnosis_name` — the cancer type of the patient's open (ACTIVE/PLANNED)
+// treatment plan only, with a clear "Not recorded" placeholder for completed
+// treatment or patients with no plan.
 function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, AssignedDoctor>) {
   const assigned = assignedDoctors[p.patient_id];
   const { bg: deptBg, text: deptColor } = getDepartmentColors(assigned?.department);
@@ -186,7 +190,7 @@ function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, Assi
     age: calculateAge(p.patient_dob),
     gender: formatGender(p.patient_gender),
     mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
-    diagnose: "Not recorded",
+    diagnose: p.diagnosis_name?.trim() || "Not recorded",
     diagnoseBg: "#F3F4F6",
     diagnoseColor: "#6B7280",
     patientAvatarColor: assigned ? deptColor : "#00488D",
@@ -377,7 +381,7 @@ export default function PatientsManagement() {
         do {
           const res = await appointmentApi.getAll({
             branchId: isAllBranches ? undefined : selectedBranchId,
-            dateFrom: format(new Date(), "yyyy-MM-dd"),
+            dateFrom: getTodayInActiveTimezone(),
             limit: PAGE_SIZE,
             page,
             sortBy: "appointment_date",
@@ -456,7 +460,7 @@ export default function PatientsManagement() {
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(
     () => viewMode === "grid"
-      ? ["name", "id", "mobile", "bloodGroup", "status", "age", "gender"]
+      ? ["name", "id", "mobile", "bloodGroup", "diagnose", "status", "age", "gender"]
       : ["name", "id", "mobile", "diagnose", "doctor", "status", "age", "gender"],
     [viewMode],
   );
@@ -563,8 +567,8 @@ export default function PatientsManagement() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Patients Management",
-        subtitle: `${sortedData.length} patient${sortedData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `patients-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${sortedData.length} patient${sortedData.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `patients-${getTodayInActiveTimezone()}.pdf`,
         columns: viewMode === "grid"
           ? [
               { header: "Patient ID", cell: (r: any) => r.id },
@@ -573,6 +577,7 @@ export default function PatientsManagement() {
               { header: "Gender", cell: (r: any) => r.gender },
               { header: "Mobile", cell: (r: any) => r.mobile },
               { header: "Blood Group", cell: (r: any) => r.bloodGroup ?? "—" },
+              { header: "Diagnosis", cell: (r: any) => r.diagnose ?? "—" },
               { header: "Status", cell: (r: any) => r.status },
             ]
           : [
@@ -688,13 +693,13 @@ export default function PatientsManagement() {
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isToday(selectedDate)
+                        {isTodayInActiveTimezone(selectedDate)
                           ? "Today"
-                          : isYesterday(selectedDate)
+                          : isYesterdayInActiveTimezone(selectedDate)
                             ? "Yesterday"
-                            : isTomorrow(selectedDate)
+                            : isTomorrowInActiveTimezone(selectedDate)
                               ? "Tomorrow"
-                              : format(selectedDate, "dd/MM/yyyy")}
+                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
@@ -870,6 +875,9 @@ export default function PatientsManagement() {
                           </p>
                           <p className="hms-content-text text-[#191C1E]">{patient.mobile}</p>
                           <p className="hms-content-text text-[#191C1E] font-semibold">{patient.bloodGroup}</p>
+                          <p className="hms-content-text text-[#191C1E] truncate" title={patient.diagnose}>
+                            <span className="text-[#6B7280]">Diagnosis:</span> {patient.diagnose}
+                          </p>
                         </div>
 
                         <div className="absolute top-3 right-3">

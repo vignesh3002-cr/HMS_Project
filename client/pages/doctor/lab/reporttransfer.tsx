@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
+import { getActiveTimezone } from "@/utils/timezone";
 import LabNav from "./labnav";
 import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
@@ -242,10 +243,10 @@ function isTransferOverdue(item?: TransferItem | null): boolean {
 }
 
 function formatReportDate(dateVal?: string | Date | null): string {
-  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() });
   const d = new Date(dateVal);
   if (isNaN(d.getTime())) return String(dateVal);
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() });
 }
 
 function getStatusRank(status: string): number {
@@ -422,7 +423,7 @@ export default function ReportTransfer() {
         const commentString = typeof rep.report_comment === "string" ? rep.report_comment : "";
 
         const deliveredTimeStr = rep.delivered_datetime
-          ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() })
           : "11:35 AM";
 
         const rawTargetDate = (orderItem as any)?.target_date || (order as any)?.target_date || (rep as any)?.target_date;
@@ -730,6 +731,7 @@ export default function ReportTransfer() {
     const nowTime = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: getActiveTimezone(),
     });
 
     const recipientList: string[] = [];
@@ -786,6 +788,7 @@ export default function ReportTransfer() {
     const nowTime = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: getActiveTimezone(),
     });
 
     if (!id.startsWith("tx-") && !id.startsWith("item-")) {

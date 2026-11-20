@@ -4,6 +4,7 @@ import API from "../../api/axios";
 import { encounterApi, type EncounterRecord } from "../../api/encounter.api";
 import { chemoPlanCurrentItems, chemoPlanItemName } from "../../api/chemotherapy.api";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   type PatientDocumentItem,
   loadPatientDocuments,
@@ -70,11 +71,13 @@ function mapEncounterToClinicalNote(
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
+        timeZone: getActiveTimezone(),
       });
       formattedDateTime = `${d.toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric",
+        timeZone: getActiveTimezone(),
       })}, ${timeStr}`;
     }
   }
@@ -233,7 +236,7 @@ function mapEncounterToClinicalNote(
   if (enc.follow_up_date) {
     const fd = new Date(enc.follow_up_date);
     if (!Number.isNaN(fd.getTime())) {
-      followUp = `Next visit scheduled for ${fd.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}.`;
+      followUp = `Next visit scheduled for ${fd.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })}.`;
     }
   }
   if (!followUp) {
@@ -444,7 +447,7 @@ const PatientNotesDocuments: React.FC<{
         const builtActivities = rawEncounters.slice(0, 5).map((enc, i) => {
           const doc = enc.employees?.first_name ? `Dr. ${enc.employees.first_name}` : (loadedPlan?.doctor_name ? (loadedPlan.doctor_name.toLowerCase().startsWith("dr") ? loadedPlan.doctor_name : `Dr. ${loadedPlan.doctor_name}`) : "Doctor");
           const encType = enc.encounter_type && enc.encounter_type !== "OPD" ? enc.encounter_type : (loadedPlan ? "Chemo Follow-up" : "Consultation");
-          const dateStr = enc.encounter_ts ? new Date(enc.encounter_ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "RECENT";
+          const dateStr = enc.encounter_ts ? new Date(enc.encounter_ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: getActiveTimezone() }) : "RECENT";
           return {
             title: encType,
             description: `${doc} completed clinical evaluation`,

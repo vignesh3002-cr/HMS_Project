@@ -15,9 +15,10 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { useToast } from "@/hooks/use-toast";
 import { encounterApi, type PatientHistoryPayload, type VitalsLogEntry } from "@/api/encounter.api";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export type TemperatureUnit = "C" | "F";
 export type WeightUnit = "kg" | "lb";
@@ -434,7 +435,7 @@ const VitalsSignsPopover = ({
       title: "Editing vitals reading",
       description: `Loaded reading from ${
         entry.recorded_at && !isNaN(new Date(entry.recorded_at).getTime())
-          ? format(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
+          ? formatInBranchTimezone(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
           : "history"
       }.`,
     });
@@ -453,7 +454,7 @@ const VitalsSignsPopover = ({
     if (!existingEncounterNo || !entryKey) return;
     const formattedTime =
       entry.recorded_at && !isNaN(new Date(entry.recorded_at).getTime())
-        ? format(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
+        ? formatInBranchTimezone(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
         : "this entry";
     if (!window.confirm(`Are you sure you want to delete the vitals reading from ${formattedTime}?`)) {
       return;
@@ -488,7 +489,7 @@ const VitalsSignsPopover = ({
   };
 
   const openSummary = () => {
-    setRecordedAt(new Date().toLocaleString());
+    setRecordedAt(new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() }));
     setSummaryOpen(true);
   };
 
@@ -543,7 +544,7 @@ const VitalsSignsPopover = ({
           title: "Vitals updated",
           description: `Updated reading from ${
             editingEntry.recorded_at && !isNaN(new Date(editingEntry.recorded_at).getTime())
-              ? format(new Date(editingEntry.recorded_at), "dd MMM yyyy, hh:mm a")
+              ? formatInBranchTimezone(new Date(editingEntry.recorded_at), "dd MMM yyyy, hh:mm a")
               : "history"
           }.`,
         });
@@ -654,7 +655,7 @@ const VitalsSignsPopover = ({
               <span>
                 Editing vitals reading from{" "}
                 {editingEntry.recorded_at && !isNaN(new Date(editingEntry.recorded_at).getTime())
-                  ? format(new Date(editingEntry.recorded_at), "dd MMM yyyy, hh:mm a")
+                  ? formatInBranchTimezone(new Date(editingEntry.recorded_at), "dd MMM yyyy, hh:mm a")
                   : "history"}
               </span>
             </div>
@@ -896,7 +897,7 @@ const VitalsSignsPopover = ({
                           <Clock size={12} className="text-slate-400" />
                           {entry.recorded_at &&
                           !isNaN(new Date(entry.recorded_at).getTime())
-                            ? format(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
+                            ? formatInBranchTimezone(new Date(entry.recorded_at), "dd MMM yyyy, hh:mm a")
                             : "—"}
                         </span>
                         <div className="flex items-center gap-2">

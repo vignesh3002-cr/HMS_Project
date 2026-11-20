@@ -17,6 +17,7 @@ import {
     type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getActiveTimezone } from "@/utils/timezone";
 import type { AIPerformedAction } from "@/api/ai-chat.api";
 
 /* ------------------------------------------------------------------
@@ -135,7 +136,7 @@ const fmtDateTime = (v: unknown) => {
     if (isBlank(v)) return "—";
     const d = new Date(String(v));
     if (Number.isNaN(d.getTime())) return String(v);
-    return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: getActiveTimezone() });
 };
 
 const titleCase = (v: unknown) =>
@@ -302,7 +303,7 @@ const doctorsOnDuty: Builder = (result) => {
 
     return {
         icon: Stethoscope,
-        title: dateKey && dateKey !== new Date().toLocaleDateString("en-CA") ? "Doctors On Duty" : "Doctors Present Today",
+        title: dateKey && dateKey !== new Date().toLocaleDateString("en-CA", { timeZone: getActiveTimezone() }) ? "Doctors On Duty" : "Doctors Present Today",
         subtitle: dateKey ? fmtLongDate(dateKey) : undefined,
         stats: [
             { label: "Doctors on Duty", value: distinct(doctors.map((d) => d.employee_id)), tone: "blue" },

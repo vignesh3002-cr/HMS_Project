@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ArrowLeft,
   Printer,
@@ -67,6 +68,21 @@ function formatDoctorName(e: AdmissionRecord["employees"]): string {
   return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
 }
 
+/*
+ * admission_date carries two shapes in the DB: planned rows are stored as
+ * UTC midnight (a calendar date) while real admissions are true instants.
+ * Midnight therefore renders as a plain date (UTC pin); anything with a clock
+ * time renders in the branch's local timezone.
+ */
+function displayTz(d: Date): string {
+  const isMidnight =
+    d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0;
+  return isMidnight ? "UTC" : getActiveTimezone();
+}
+
 function formatDateTime(date?: string | null): string {
   if (!date) return "—";
   const d = new Date(date);
@@ -78,7 +94,7 @@ function formatDateTime(date?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "UTC",
+    timeZone: displayTz(d),
   });
 }
 
@@ -86,10 +102,10 @@ function formatDateOnly(date?: string | null): string {
   if (!date) return "—";
   const d = new Date(date);
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: displayTz(d) });
 }
 
-// Care-team times are real instants; show them in hospital time (IST).
+// Care-team times are real instants; show them in the active branch's time.
 function formatCareTeamTime(date?: string | null): string {
   if (!date) return "—";
   const d = new Date(date);
@@ -100,7 +116,7 @@ function formatCareTeamTime(date?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Asia/Kolkata",
+    timeZone: getActiveTimezone(),
   });
 }
 

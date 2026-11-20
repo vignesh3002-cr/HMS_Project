@@ -16,6 +16,7 @@ import {
 } from "docx";
 import { formatFileSize, type PatientDocumentItem } from "./patientDocuments";
 import { buildWordSections, wordSectionsToDocxChildren } from "./combinedDocumentWord";
+import { getActiveTimezone } from "@/utils/timezone";
 
 const TITLE_COLOR = "141E28";
 const HEADING_COLOR = "312E81";
@@ -152,7 +153,7 @@ export async function downloadPatientDocumentsDocx(
   documents: PatientDocumentItem[],
   options: PatientDocumentsDocxOptions = {}
 ): Promise<void> {
-  const generatedAt = new Date().toLocaleString();
+  const generatedAt = new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() });
   const patientLabel = options.patientId || "—";
 
   const children: (Paragraph | Table)[] = [

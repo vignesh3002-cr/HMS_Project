@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   List,
@@ -363,7 +364,7 @@ export default function Doctor() {
         includeDeleted: showDeactivated,
         // Pass the selected date so the backend computes doctor_status
         // (Active/Leave/Inactive) and the day's total_slots/booked_count.
-        date: format(selectedDate, "yyyy-MM-dd"),
+        date: dayKeyOf(selectedDate),
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -413,7 +414,7 @@ useEffect(() => {
   // Fetch each visible active doctor's slot summary for the selected day (page-scoped, on-demand)
   const fetchSlotSummaries = useCallback(
     async (doctorIds: string[], date: Date, signal: { cancelled: boolean }) => {
-      const dateStr = format(date, "yyyy-MM-dd");
+      const dateStr = dayKeyOf(date);
       const results = await Promise.all(
         doctorIds.map(async (id) => {
           try {
@@ -598,8 +599,8 @@ useEffect(() => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Doctor Management",
-        subtitle: `${displayData.length} doctor${displayData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `doctors-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${displayData.length} doctor${displayData.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `doctors-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Doctor ID", cell: (r: any) => r.id },
           { header: "Name", cell: (r: any) => r.name },
@@ -720,13 +721,13 @@ useEffect(() => {
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isToday(selectedDate)
+                        {isTodayInActiveTimezone(selectedDate)
                           ? "Today"
-                          : isYesterday(selectedDate)
+                          : isYesterdayInActiveTimezone(selectedDate)
                             ? "Yesterday"
-                            : isTomorrow(selectedDate)
+                            : isTomorrowInActiveTimezone(selectedDate)
                               ? "Tomorrow"
-                              : format(selectedDate, "dd/MM/yyyy")}
+                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
@@ -829,7 +830,7 @@ useEffect(() => {
                     );
                     const firstBranch = r.branches?.[0];
                     const branchId = firstBranch?.branch_id || "";
-                    const dateStr = format(selectedDate, "yyyy-MM-dd");
+                    const dateStr = dayKeyOf(selectedDate);
                     const emp = realDoctors?.find((e: any) => e.employee_id === r.id) as any;
                     const departmentId = emp?.department_id || emp?.department_master?.department_id || "";
                     return (

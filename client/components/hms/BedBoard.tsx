@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { Sparkles } from "lucide-react";
 import type { BedPatientSummary, BedRecord, WardRecord } from "@/api/ipd.api";
 import { BED_STATUS_META, BED_STATUS_ORDER, getBedStatusMeta } from "@/components/hms/BedStatusBadge";
@@ -22,7 +22,7 @@ function patientName(p: BedPatientSummary | null | undefined) {
 function safeFormat(value: string | null | undefined, pattern: string) {
   if (!value) return "";
   const d = new Date(value);
-  return isNaN(d.getTime()) ? "" : format(d, pattern);
+  return isNaN(d.getTime()) ? "" : formatInBranchTimezone(d, pattern);
 }
 
 /**

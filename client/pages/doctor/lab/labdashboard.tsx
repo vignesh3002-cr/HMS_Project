@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ChevronLeft,
   ChevronRight,
@@ -617,12 +618,14 @@ export default function LabDashboard() {
             day: "2-digit",
             month: "2-digit",
             year: "2-digit",
+            timeZone: getActiveTimezone(),
           });
 
           const formattedTime = dateObj.toLocaleTimeString("en-US", {
             hour: "2-digit",
             minute: "2-digit",
             hour12: true,
+            timeZone: getActiveTimezone(),
           });
 
           const formattedReqTime =
@@ -630,6 +633,7 @@ export default function LabDashboard() {
               day: "2-digit",
               month: "short",
               year: "numeric",
+              timeZone: getActiveTimezone(),
             }) +
             " " +
             formattedTime;
@@ -786,7 +790,7 @@ export default function LabDashboard() {
             orderDateTimeIso: dateObj.toISOString(),
             orderTimestamp: dateObj.getTime(),
             collectionTimeIso: isCollected && colDate && !isNaN(colDate.getTime()) ? colDate.toISOString() : undefined,
-            collectionTime: isCollected && colDate && !isNaN(colDate.getTime()) ? colDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }) : undefined,
+            collectionTime: isCollected && colDate && !isNaN(colDate.getTime()) ? colDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() }) : undefined,
             barcodeGenerated: isCollected,
             isCollected,
             stabilityHours,
@@ -795,7 +799,7 @@ export default function LabDashboard() {
             targetDateIso: itemTargetDates[0] ? normalizeToIsoDate(itemTargetDates[0]) || undefined : undefined,
             status: isCompleted ? "COMPLETED" : "PROCESSING",
             dob: patient?.patient_dob
-              ? new Date(patient.patient_dob).toLocaleDateString("en-GB")
+              ? new Date(patient.patient_dob).toLocaleDateString("en-GB", { timeZone: "UTC" })
               : "15/06/1990",
             gender: patient?.patient_gender || "Male",
             mobile: patient?.patient_primary_mobile || "9876543210",
@@ -909,7 +913,7 @@ export default function LabDashboard() {
       const orderId = selectedPatient.id;
       const primaryBarcode = sampleBarcodes[0]?.barcode || `BC${selectedPatient.requestId.replace(/\D/g, "").slice(-6) || "2609"}0001`;
       const nowIso = new Date().toISOString();
-      const nowTimeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+      const nowTimeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() });
 
       setTestsList((prev) =>
         prev.map((t) =>
@@ -1062,7 +1066,7 @@ export default function LabDashboard() {
           setPatientFormData((prev) => ({
             ...prev,
             fullName: realName || prev.fullName,
-            dob: data.patient_dob ? new Date(data.patient_dob).toLocaleDateString("en-GB") : prev.dob,
+            dob: data.patient_dob ? new Date(data.patient_dob).toLocaleDateString("en-GB", { timeZone: "UTC" }) : prev.dob,
             gender: data.patient_gender || prev.gender,
             mobile: data.patient_primary_mobile || prev.mobile,
             email: data.patient_email || prev.email,

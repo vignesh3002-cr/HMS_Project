@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { ChemoAdministrationDay, ChemoAdverseEventRecord } from "@/api/chemotherapy.api";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ADMIN_ROLE_SECTIONS,
   ADMIN_STATUS_LABEL,
@@ -205,7 +206,7 @@ export function downloadCycleAdministrationReport(data: CycleReportData) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Asia/Kolkata",
+    timeZone: getActiveTimezone(),
   });
   const patientLine = [
     data.patient.name && `Patient: ${data.patient.name}`,

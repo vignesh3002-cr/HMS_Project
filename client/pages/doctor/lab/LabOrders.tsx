@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
+import { getActiveTimezone, getTodayInActiveTimezone, dayKeyOf, formatInBranchTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import LabNav from "./labnav";
 import {
   labOrderApi,
@@ -141,7 +142,7 @@ const toIsoDateString = (value?: string | null | Date): string => {
 export const isTestOverdue = (test: OrderTestItem, orderStatus?: string, asOfDateIso?: string): boolean => {
   if (test.status === "COMPLETED" || orderStatus === "COMPLETED") return false;
 
-  const todayIso = asOfDateIso || format(new Date(), "yyyy-MM-dd");
+  const todayIso = asOfDateIso || getTodayInActiveTimezone();
   if (test.targetDateIso) {
     return test.targetDateIso < todayIso;
   }
@@ -166,7 +167,7 @@ export const isTestOverdue = (test: OrderTestItem, orderStatus?: string, asOfDat
 export const isOrderOverdue = (order: TrackedOrder, asOfDateIso?: string): boolean => {
   if (order.orderStatus === "COMPLETED") return false;
 
-  const todayIso = asOfDateIso || format(new Date(), "yyyy-MM-dd");
+  const todayIso = asOfDateIso || getTodayInActiveTimezone();
   if (order.targetDateIso && order.targetDateIso < todayIso) {
     return true;
   }
@@ -421,12 +422,14 @@ export default function LabOrders() {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",
+                timeZone: getActiveTimezone(),
               }) +
               ", " +
               deadlineDateObj.toLocaleTimeString("en-US", {
                 hour: "2-digit",
                 minute: "2-digit",
                 hour12: true,
+                timeZone: getActiveTimezone(),
               })
             : undefined;
 
@@ -438,7 +441,7 @@ export default function LabOrders() {
             barcode,
             status,
             statusLabel,
-            completedAt: status === "COMPLETED" ? (oi.updated_at ? new Date(oi.updated_at).toLocaleString() : "—") : undefined,
+            completedAt: status === "COMPLETED" ? (oi.updated_at ? new Date(oi.updated_at).toLocaleString(undefined, { timeZone: getActiveTimezone() }) : "—") : undefined,
             resultSummary: lsResult,
             parameters: lsParams.length > 0 ? lsParams : undefined,
             targetDate: targetDateFormatted !== "—" ? targetDateFormatted : undefined,
@@ -507,10 +510,10 @@ export default function LabOrders() {
         const orderDateObj = new Date(orderRawDate);
         const isValidDate = !Number.isNaN(orderDateObj.getTime());
         const orderDateFormatted = isValidDate
-          ? orderDateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+          ? orderDateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() })
           : "—";
         const orderTimeFormatted = isValidDate
-          ? orderDateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
+          ? orderDateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() })
           : undefined;
         const orderDateIso = toIsoDateString(orderDateObj);
 
@@ -624,7 +627,7 @@ export default function LabOrders() {
 
   /* ---------- metrics ---------- */
   const metrics = useMemo(() => {
-    const currentDayIso = selectedDate ? format(selectedDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
+    const currentDayIso = selectedDate ? dayKeyOf(selectedDate) : getTodayInActiveTimezone();
 
     const list = selectedDate
       ? orders.filter((o) => isOrderMatchingDate(o, currentDayIso, dateFilterType))
@@ -637,7 +640,7 @@ export default function LabOrders() {
     const allCompletedOrderPct = allOrdersCount > 0 ? Math.round((allCompletedOrdersCount / allOrdersCount) * 100) : 0;
     const allRevenue = orders.reduce((a, o) => a + (o.revenue || 0), 0);
 
-    const todayIso = format(new Date(), "yyyy-MM-dd");
+    const todayIso = getTodayInActiveTimezone();
     const todayOrders = orders.filter((o) => o.orderDateIso === todayIso);
     const ordersToday = todayOrders.length;
     const testsToday = todayOrders.reduce((a, o) => a + o.totalTests, 0);
@@ -853,7 +856,7 @@ export default function LabOrders() {
         valueColor: "#00488D",
         iconBg: "rgba(255, 255, 255, 0.50)",
         icon: <CalendarDays className="w-[17px] h-[17px]" color="#00488D" />,
-        isActive: Boolean(selectedDate && isToday(selectedDate)),
+        isActive: Boolean(selectedDate && isTodayInActiveTimezone(selectedDate)),
         onClick: () => {
           setSelectedDate(new Date());
           setDateFilterType("ACTIVE_RANGE");
@@ -1005,7 +1008,7 @@ export default function LabOrders() {
 
   /* ---------- filtered list ---------- */
   const filtered = useMemo(() => {
-    const currentDayIso = selectedDate ? format(selectedDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
+    const currentDayIso = selectedDate ? dayKeyOf(selectedDate) : getTodayInActiveTimezone();
 
     return orders.filter((o) => {
       const isOverdue = isOrderOverdue(o, currentDayIso);
@@ -1391,12 +1394,12 @@ export default function LabOrders() {
                           }`}
                         >
                           <CalendarIcon className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-                          {selectedDate && !isToday(selectedDate) ? (
-                            isYesterday(selectedDate)
+                          {selectedDate && !isTodayInActiveTimezone(selectedDate) ? (
+                            isYesterdayInActiveTimezone(selectedDate)
                               ? "Yesterday"
-                              : isTomorrow(selectedDate)
+                              : isTomorrowInActiveTimezone(selectedDate)
                                 ? "Tomorrow"
-                                : format(selectedDate, "dd/MM/yyyy")
+                                : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")
                           ) : (
                             "Today"
                           )}
@@ -1412,7 +1415,7 @@ export default function LabOrders() {
                               ? "Filter by Order Date"
                               : "Filter Orders by Date"}
                           </span>
-                          {selectedDate && !isToday(selectedDate) && (
+                          {selectedDate && !isTodayInActiveTimezone(selectedDate) && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1448,7 +1451,7 @@ export default function LabOrders() {
                           >
                             Today
                           </button>
-                          {selectedDate && !isToday(selectedDate) && (
+                          {selectedDate && !isTodayInActiveTimezone(selectedDate) && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1474,7 +1477,7 @@ export default function LabOrders() {
                     </button>
                   </div>
 
-                  {selectedDate && !isToday(selectedDate) && (
+                  {selectedDate && !isTodayInActiveTimezone(selectedDate) && (
                     <button
                       type="button"
                       onClick={() => setSelectedDate(new Date())}
@@ -1534,8 +1537,8 @@ export default function LabOrders() {
                             "All active lab orders and tests are currently within their scheduled target date."
                           ) : selectedDate ? (
                             <>
-                              No orders found for {dateFilterType === "TARGET_DATE" ? "target date" : dateFilterType === "ORDER_DATE" ? "order date" : "date"} {isToday(selectedDate) ? "Today" : format(selectedDate, "dd/MM/yyyy")}.{" "}
-                              {!isToday(selectedDate) && (
+                              No orders found for {dateFilterType === "TARGET_DATE" ? "target date" : dateFilterType === "ORDER_DATE" ? "order date" : "date"} {isTodayInActiveTimezone(selectedDate) ? "Today" : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}.{" "}
+                              {!isTodayInActiveTimezone(selectedDate) && (
                                 <button
                                   type="button"
                                   onClick={() => setSelectedDate(new Date())}
@@ -1554,7 +1557,7 @@ export default function LabOrders() {
                   ) : filtered.map((o) => {
                     const isCompleted = o.orderStatus === "COMPLETED";
                     const isInProgress = o.orderStatus === "IN_PROGRESS";
-                    const currentDayIso = selectedDate ? format(selectedDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
+                    const currentDayIso = selectedDate ? dayKeyOf(selectedDate) : getTodayInActiveTimezone();
                     const isOverdue = isOrderOverdue(o, currentDayIso);
                     return (
                       <tr
@@ -1679,7 +1682,7 @@ export default function LabOrders() {
             {/* Footer */}
             <div className="p-4 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
               <span>Showing <strong>{filtered.length}</strong> of <strong>{orders.length}</strong> orders</span>
-              <span className="text-[11px] text-slate-400">Refreshed {lastRefreshed.toLocaleTimeString()}</span>
+              <span className="text-[11px] text-slate-400">Refreshed {lastRefreshed.toLocaleTimeString(undefined, { timeZone: getActiveTimezone() })}</span>
             </div>
           </section>
         </main>
@@ -1700,7 +1703,7 @@ export default function LabOrders() {
                     {selectedOrder.priority === "URGENT" && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">URGENT</span>}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                    <span>{new Date(selectedOrder.orderDatetime).toLocaleString()}</span>
+                    <span>{new Date(selectedOrder.orderDatetime).toLocaleString(undefined, { timeZone: getActiveTimezone() })}</span>
                     {selectedOrder.targetDateFormatted && selectedOrder.targetDateFormatted !== "—" && (
                       <span className={`inline-flex items-center gap-1 font-semibold ${isOrderOverdue(selectedOrder) ? "text-rose-700 font-bold" : "text-slate-700"}`}>
                         · <CalendarIcon className="w-3.5 h-3.5 shrink-0" /> Target Date: {selectedOrder.targetDateFormatted}

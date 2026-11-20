@@ -17,8 +17,10 @@ import {
   Clock,
 } from "lucide-react";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
+import { getActiveTimezone } from "@/utils/timezone";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel } from "@/components/Filter";
@@ -287,7 +289,7 @@ const InpatientAdmissions: React.FC = () => {
   }, [ipdAppliedStatus, ipdDateFilter]);
 
   const dateFilterStr = useMemo(() => {
-    return ipdDateFilter ? format(ipdDateFilter, "yyyy-MM-dd") : "";
+    return ipdDateFilter ? dayKeyOf(ipdDateFilter) : "";
   }, [ipdDateFilter]);
 
   // Load Admissions with React Query (cached per filter combination for 5 min)
@@ -623,8 +625,8 @@ const InpatientAdmissions: React.FC = () => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Inpatient (IPD) Census Report",
-        subtitle: `${admissions.length} admission record${admissions.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `ipd-census-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${admissions.length} admission record${admissions.length === 1 ? "" : "s"} — exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `ipd-census-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "IP Number", cell: (r: AdmissionRecord) => r.ip_number || "—" },
           {
@@ -650,7 +652,7 @@ const InpatientAdmissions: React.FC = () => {
           {
             header: "Admitted On",
             cell: (r: AdmissionRecord) =>
-              r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy") : "—",
+              r.admission_date ? formatInBranchTimezone(new Date(r.admission_date), "dd/MM/yyyy") : "—",
           },
           { header: "Status", cell: (r: AdmissionRecord) => r.status || "—" },
         ],
@@ -671,7 +673,7 @@ const InpatientAdmissions: React.FC = () => {
           const doctorName = r.employees
             ? `Dr. ${[r.employees.first_name, r.employees.last_name].filter(Boolean).join(" ")}`
             : "";
-          const admittedOn = r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy HH:mm") : "";
+          const admittedOn = r.admission_date ? formatInBranchTimezone(new Date(r.admission_date), "dd/MM/yyyy HH:mm") : "";
           const ward = r.ward_master?.ward_name || "";
           const bed = r.bed_master?.bed_number || "";
           return [
@@ -690,7 +692,7 @@ const InpatientAdmissions: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `ipd-census-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      link.download = `ipd-census-${getTodayInActiveTimezone()}.csv`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -778,7 +780,7 @@ const InpatientAdmissions: React.FC = () => {
               className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded bg-[#F5F3FF] text-[#6D28D9] text-[10px] font-semibold border border-violet-100"
               title={
                 row.bed_master?.reserved_until
-                  ? `Held until ${format(new Date(row.bed_master.reserved_until), "dd MMM, hh:mm a")}`
+                  ? `Held until ${formatInBranchTimezone(new Date(row.bed_master.reserved_until), "dd MMM, hh:mm a")}`
                   : undefined
               }
             >
@@ -798,7 +800,7 @@ const InpatientAdmissions: React.FC = () => {
         return (
           <div className="hms-content-text text-[#191C1E] leading-4">
             <div className="flex items-center gap-1.5">
-              {valid ? format(dt, "MM/dd/yyyy") : "—"}
+              {valid ? formatInBranchTimezone(dt, "MM/dd/yyyy") : "—"}
               {row.admission_type && (
                 <span className="inline-block w-fit text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
                   {row.admission_type}
@@ -806,7 +808,7 @@ const InpatientAdmissions: React.FC = () => {
               )}
             </div>
             <div className="text-[11px] font-medium text-[#8C8D8F] mt-1">
-              {valid ? format(dt, "hh:mm a") : ""}
+              {valid ? formatInBranchTimezone(dt, "hh:mm a") : ""}
             </div>
           </div>
         );
@@ -1037,7 +1039,7 @@ const InpatientAdmissions: React.FC = () => {
             const occupiedBeds = ipdOverview?.bedsOccupied ?? 0;
             const totalBeds = ipdOverview?.totalBeds ?? 0;
             const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
-            const admittedToday = admittedTodayData?.totalAdmittedToday ?? 0;
+            const admittedToday = admittedTodayData?.totalPatients ?? 0;
             const readyForDischarge = admissions.filter((a) => a.status === "ADMITTED" && Boolean(a.discharge_details_at)).length;
             const plannedAdmissions = admissions.filter((a) => a.status === "PLANNED").length;
 
@@ -1180,13 +1182,13 @@ const InpatientAdmissions: React.FC = () => {
                     <Popover open={isIpdCalendarOpen} onOpenChange={setIsIpdCalendarOpen}>
                       <PopoverTrigger asChild>
                         <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                          {isToday(ipdNavDate)
+                          {isTodayInActiveTimezone(ipdNavDate)
                             ? "Today"
-                            : isYesterday(ipdNavDate)
+                            : isYesterdayInActiveTimezone(ipdNavDate)
                               ? "Yesterday"
-                              : isTomorrow(ipdNavDate)
+                              : isTomorrowInActiveTimezone(ipdNavDate)
                                 ? "Tomorrow"
-                                : format(ipdNavDate, "dd/MM/yyyy")}
+                                : formatInBranchTimezone(ipdNavDate, "dd/MM/yyyy")}
                         </button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
@@ -1258,7 +1260,7 @@ const InpatientAdmissions: React.FC = () => {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage={
                   ipdDateFilter
-                    ? `No patients were admitted on ${format(ipdDateFilter, "dd MMM yyyy")}.`
+                    ? `No patients were admitted on ${formatInBranchTimezone(ipdDateFilter, "dd MMM yyyy")}.`
                     : "No inpatient admissions found matching your criteria."
                 }
                 rowKey={(row: AdmissionRecord) => row.admission_id}
@@ -1604,7 +1606,7 @@ const InpatientAdmissions: React.FC = () => {
                 </div>
                 <div className="col-span-2 text-[11px] text-slate-500">
                   Saved by {activeAdmission.discharge_details_by_name || activeAdmission.discharge_details_by || "doctor"}
-                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}
+                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}` : ""}
                 </div>
               </div>
 

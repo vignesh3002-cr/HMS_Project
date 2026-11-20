@@ -10,6 +10,7 @@ import {
   type ChemoPlanOrder,
 } from "../../../api/chemotherapy.api";
 import type { SummaryPlanItem, SummaryPlan } from "./types";
+import { getActiveTimezone } from "@/utils/timezone";
 import { useDischargeMedicines, useNextVisitBooking } from "./hooks";
 
 /* ============================================================
@@ -78,7 +79,7 @@ const fmtDateTime = (value?: string | null) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: getActiveTimezone() });
 };
 
 const localTodayIso = () => {

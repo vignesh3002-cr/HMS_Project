@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ArrowLeft,
   History,
@@ -604,7 +605,7 @@ function AuditLogModal({ onClose }: { onClose: () => void }) {
                     </td>
                     <td className="px-4 py-2.5 text-xs text-slate-600">{log.changed_by}</td>
                     <td className="px-4 py-2.5 text-xs text-slate-400">
-                      {new Date(log.changed_at).toLocaleString()}
+                      {new Date(log.changed_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}
                     </td>
                   </tr>
                 ))}
