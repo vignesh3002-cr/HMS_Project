@@ -63,6 +63,12 @@ export interface PharmacySlipItem {
   duration: string | null;
   instructions: string | null;
   pharmacy_item_id?: string | null;
+  /* The popup draft row this line belongs to. */
+  source_row_key?: string | null;
+  /* True for the automatic top-up line of a row. */
+  is_top_up?: boolean | null;
+  /* Set on a base line when the doctor removed its automatic top-up line. */
+  extra_suppressed?: boolean | null;
 }
 
 /* One row of GET /pharmacy/master-items: a brand's pack with its strength. */
@@ -96,6 +102,9 @@ export interface PharmacySlipOrderItemPayload {
   duration?: string | null;
   instructions?: string | null;
   pharmacy_item_id?: string | null;
+  source_row_key?: string | null;
+  is_top_up?: boolean | null;
+  extra_suppressed?: boolean | null;
 }
 
 export interface SaveSlipFromOrderPayload {
@@ -104,6 +113,7 @@ export interface SaveSlipFromOrderPayload {
   cycle_day: number;
   encounter_no?: string | null;
   appointment_id?: string | null;
+  removed_row_keys?: string[] | null;
   items: PharmacySlipOrderItemPayload[];
 }
 
@@ -134,6 +144,8 @@ export interface PharmacySlipRecord {
   created_at: string | null;
   updated_by: string | null;
   updated_at: string | null;
+  /* Draft row keys the doctor removed in the popup. */
+  removed_row_keys?: string[] | null;
   patient_bio_data?: {
     patient_id?: string;
     patient_first_name?: string | null;
