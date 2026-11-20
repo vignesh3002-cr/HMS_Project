@@ -460,6 +460,11 @@ export const ipdApi = {
       params: branchId ? { branchId } : undefined,
     }),
 
+  getAdmittedPatientsToday: (branchId?: string) =>
+    API.get<{ success: boolean; message: string; data: any }>("/ipd/stats/patients-today", {
+      params: branchId ? { branchId } : undefined,
+    }),
+
   getOverview: (branchId?: string) =>
     API.get<{
       success: boolean;

@@ -39,10 +39,11 @@ export function useDoctorFilters({ doctorRows, branches }: UseDoctorFiltersParam
     {
       id: "name",
       label: "Doctor Name",
-      type: "combobox",
+      type: "multiselect",
       placeholder: "Search by name or ID",
       options: nameOptions,
       matchKeys: ["name", "id"],
+      compact: true,
     },
     { id: "dept", label: "Department", type: "multiselect", options: deptOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions },

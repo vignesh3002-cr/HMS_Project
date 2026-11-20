@@ -128,6 +128,11 @@ export interface RegimenProtocol {
   guideline_source: string | null;
   notes: string | null;
   active_status: number | null;
+  created_by?: string | null;
+  updated_by?: string | null;
+  review_date?: string | null;
+  used_this_month?: number | null;
+  patient_count?: number | null;
   created_at: string | null;
   updated_at: string | null;
   cancer_types: { cancer_type: string | null } | null;
@@ -170,6 +175,8 @@ export interface ChemoPlanCycle {
   planned_date?: string | null;
   actual_date?: string | null;
   next_cycle_date?: string | null;
+  rescheduled_date?: string | null;
+  cycle_interval_days?: number | null;
   cycle_status?: string | null;
   completion_status?: string | null;
 }
@@ -205,6 +212,14 @@ export interface ChemoPlan {
     patient_id?: string;
     patient_first_name?: string | null;
     patient_last_name?: string | null;
+  } | null;
+  /* Branch / oncologist are returned by GET /chemotherapy/plans for the
+     Orders page's Branch and Oncologist filters (neither is a column). */
+  branch?: { branch_name?: string | null } | null;
+  employees?: {
+    employee_id?: string;
+    first_name?: string | null;
+    last_name?: string | null;
   } | null;
   chemotherapy_regimen_protocol?: {
     protocol_id?: string;
@@ -637,18 +652,6 @@ export const chemoPlanCurrentItems = <T = ChemoPlanItem>(plan?: {
   return (plan?.chemotherapy_plan_items ?? []) as T[];
 };
 
-export interface LabReviewRecord {
-  lab_review_id?: string;
-  chemotherapy_cycle_id?: string;
-  review_date?: string | null;
-  hemoglobin?: number | string | null;
-  wbc?: number | string | null;
-  platelet_count?: number | string | null;
-  cbc_normal?: boolean | null;
-  chemotherapy_fit?: boolean | null;
-  review_notes?: string | null;
-}
-
 /* The adverse-event symptom flags (boolean columns of
    chemotherapy_adverse_event). */
 export type ChemoAdverseSymptomFlag =
@@ -722,15 +725,56 @@ export type ChemoAdverseEventRecord = Partial<Record<ChemoAdverseSymptomFlag, bo
   updated_by: string | null;
 };
 
+export interface ProtocolPerformanceItem {
+  id: string;
+  name: string;
+  regimen_code: string;
+  cancer_type: string;
+  intent: string;
+  cycle_days: number;
+  version: string;
+  status: string;
+  count: number;
+  patient_count: number;
+  previousCount: number;
+  systemShare: number;
+  color: string;
+  details?: {
+    completed: number;
+    active: number;
+    planned: number;
+    total: number;
+  };
+}
+
+export interface ProtocolPerformanceData {
+  protocols: ProtocolPerformanceItem[];
+  totalOrders: number;
+  totalUniquePatients: number;
+}
+
 export const chemotherapyApi = {
   listRegimenProtocols: (params?: {
     cancer_type_id?: string;
     subtype_id?: string;
+    include_inactive?: boolean;
+    active_status?: number;
   }) =>
     API.get<{ success: boolean; message: string; data: RegimenProtocol[] }>(
       "/chemotherapy/regimen-protocols",
       { params }
     ),
+  getProtocolPerformance: (params?: {
+    date_from?: string;
+    date_to?: string;
+    prev_date_from?: string;
+    prev_date_to?: string;
+  }) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: ProtocolPerformanceData;
+    }>("/chemotherapy/regimen-protocols/performance", { params }),
   listPlans: (params?: {
     page?: number;
     limit?: number;
@@ -850,10 +894,6 @@ export const chemotherapyApi = {
     API.post<{ success: boolean; message: string; data: ChemoAdministrationDayCompletion }>(
       `/chemotherapy/plans/${planId}/orders/${cycleNumber}/${cycleDay}/administration/complete`
     ),
-  listLabReviews: (cycleId: string) =>
-    API.get<{ success: boolean; message: string; data: LabReviewRecord[] }>(
-      `/chemotherapy/cycles/${cycleId}/lab-review`
-    ),
   listAdverseEvents: (cycleId: string) =>
     API.get<{ success: boolean; message: string; data: ChemoAdverseEventRecord[] }>(
       `/chemotherapy/cycles/${cycleId}/adverse-events`
@@ -914,6 +954,7 @@ export const chemotherapyApi = {
     }> | null;
     guideline_source?: string | null;
     notes?: string | null;
+    review_date?: string | null;
     items: Array<{
       medicine_id: string;
       drug_role?: string;
@@ -964,6 +1005,7 @@ export const chemotherapyApi = {
       }> | null;
       guideline_source?: string | null;
       notes?: string | null;
+      review_date?: string | null;
       items?: Array<{
         medicine_id: string;
         drug_role?: string;
@@ -984,11 +1026,22 @@ export const chemotherapyApi = {
       }>;
       discharge_instructions?: DischargeInstructionInput[];
       dilutions?: RegimenProtocolDilutionInput[];
+      active_status?: number | null;
     }
   ) =>
     API.put<{ success: boolean; message: string; data: RegimenProtocol }>(
       `/chemotherapy/regimen-protocols/${protocolId}`,
       payload
+    ),
+  archiveRegimenProtocol: (protocolId: string) =>
+    API.put<{ success: boolean; message: string; data: RegimenProtocol }>(
+      `/chemotherapy/regimen-protocols/${protocolId}`,
+      { active_status: 0 }
+    ),
+  restoreRegimenProtocol: (protocolId: string) =>
+    API.put<{ success: boolean; message: string; data: RegimenProtocol }>(
+      `/chemotherapy/regimen-protocols/${protocolId}`,
+      { active_status: 1 }
     ),
   deleteRegimenProtocol: (protocolId: string) =>
     API.delete<{ success: boolean; message: string; data: RegimenProtocol }>(

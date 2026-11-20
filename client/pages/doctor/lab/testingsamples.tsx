@@ -2860,10 +2860,6 @@ export default function TestingSamples() {
                   )}
                 </div>
 
-
-
-
-
                 {/* Filter Button */}
                 <div className="relative shrink-0">
                   <button

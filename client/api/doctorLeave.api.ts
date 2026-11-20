@@ -87,6 +87,7 @@ leaves: DoctorLeaveRecord[];
 
 export interface GetDoctorLeavesParams {
 employee_id?: string;
+branchId?: string;
 status?: LeaveStatus;
 page?: number;
 limit?: number;

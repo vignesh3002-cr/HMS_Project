@@ -1,25 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { format, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import CalendarPicker, { type DateRange as CalendarDateRange } from "@/components/hms/Calender";
+import { PopoverContent } from "@/components/ui/popover";
+import type { DateRange as CalendarDateRange } from "@/components/hms/Calender";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { branchApi } from "@/api/branch.api";
+import PerformanceChart, { type PerformanceChartItem } from "./performanceChart";
 
-/**
- * Branch Performance widget. Self-contained component extracted from
- * Dashboard.tsx. Owns the whole branch-performance feature: the React Query
- * backed appointment-count sweep, the compact ranked bar list with animated
- * system-share bars, the original Dashboard hover KPI popover, the
- * range/custom-range selector AND a "Bar Diagram / Pie Chart" visualization
- * dropdown. Both views share the identical hover popover — in "pie" mode
- * hovering a slice or a legend row opens the very same side popover.
- */
-
-type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "custom";
-type BranchPerfViz = "bars" | "pie";
+export type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "custom";
 
 const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
   { value: "today", label: "Today" },
@@ -30,11 +19,6 @@ const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
   { value: "thisMonth", label: "This Month" },
   { value: "lastMonth", label: "Last Month" },
   { value: "custom", label: "Custom Range" },
-];
-
-const BRANCH_PERF_VIZ_OPTIONS: { value: BranchPerfViz; label: string }[] = [
-  { value: "bars", label: "Bar Diagram" },
-  { value: "pie", label: "Pie Chart" },
 ];
 
 interface BranchPerfRangeResult {
@@ -57,7 +41,7 @@ function systemSharePct(branchBookedCount: number, totalSystemBookedCount: numbe
 }
 
 function utilizationPct(bookedCount: number, totalSlots: number): number | null {
-  if (totalSlots <= 0) return null; // no capacity data -> render "N/A", never 0% or 100%
+  if (totalSlots <= 0) return null;
   return Math.round((bookedCount / totalSlots) * 100);
 }
 
@@ -165,25 +149,20 @@ function getBranchPerfRangeDates(range: BranchPerfRange, base: Date, customRange
   };
 }
 
-/** Distinct hue for each branch so pie slices don't collide. */
 const PIE_COLORS = [
   "#004888", "#00A878", "#C7701C", "#7B3200", "#6D5BC5",
   "#0E86C4", "#3D8C40", "#B54A7E", "#C49A2A", "#57627A",
   "#2E9DB3", "#8F4FB0", "#D9534F", "#3E7CB1", "#A8720F",
 ];
 
-
-function formatStatValue(value: number): string {
-  return (typeof value === "number" && !isNaN(value) ? value : 0).toLocaleString();
-}
-
 function formatComparisonRange(from: Date, to: Date): string {
   return `${format(from, "MMM d")} - ${format(to, "MMM d")}`;
 }
 
 interface BranchPerformanceProps {
-  /** Base date for all relative ranges (today/yesterday/weeks/months). */
   selectedDate?: Date;
+  compact?: boolean;
+  className?: string;
 }
 
 interface BranchPerfBranch {
@@ -197,12 +176,6 @@ interface BranchPerfBranch {
   appointments?: AppointmentRecord[];
 }
 
-/**
- * Branch Performance widget (extracted from Dashboard.tsx).
- * Owns its own data fetching, ranking, hover-KPI card, range selection and
- * the Bar/Pie visualization dropdown. Pie mode renders the same ranked
- * branch-share data as a recharts donut chart.
- */
 interface BranchHoverCardProps {
   branch: BranchPerfBranch;
   details: {
@@ -219,11 +192,6 @@ interface BranchHoverCardProps {
   onMouseLeave: () => void;
 }
 
-/**
- * The hover popover body — the same markup the original Dashboard.tsx widget
- * used. Rendered inside <PopoverContent> for both the bar rows and the pie
- * legend rows so hovering behaves identically in both visualization modes.
- */
 function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMouseLeave }: BranchHoverCardProps) {
   const trendObj = computeTrend(branch.count, branch.previousCount);
   const formattedTrendText = formatTrend(trendObj);
@@ -246,7 +214,6 @@ function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMous
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {/* Hover card header */}
       <div className="px-4 pt-3 pb-2">
         <div className="text-[#191C1E] font-bold text-xs tracking-[0.2px]">{branch.name}</div>
         <div className="flex items-center gap-2 mt-1">
@@ -261,15 +228,12 @@ function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMous
 
       <div className="border-t border-[#E5E7EB] mx-3" />
 
-      {/* Volume & Capacity metrics */}
       <div className="px-4 py-2.5 flex flex-col gap-2">
-        {/* System Share */}
         <div className="flex justify-between items-center">
           <span className="text-[#6B7280] text-[10px] font-medium">System Share</span>
           <span className="text-[#191C1E] text-[11px] font-semibold">{branch.systemShare}%</span>
         </div>
 
-        {/* Utilization */}
         <div className="flex justify-between items-start">
           <span className="text-[#6B7280] text-[10px] font-medium">Utilization</span>
           <div className="flex flex-col items-end gap-0.5">
@@ -299,7 +263,6 @@ function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMous
           </div>
         </div>
 
-        {/* Capacity Breakdown */}
         {branch.totalSlots > 0 && (
           <>
             <div className="flex justify-between items-center">
@@ -318,7 +281,6 @@ function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMous
 
       <div className="border-t border-[#E5E7EB] mx-3" />
 
-      {/* Appointment Outcomes / Upcoming (tomorrow) */}
       <div className="px-4 py-2.5 pb-3">
         {loading && !details ? (
           <div className="flex items-center gap-2 text-[#6B7280] text-[10px] py-1">
@@ -369,22 +331,17 @@ function BranchHoverCard({ branch, details, loading, range, onMouseEnter, onMous
   );
 }
 
-export default function BranchPerformance({ selectedDate = new Date() }: BranchPerformanceProps) {
-  // "bars" = compact ranked bar list (original look); "pie" = donut chart.
-  const [vizMode, setVizMode] = useState<BranchPerfViz>("bars");
-
+export default function BranchPerformance({ selectedDate = new Date(), compact = false, className }: BranchPerformanceProps) {
   const [branchPerfRange, setBranchPerfRange] = useState<BranchPerfRange>("today");
   const [customDateRange, setCustomDateRange] = useState<CalendarDateRange | null>(null);
-  const [isCustomRangeOpen, setIsCustomRangeOpen] = useState(false);
+  const [scope, setScope] = useState<"top3" | "all">("top3");
+
   const [branchPerfDateLabel, setBranchPerfDateLabel] = useState("");
   const [branchPerfCompareLabel, setBranchPerfCompareLabel] = useState("");
 
   const [branches, setBranches] = useState<BranchPerfBranch[]>([]);
   const [branchPerfError, setBranchPerfError] = useState<string | null>(null);
 
-  // Hover card state -- detailed KPIs are fetched on demand when a row/slice
-  // is hovered, so the initial sweep stays fast (count-only queries).
-  const [hoveredBranchId, setHoveredBranchId] = useState<string | null>(null);
   const [hoveredBranchDetails, setHoveredBranchDetails] = useState<{
     total: number;
     booked: number;
@@ -394,7 +351,6 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
     scheduled: number;
   } | null>(null);
   const [isHoverDetailsLoading, setIsHoverDetailsLoading] = useState(false);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const branchPerfQuery = useQuery({
     queryKey: ["dashboard-branch-perf", branchPerfRange, format(selectedDate, "yyyy-MM-dd"), customDateRange],
@@ -404,7 +360,6 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
 
       const { dateFrom, dateTo, prevDateFrom, prevDateTo, dateLabel, compareLabel } = getBranchPerfRangeDates(branchPerfRange, selectedDate, customDateRange);
 
-      // Helper to fetch all appointments for a date range in consolidated batches
       async function fetchAllAppointmentsInRange(dFrom: string, dTo: string): Promise<AppointmentRecord[]> {
         const res = await appointmentApi.getAll({ dateFrom: dFrom, dateTo: dTo, limit: 100 }).catch(() => null);
         if (!res?.data?.data) return [];
@@ -425,13 +380,11 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
         return records;
       }
 
-      // 2 consolidated requests instead of 42 per-branch requests
       const [currentAppts, prevAppts] = await Promise.all([
         fetchAllAppointmentsInRange(dateFrom, dateTo),
         fetchAllAppointmentsInRange(prevDateFrom, prevDateTo),
       ]);
 
-      // Group appointments by branch in memory
       const currentByBranch: Record<string, { booked: number; total: number; appointments: AppointmentRecord[] }> = {};
       const prevByBranch: Record<string, number> = {};
 
@@ -502,7 +455,6 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
     setBranches([]);
   }, [branchPerfQuery.error]);
 
-  // Detailed KPIs for the hovered branch computed instantly from in-memory branch appointments.
   const fetchBranchHoverDetails = useCallback((branchId: string) => {
     const branch = branches.find((b) => b.id === branchId);
     const appointments = branch?.appointments || [];
@@ -517,12 +469,12 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
       if (s === "COMPLETED") completed++;
       else if (s === "CANCELLED") cancelled++;
       else if (s === "NO_SHOW") noShow++;
-      else if (s === "SCHEDULED" || s === "RESCHEDULED" || s === "NOT_CHECKED_IN" || s === "IN_CONSULTATION") scheduled++;
+      else scheduled++;
     });
 
     setHoveredBranchDetails({
       total: appointments.length,
-      booked: appointments.length - cancelled - noShow,
+      booked: branch?.count || 0,
       completed,
       cancelled,
       noShow,
@@ -531,396 +483,69 @@ export default function BranchPerformance({ selectedDate = new Date() }: BranchP
     setIsHoverDetailsLoading(false);
   }, [branches]);
 
-  useEffect(() => {
-    if (!hoveredBranchId) return;
-    fetchBranchHoverDetails(hoveredBranchId);
-  }, [hoveredBranchId, fetchBranchHoverDetails]);
+  const chartItems = useMemo<PerformanceChartItem[]>(() => {
+    return branches.map((b, index) => {
+      const trendObj = computeTrend(b.count, b.previousCount);
+      const formattedTrendText = formatTrend(trendObj);
+      const trendColor =
+        trendObj.kind === "none"
+          ? "#8C8D8F"
+          : trendObj.kind === "new" || (trendObj.kind === "change" && trendObj.delta > 0)
+          ? "#16A34A"
+          : "#EF4444";
 
-  // Hover open/close timing identical to the original Dashboard widget: the
-  // popover opens immediately, closing is delayed 150ms so the pointer can
-  // travel onto the popover without it flickering away.
-  const handleBranchMouseEnter = useCallback((branchId: string) => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-    setHoveredBranchId(branchId);
-  }, []);
-
-  const handleBranchMouseLeave = useCallback(() => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = setTimeout(() => {
-      setHoveredBranchId(null);
-      setHoveredBranchDetails(null);
-    }, 150);
-  }, []);
-
-  const cancelHoverClose = useCallback(() => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (hoverTimerRef.current) {
-        clearTimeout(hoverTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Animated bar fill: mirrors each branch's systemShare %, stepping one
-  // point at a time so repeated range changes can't leak overlapping timers.
-  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
-  const animatedValuesRef = useRef<Record<string, number>>({});
-  animatedValuesRef.current = animatedValues;
-
-  useEffect(() => {
-    const validIds = new Set(branches.map((b) => b.id));
-    setAnimatedValues((prev) => {
-      let changed = false;
-      const next: Record<string, number> = {};
-      for (const [k, v] of Object.entries(prev)) {
-        if (validIds.has(k)) {
-          next[k] = v;
-        } else {
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
+      return {
+        id: b.id,
+        title: b.name,
+        value: b.count,
+        valueLabel: `${b.count} ${b.count === 1 ? "appt" : "appts"}`,
+        share: b.systemShare,
+        color: b.color,
+        subtext: formattedTrendText,
+        subtextColor: trendColor,
+        isTop: index === 0 && b.count > 0,
+        rawItem: b,
+      };
     });
-
-
-    const intervals = branches
-      .filter((b) => b.systemShare !== (animatedValuesRef.current[b.id] ?? 0))
-      .map((branch) => {
-        const interval = window.setInterval(() => {
-          setAnimatedValues((prev) => {
-            const value = prev[branch.id] ?? 0;
-            if (value === branch.systemShare) {
-              window.clearInterval(interval);
-              return prev;
-            }
-            return {
-              ...prev,
-              [branch.id]: value < branch.systemShare ? value + 1 : value - 1,
-            };
-          });
-
-        }, 30);
-        return interval;
-      });
-
-
-    return () => intervals.forEach((interval) => window.clearInterval(interval));
   }, [branches]);
 
-  const pieData = useMemo(
-    () => branches.filter((b) => b.count > 0).map((b) => ({ name: b.name, value: b.count, share: b.systemShare, color: b.color, id: b.id })),
-    [branches],
-  );
-  const pieTotal = useMemo(() => pieData.reduce((sum, d) => sum + d.value, 0), [pieData]);
+  const totalAppointments = useMemo(() => {
+    return branches.reduce((sum, b) => sum + b.count, 0);
+  }, [branches]);
 
   return (
-    <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-      {/* Header -- original Dashboard widget look */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
-            {isUpdating && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-[#00488D] font-medium bg-blue-50 px-2 py-0.5 rounded-full animate-fade-in">
-                <Loader2 className="w-3 h-3 animate-spin text-[#00488D]" />
-                <span>Updating...</span>
-              </span>
-            )}
-          </div>
-          {branchPerfDateLabel && <p className="text-[#424752] text-[10px] font-semibold mt-0.5">{branchPerfDateLabel}</p>}
-          {branchPerfCompareLabel && <p className="text-[#8C8D8F] text-[9px] font-medium">{branchPerfCompareLabel}</p>}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Bar Diagram / Pie Chart select -- styled exactly like the range select */}
-          <select
-            value={vizMode}
-            onChange={(e) => setVizMode(e.target.value as BranchPerfViz)}
-            className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
-            title="Choose visualization"
-          >
-            {BRANCH_PERF_VIZ_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          {(branchPerfRange === "custom" && (
-            <Popover
-              open={isCustomRangeOpen}
-              onOpenChange={(open) => {
-                setIsCustomRangeOpen(open);
-                if (open) {
-                  setHoveredBranchId(null);
-                  setHoveredBranchDetails(null);
-                }
-              }}
-            >
-              <PopoverTrigger asChild>
-                <button
-                  className="px-2 py-1 rounded border border-[#00488D] bg-[#D6E3FF] text-[#00488D] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer"
-                >
-                  {customDateRange?.from && customDateRange?.to
-                    ? formatComparisonRange(customDateRange.from, customDateRange.to)
-                    : "Pick Range"}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
-                <CalendarPicker
-                  mode="range"
-                  selected={customDateRange}
-                  hideThemePicker
-                  onSelect={(range) => {
-                    if (range && typeof range === "object" && "from" in range && "to" in range) {
-                      setCustomDateRange(range);
-                      setIsCustomRangeOpen(false);
-                    }
-                  }}
-                />
-              </PopoverContent>
-            </Popover>
-          )) || null}
-          <select
-            value={branchPerfRange}
-            onChange={(e) => {
-              const next = e.target.value as BranchPerfRange;
-              setBranchPerfRange(next);
-              if (next === "custom" && !customDateRange) {
-                setHoveredBranchId(null);
-                setHoveredBranchDetails(null);
-                setIsCustomRangeOpen(true);
-              }
-            }}
-            className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
-            title="Choose date range"
-          >
-            {BRANCH_PERF_RANGE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Error state */}
-      {branchPerfError && (
-        <div className="flex items-center gap-2 text-[#B91C1C] text-xs bg-[#FEF2F2] border border-[#FECACA] rounded-md px-3 py-2">
-          <AlertCircle size={14} />
-          <span>{branchPerfError}</span>
-        </div>
+    <PerformanceChart
+      title="Branch Performance"
+      compact={compact}
+      className={className}
+      isLoading={isInitialLoading}
+      isUpdating={isUpdating}
+      error={branchPerfError}
+      items={chartItems}
+      totalValue={totalAppointments}
+      totalValueUnit="Appointments"
+      dateLabel={branchPerfDateLabel}
+      compareLabel={branchPerfCompareLabel}
+      selectedRange={branchPerfRange}
+      onRangeChange={(next) => setBranchPerfRange(next as BranchPerfRange)}
+      rangeOptions={BRANCH_PERF_RANGE_OPTIONS}
+      customDateRange={customDateRange}
+      onCustomRangeSelect={(r) => setCustomDateRange(r)}
+      scope={scope}
+      onScopeToggle={() => setScope(scope === "top3" ? "all" : "top3")}
+      top3FooterLabel="Top 3 Branches"
+      totalFooterLabel="Total Branches"
+      emptyMessage="No branch data available."
+      renderHoverCard={(item) => (
+        <BranchHoverCard
+          branch={item.rawItem}
+          details={hoveredBranchDetails}
+          loading={isHoverDetailsLoading}
+          range={branchPerfRange}
+          onMouseEnter={() => fetchBranchHoverDetails(item.id)}
+          onMouseLeave={() => {}}
+        />
       )}
-
-      {/* Loading skeleton -- Mode aware */}
-      {isInitialLoading && vizMode === "bars" && (
-        <div className="flex flex-col gap-3 py-2">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-full bg-[#F1F3F6] animate-pulse" />
-              <div className="flex-1 flex flex-col gap-1.5">
-                <div className="h-2.5 w-1/3 bg-[#F1F3F6] rounded animate-pulse" />
-                <div className="h-2 bg-[#F1F3F6] rounded animate-pulse" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {isInitialLoading && vizMode === "pie" && (
-        <div className="flex flex-col lg:flex-row items-center gap-4 py-2">
-          {/* Donut chart skeleton */}
-          <div className="relative w-full lg:w-1/2 h-[260px] flex items-center justify-center">
-            <div className="w-[164px] h-[164px] rounded-full bg-[#F1F3F6] animate-pulse flex items-center justify-center shadow-inner">
-              <div className="w-[116px] h-[116px] rounded-full bg-white flex flex-col items-center justify-center gap-1 shadow-sm">
-                <div className="w-8 h-2 bg-[#F1F3F6] rounded animate-pulse" />
-                <div className="w-12 h-4 bg-[#E5E7EB] rounded animate-pulse" />
-                <div className="w-8 h-2 bg-[#F1F3F6] rounded animate-pulse" />
-              </div>
-            </div>
-          </div>
-          {/* Legend rows skeleton */}
-          <div className="w-full lg:w-1/2 flex flex-col gap-2 max-h-[260px] py-1">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex items-center justify-between p-1.5 rounded-md">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#F1F3F6] animate-pulse shrink-0" />
-                  <div className="w-24 h-2.5 bg-[#F1F3F6] rounded animate-pulse" />
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="w-12 h-2.5 bg-[#F1F3F6] rounded animate-pulse" />
-                  <div className="w-8 h-2.5 bg-[#E5E7EB] rounded animate-pulse" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!isInitialLoading && !branchPerfError && branches.length === 0 && (
-        <div className="flex items-center justify-center py-8 text-[#6B7280] text-xs">No branch data available.</div>
-      )}
-
-      {/* BAR VIEW -- original compact rows with animated share bars */}
-      {!isInitialLoading && !branchPerfError && branches.length > 0 && vizMode === "bars" && (
-        <div className={`flex flex-col gap-3 max-h-[260px] overflow-y-auto hide-scrollbar pr-1 transition-opacity duration-200 ${isUpdating ? "opacity-75" : "opacity-100"}`}>
-          {branches.map((branch, index) => {
-            const trendObj = computeTrend(branch.count, branch.previousCount);
-            const formattedTrendText = formatTrend(trendObj);
-            const isTop = index === 0 && branch.count > 0;
-            const isOpen = hoveredBranchId === branch.id;
-
-            const trendColor =
-              trendObj.kind === "none"
-                ? "#8C8D8F"
-                : trendObj.kind === "new" || (trendObj.kind === "change" && trendObj.delta > 0)
-                ? "#16A34A"
-                : "#EF4444";
-
-            const sharePct = animatedValues[branch.id] ?? branch.systemShare;
-
-            return (
-              <Popover key={branch.id} open={isOpen}>
-                <PopoverTrigger asChild>
-                  <div
-                    className="relative flex flex-col gap-1 cursor-pointer rounded-md px-1.5 py-1 transition-colors duration-150 hover:bg-[#F8FAFC]"
-                    onMouseEnter={() => {
-                      if (isCustomRangeOpen) return;
-                      handleBranchMouseEnter(branch.id);
-                    }}
-                    onMouseLeave={handleBranchMouseLeave}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-[#8C8D8F] text-[9px] font-bold w-3 flex-shrink-0">{index + 1}.</span>
-                        <span className="text-[#191C1E] text-[10px] font-semibold tracking-[0.3px] capitalize truncate">
-                          {branch.name}
-                        </span>
-                        {isTop && (
-                          <span className="text-[#00488D] text-[9px] leading-none" title="Highest volume">★</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-[10px] font-semibold text-[#424752]">
-                          {branch.count} {branch.count === 1 ? "appt" : "appts"}
-                        </span>
-                        <span className="text-[9px] font-semibold tracking-[0.5px] uppercase" style={{ color: branch.color }}>
-                          {sharePct}% share
-                        </span>
-                      </div>
-                    </div>
-                    {/* System Share bar */}
-                    <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-300" style={{ width: `${sharePct}%`, background: branch.color }} />
-                    </div>
-                    {/* Trend badge */}
-                    <div className="flex items-center gap-1 pl-[18px]">
-                      <span className="text-[8px] font-semibold" style={{ color: trendColor }}>
-                        {formattedTrendText}
-                      </span>
-                    </div>
-                  </div>
-                </PopoverTrigger>
-                <BranchHoverCard
-                  branch={branch}
-                  details={hoveredBranchDetails}
-                  loading={isHoverDetailsLoading}
-                  range={branchPerfRange}
-                  onMouseEnter={cancelHoverClose}
-                  onMouseLeave={handleBranchMouseLeave}
-                />
-              </Popover>
-            );
-          })}
-        </div>
-      )}
-
-      {/* PIE VIEW */}
-      {!isInitialLoading && !branchPerfError && vizMode === "pie" && (
-        pieData.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-[#6B7280] text-xs">No booked appointments for this range.</div>
-        ) : (
-          <div className={`flex flex-col lg:flex-row items-start gap-4 transition-opacity duration-200 ${isUpdating ? "opacity-75" : "opacity-100"}`}>
-            <div className="relative w-full lg:w-1/2 h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={95}
-                    paddingAngle={2}
-                    stroke="none"
-                    isAnimationActive={true}
-                    animationDuration={600}
-                  >
-                    {pieData.map((entry) => (
-                      <Cell
-                        key={entry.id}
-                        fill={entry.color}
-                        opacity={hoveredBranchId && hoveredBranchId !== entry.id ? 0.35 : 1}
-                        onMouseEnter={() => {
-                          if (isCustomRangeOpen) return;
-                          handleBranchMouseEnter(entry.id);
-                        }}
-                        onMouseLeave={handleBranchMouseLeave}
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-lg font-extrabold text-[#191C1E]">{formatStatValue(pieTotal)}</span>
-                <span className="text-[9px] uppercase tracking-[0.8px] text-[#6B7280]">Total booked</span>
-              </div>
-            </div>
-            <div className="w-full lg:w-1/2 flex flex-col gap-1 max-h-[260px] overflow-y-auto hide-scrollbar pr-1">
-              {pieData.map((entry) => {
-                const branch = branches.find((b) => b.id === entry.id);
-                if (!branch) return null;
-                return (
-                  <Popover key={entry.id} open={hoveredBranchId === entry.id}>
-                    <PopoverTrigger asChild>
-                      <div
-                        className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[#F8FAFC] cursor-pointer"
-                        onMouseEnter={() => {
-                          if (isCustomRangeOpen) return;
-                          handleBranchMouseEnter(entry.id);
-                        }}
-                        onMouseLeave={handleBranchMouseLeave}
-                      >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
-                          <span className="text-[10px] font-semibold text-[#191C1E] tracking-[0.3px] truncate">{entry.name}</span>
-                        </span>
-                        <span className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] font-semibold text-[#424752]">{formatStatValue(entry.value)}</span>
-                          <span className="text-[9px] font-semibold text-[#8C8D8F] uppercase tracking-[0.5px]">{entry.share}% share</span>
-                        </span>
-                      </div>
-                    </PopoverTrigger>
-                    <BranchHoverCard
-                      branch={branch}
-                      details={hoveredBranchDetails}
-                      loading={isHoverDetailsLoading}
-                      range={branchPerfRange}
-                      onMouseEnter={cancelHoverClose}
-                      onMouseLeave={handleBranchMouseLeave}
-                    />
-                  </Popover>
-                );
-              })}
-            </div>
-          </div>
-        )
-      )}
-    </div>
+    />
   );
 }

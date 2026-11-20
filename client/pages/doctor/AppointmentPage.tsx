@@ -1254,17 +1254,6 @@ export default function AppointmentPage() {
      ======================================================= */
 
   // Filter system — useAppointmentFilters + useFilterPanel
-  const appointmentRows = useMemo(
-    () =>
-      patients.map((p) => ({
-        branch: null as string | null,
-        status: p.originalStatus,
-      })),
-    [patients],
-  );
-
-  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows });
-
   const {
     values: filterValues,
     appliedValues,
@@ -1273,7 +1262,26 @@ export default function AppointmentPage() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
-  } = useFilterPanel(appointmentFilterFields);
+  } = useFilterPanel();
+
+  const appointmentRows = useMemo(
+    () =>
+      patients.map((p) => ({
+        id: p.id,
+        patient: p.name,
+        patientId: p.patientCode,
+        branch: null as string | null,
+        status: p.originalStatus,
+        visitType: (p as any).visitType || null,
+        tokenId: p.tokenNumber != null ? String(p.tokenNumber) : undefined,
+      })),
+    [patients],
+  );
+
+  const { appointmentFilterFields } = useAppointmentFilters({
+    appointmentRows,
+    filterValues,
+  });
 
   // Search + filter + sort
   const filtered = useMemo(() => {
@@ -1613,6 +1621,7 @@ export default function AppointmentPage() {
                   title="Filters"
                   fields={appointmentFilterFields}
                   values={filterValues}
+                  appliedValues={appliedValues}
                   onChange={handleFilterChange}
                   onApply={handleApplyFilter}
                   onClear={handleClearFilter}

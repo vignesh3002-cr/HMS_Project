@@ -216,16 +216,16 @@ export default function NotificationSettings() {
 
       <div className="space-y-6">
         {visibleGroups.map((group) => (
-          <section key={group.title} className="rounded-xl border p-5">
-            <h3 className="text-sm font-semibold text-gray-900">{group.title}</h3>
-            <p className="mb-4 text-xs text-gray-500">{group.description}</p>
+          <section key={group.title} className="rounded-xl border border-gray-200 dark:border-slate-800 dark:bg-slate-900/40 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">{group.title}</h3>
+            <p className="mb-4 text-xs text-gray-500 dark:text-slate-400">{group.description}</p>
 
             <div className="space-y-4">
               {group.items.map((item) => (
                 <div key={item.key} className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-gray-800">{item.label}</p>
-                    <p className="text-xs text-gray-500">{item.description}</p>
+                    <p className="text-sm font-medium text-gray-800 dark:text-slate-200">{item.label}</p>
+                    <p className="text-xs text-gray-500 dark:text-slate-400">{item.description}</p>
                   </div>
                   <Switch
                     checked={typeSettings[item.key]}
@@ -238,9 +238,9 @@ export default function NotificationSettings() {
           </section>
         ))}
 
-        <section className="rounded-xl border p-5">
-          <h3 className="text-sm font-semibold text-gray-900">Delivery channels</h3>
-          <p className="mb-4 text-xs text-gray-500">
+        <section className="rounded-xl border border-gray-200 dark:border-slate-800 dark:bg-slate-900/40 p-5">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Delivery channels</h3>
+          <p className="mb-4 text-xs text-gray-500 dark:text-slate-400">
             How you want to receive notifications. Channel availability depends on
             provider configuration in the Integrations tab.
           </p>
@@ -253,8 +253,8 @@ export default function NotificationSettings() {
             ].map((channel) => (
               <div key={channel.key} className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm font-medium text-gray-800">{channel.label}</p>
-                  <p className="text-xs text-gray-500">{channel.description}</p>
+                  <p className="text-sm font-medium text-gray-800 dark:text-slate-200">{channel.label}</p>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">{channel.description}</p>
                 </div>
                 <Switch
                   checked={getChannelValue(channel.key as keyof typeof CHANNEL_KEYS)}

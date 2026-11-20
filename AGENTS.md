@@ -279,3 +279,34 @@ const data: MyRouteResponse = await response.json();
  - Pure logic in client/pages/doctor/consultation/pharmacySlip.ts (+ pharmacySlip.spec.ts, 27 tests): brand options from pharmacy_master matched on the ordered medicine_master.generic_id + dosage_form (fallback generic, then medicine_id), unit-aware dose parsing (mg/g/mcg/ml/IU), and the quantity allocation - selected strength >= patient dose -> 1; otherwise the smallest-overshoot smaller strength tops it up (TC2 30x1, TC3 20x2); a brand with nothing smaller folds into the selected row (TC4 120x2). Quantity counts units of the selected strength, never whole packs; the doctor can override either line and reset to the suggestion.
  - Backend: POST /api/pharmacy/slips/from-order upserts the live DRAFT slip of one explicit cycle day by plan_order_id (ISSUED is rejected as read-only, CANCELLED frees the slot); GET /api/pharmacy/slips/by-order restores it; GET /api/pharmacy/master-items now also accepts generic_ids and is branch-scoped to the active branch plus the shared null-branch catalog. New columns pharmacy_slip_item.dosage_form / patient_dose (prisma/sql/20261031_pharmacy_slip_item_dosage.sql, executed).
  - DischargeMedication rows carry drugForm + genericId so the popup can show the form and list the generic's brands; Summary.tsx's printed slip gained the same Drug Form / Patient Dosage columns.
+
+### T1. TEMP / TESTING ONLY — SMS gateway diagnostics (DELETE LATER)
+
+**Status: temporary scaffolding, added 2026-11-18 only so the OTP UI stops reporting a false "sent" while the TextBee phone is broken. Remove once a reliable SMS provider (or a fixed TextBee device) is in place.**
+
+Why: TextBee's `POST /gateway/send-sms` returns 200 as soon as the request is queued on the Android phone. If the phone then fails (radio error `RIL_SMS_SEND_FAIL_RETRY`, no SMS balance, app asleep/battery saver) the API never tells us, so the UI claimed the OTP was sent when nothing arrived.
+
+What was added (all marked `TEMP (testing only)` in code):
+
+1. `HMS_Backend/HMS_Backend/src/modules/integration/smsService.ts`
+   - `fetchRecentMessages()` / `onlyDigits()` helpers.
+   - `getSmsGatewayHealth({ deviceId, apiKey, apiUrl })` → reads `GET /gateway/messages?limit=20`, looks at the 3 newest messages. Unhealthy when none of them reached the carrier. Hard-blocks (throws) only if the newest attempt is younger than `BLOCK_WINDOW_MS` (3 min); older failures degrade to a warning so a fixed phone recovers without a cooldown.
+   - `verifySmsDelivery({ deviceId, recipients, message, apiKey, apiUrl })` → polls the messages list 3 × 1.5 s after sending; throws the real TextBee error if that exact message already flipped to `failed`, returns `"delivered"` if confirmed, `"unknown"` if still queued (carrier failures can take ~16 min, too long to await in a login request).
+
+2. `HMS_Backend/HMS_Backend/src/modules/auth/2fa/twoFactor.service.ts` — two call sites inside `sendSmsOtp()`:
+   - preflight `getSmsGatewayHealth(...)` before `sendSMS(...)`;
+   - post-send `verifySmsDelivery(...)`, which can downgrade the result from `"sent"` to `"queued"`.
+   - `deliverOtp()` now returns `"sent" | "queued"`; `sendLoginOTP()` and `sendAlternateMobileOtp()` surface it as `deliveryStatus` plus an honest "accepted by the gateway but delivery is not confirmed" message instead of "sent".
+
+3. `HMS_Project/client/pages/Authenticate.tsx` (+ `client/api/twoFactor.api.ts`) — the code screen's **Resend Code** now reuses the channel picked in the "Choose verification method" modal (`activeChannel`) instead of always posting to `/auth/send-otp` (email). Toast text comes from the server (`res.message`), so the queued/failure reason is visible. This part is a genuine bug fix and should be KEPT even after the diagnostics are removed.
+
+Observed behaviour (2026-11-18, TextBee device `6afd2c135b9635c5ddda253a`, motorola edge 60 stylus, battery 18%, Airtel slot 1):
+- stale failure (>3 min old) → HTTP 200 `{ deliveryStatus: "queued", message: "Verification code accepted by the SMS gateway but delivery is not confirmed…" }`
+- immediate retry → HTTP 400 `{ message: "SMS gateway is not delivering messages: the last messages are still stuck at 'dispatched' …" }`
+
+How to delete:
+1. In `smsService.ts`: delete the `TEMPORARY / TESTING ONLY` block (`SmsGatewayMessage`, `SmsGatewayHealth`, `TextBeeMessageRecord`, `PENDING_STATUSES`, `BLOCK_WINDOW_MS`, `fetchRecentMessages`, `toGatewayMessage`, `getSmsGatewayHealth`, `verifySmsDelivery`). Keep `onlyDigits` only if still referenced.
+2. In `twoFactor.service.ts`: remove `getSmsGatewayHealth`/`verifySmsDelivery` from the import, drop the preflight block and the post-send verification in `sendSmsOtp()`, and simplify its return type back to `Promise<void>` (or keep `"sent" | "queued"` if another provider reports real status).
+3. Leave `deliverOtp`/`sendLoginOTP`/`sendAlternateMobileOtp` returning `"sent"` when a provider confirms, and leave the `deliveryStatus` field in the API response — harmless once the diagnostics are gone.
+4. This section (T1) can be deleted from AGENTS.md once steps 1–2 are done.
+

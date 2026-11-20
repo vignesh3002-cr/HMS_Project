@@ -20,6 +20,7 @@ import { AddWardDialog } from "@/components/hms/AddWardDialog";
 import { AddBedDialog } from "@/components/hms/AddBedDialog";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { useFilterPanel } from "@/components/Filter";
+import { isMultiBranchUser } from "@/components/Filter/utils";
 import type { FilterField } from "@/components/Filter/types";
 import { BedStatusBadge, BED_STATUS_META, BED_STATUS_ORDER } from "@/components/hms/BedStatusBadge";
 import { BedBoard } from "@/components/hms/BedBoard";
@@ -79,7 +80,9 @@ export default function BedMaster() {
   const [beds, setBeds] = useState<BedRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const [branchFilter, setBranchFilter] = useState("");
   const [wardFilter, setWardFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [bedFilter, setBedFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -138,11 +141,13 @@ useEffect(fetchWards, [branchId]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, search, wardFilter, bedFilter, branchId]);
+  }, [statusFilter, search, branchFilter, wardFilter, typeFilter, bedFilter, branchId]);
 
   const filteredSorted = useMemo(() => {
     const rows = beds.filter((b) => {
+      if (branchFilter && b.branch_id !== branchFilter) return false;
       if (wardFilter && b.ward_id !== wardFilter) return false;
+      if (typeFilter && b.bed_type !== typeFilter) return false;
       if (bedFilter && b.bed_id !== bedFilter) return false;
       if (statusFilter && b.status !== statusFilter) return false;
       if (search) {
@@ -357,32 +362,16 @@ useEffect(fetchWards, [branchId]);
     setWardPage(1);
   }, [wardSearch, activeTab]);
 
-  const wardOptions = useMemo(
-    () => [
-      { label: "All Wards", value: "" },
-      ...wards.map((w) => ({ label: w.ward_name, value: w.ward_id })),
-    ],
-    [wards]
-  );
+  const showBranch = isMultiBranchUser();
 
-  // Bed options follow the Ward picked above them, so the Bed dropdown never
-  // offers a bed that the Ward selection would immediately filter away.
-  const bedFilterOptions = useMemo(() => {
-    const pool = wardFilter ? beds.filter((b) => b.ward_id === wardFilter) : beds;
-    return [
-      { label: "All Beds", value: "" },
-      ...pool.map((b) => ({
-        label: b.ward_master?.ward_name ? `${b.ward_master.ward_name} - ${b.bed_number}` : b.bed_number,
-        value: b.bed_id,
-      })),
-    ];
-  }, [beds, wardFilter]);
-
-  const bedFilterFields: FilterField[] = useMemo(() => [
-    { id: 'ward', label: 'Ward', type: 'combobox', options: wardOptions },
-    { id: 'bed', label: 'Bed', type: 'combobox', options: bedFilterOptions },
-    { id: 'status', label: 'Status', type: 'select', options: STATUS_FILTERS.map(s => ({ label: s.label, value: s.value })) },
-  ], [wardOptions, bedFilterOptions]);
+  const branchMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    branchList.forEach((b) => {
+      const name = b.branch_name || "";
+      map[b.branch_id] = b.branch_area && b.branch_area !== "N/A" ? `${name} (${b.branch_area})` : name;
+    });
+    return map;
+  }, [branchList]);
 
   const {
     values: filterValues,
@@ -391,10 +380,73 @@ useEffect(fetchWards, [branchId]);
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
     setAppliedFilter,
-  } = useFilterPanel(bedFilterFields);
+  } = useFilterPanel();
+
+  const selectedBranch = filterValues?.branch;
+  const selectedWard = filterValues?.ward;
+  const selectedType = filterValues?.bed_type;
+
+  const branchFilterOptions = useMemo(() => [
+    { label: "All Branches", value: "" },
+    ...branchList.map((b) => {
+      const name = b.branch_name || "";
+      return {
+        label: b.branch_area && b.branch_area !== "N/A" ? `${name} (${b.branch_area})` : name,
+        value: b.branch_id,
+      };
+    }),
+  ], [branchList]);
+
+  const wardOptions = useMemo(() => {
+    const pool = selectedBranch ? wards.filter((w) => w.branch_id === selectedBranch) : wards;
+    return [
+      { label: "All Wards", value: "" },
+      ...pool.map((w) => ({ label: w.ward_name, value: w.ward_id })),
+    ];
+  }, [wards, selectedBranch]);
+
+  const bedTypeOptions = useMemo(() => {
+    let pool = beds;
+    if (selectedBranch) pool = pool.filter((b) => b.branch_id === selectedBranch);
+    if (selectedWard) pool = pool.filter((b) => b.ward_id === selectedWard);
+
+    const types = Array.from(new Set(pool.map((b) => b.bed_type).filter(Boolean)));
+    types.sort();
+    return [
+      { label: "All Types", value: "" },
+      ...types.map((t) => ({ label: t, value: t })),
+    ];
+  }, [beds, selectedBranch, selectedWard]);
+
+  const bedFilterOptions = useMemo(() => {
+    let pool = beds;
+    if (selectedBranch) pool = pool.filter((b) => b.branch_id === selectedBranch);
+    if (selectedWard) pool = pool.filter((b) => b.ward_id === selectedWard);
+    if (selectedType) pool = pool.filter((b) => b.bed_type === selectedType);
+
+    return [
+      { label: "All Beds", value: "" },
+      ...pool.map((b) => ({
+        label: b.ward_master?.ward_name ? `${b.ward_master.ward_name} - ${b.bed_number}` : b.bed_number,
+        value: b.bed_id,
+      })),
+    ];
+  }, [beds, selectedBranch, selectedWard, selectedType]);
+
+  const bedFilterFields: FilterField[] = useMemo(() => [
+    ...(showBranch
+      ? [{ id: 'branch', label: 'Branch', type: 'combobox' as const, options: branchFilterOptions }]
+      : []),
+    { id: 'ward', label: 'Ward', type: 'combobox' as const, options: wardOptions },
+    { id: 'bed_type', label: 'Bed Type', type: 'combobox' as const, options: bedTypeOptions },
+    { id: 'bed', label: 'Bed', type: 'combobox' as const, options: bedFilterOptions },
+    { id: 'status', label: 'Status', type: 'select' as const, options: STATUS_FILTERS.map(s => ({ label: s.label, value: s.value })) },
+  ], [showBranch, branchFilterOptions, wardOptions, bedTypeOptions, bedFilterOptions]);
 
   useEffect(() => {
+    setBranchFilter(appliedValues.branch ?? '');
     setWardFilter(appliedValues.ward ?? '');
+    setTypeFilter(appliedValues.bed_type ?? '');
     setBedFilter(appliedValues.bed ?? '');
     setStatusFilter(appliedValues.status ?? '');
     setCurrentPage(1);
@@ -405,7 +457,9 @@ useEffect(fetchWards, [branchId]);
   // otherwise reopening the popover would still show the previous branch's
   // selections and re-apply them on the next Apply.
   useEffect(() => {
+    setAppliedFilter("branch", "");
     setAppliedFilter("ward", "");
+    setAppliedFilter("bed_type", "");
     setAppliedFilter("bed", "");
     setAppliedFilter("status", "");
   }, [branchId, setAppliedFilter]);
@@ -426,7 +480,15 @@ useEffect(fetchWards, [branchId]);
     {
       key: "ward",
       label: "Ward",
-      render: (row) => <span className="hms-content-text text-[#374151]">{row.ward_master?.ward_name || "—"}</span>,
+      render: (row) => {
+        const branchName = branchMap[row.branch_id] || (row.ward_master as any)?.branch?.branch_name || "—";
+        return (
+          <div>
+            <div className="hms-content-text text-[#374151]">{row.ward_master?.ward_name || "—"}</div>
+            <div className="hms-department-text text-[#8C8D8F]">{branchName}</div>
+          </div>
+        );
+      },
     },
     {
       key: "bed_type",
@@ -726,6 +788,7 @@ useEffect(fetchWards, [branchId]);
                 <ToolbarFilter
                   fields={bedFilterFields}
                   values={filterValues}
+                  appliedValues={appliedValues}
                   onChange={handleFilterChange}
                   onApply={handleApplyFilter}
                   onClear={handleClearFilter}

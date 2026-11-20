@@ -5,13 +5,11 @@ import {
   Search,
   Loader2,
   MoreVertical,
-  TrendingUp,
   FileText,
   CheckCircle2,
   Clock,
   CalendarDays,
   HeartPulse,
-  FlaskConical,
   UserRound,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -20,37 +18,59 @@ import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import ExportReport from "@/components/ui/ExportReport";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { useFilterPanel, useOrderFilters } from "@/components/Filter";
+import { filterDataByValues } from "@/components/Filter/utils";
+import { DiscontinuePlanDialog } from "@/components/chemo/DiscontinuePlanDialog";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 import { useNavigate } from "react-router-dom";
 import { downloadExportPdf } from "@/lib/exportPdf";
-import {
-  chemotherapyApi,
-  type ChemoPlan,
-  type LabReviewRecord,
-} from "@/api/chemotherapy.api";
+import { getUser } from "@/utils/token";
+import { chemotherapyApi, type ChemoPlan } from "@/api/chemotherapy.api";
+import CycleProgressChart from "@/components/hms/cycleProgressChart";
+import { KpiSection } from "@/components/hms/dashboard/KpiSection";
+import type { KpiItem } from "@/components/hms/dashboard/kpi.types";
 import {
   CLOSED_PLAN_STATUSES,
   avatarFor,
   fmtDate,
+  getCycleProgress,
   getInitials,
+  getStatusSnapshot,
+  getUpcomingCycles,
+  isOpenPlan,
   isOverdue,
   isTodayIso,
+  orderStatusOf,
   summarizeCycles,
   toTime,
+  upcomingDateOf,
+  type OrderStatus,
 } from "./orderMasterCycles";
 
-type OrderStatus = "Scheduled" | "In Progress" | "Labs Pending" | "Held" | "Completed" | "Cancelled";
+/* Admin-portal roles see Orders read-only: they can view/export a plan but
+   never change its status (Discontinue is hidden for them). Same role list
+   the rest of the app uses for "admin" screens. */
+const ADMIN_ROLES = ["HEAD_ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "ADMIN", "BRANCH_ADMIN"];
 
 interface OrderRow {
   plan_id: string;
-  date: string;
+  /* The plan's own treatment_start_date -- used by the Start Date column and
+     by the Upcoming Cycles rule (future start wins over next-cycle date). */
+  start_date: string;
   patient_id: string;
   patient_name: string;
   patient_initials: string;
   patient_avatar_color: string;
   patient_avatar_bg: string;
+  /* Filter-only fields -- none of these is a column. */
   intent: string;
+  branch: string;
+  branch_id?: string;
+  oncologist: string;
+  diagnosis: string;
   protocol: string;
   protocol_code: string;
   /* Cycle/Day column: the cycle + day the plan is actually on, and the
@@ -60,34 +80,26 @@ interface OrderRow {
   cycle_progress: number;
   next_cycle_date: string;
   raw_status: string;
-  /* The cycle the labs are read from - the one being treated, not the
-     highest cycle number. */
-  current_cycle_id: string;
+  status: OrderStatus;
+  is_open: boolean;
 }
 
-interface LabValue {
-  hemoglobin: string;
-  wbc: string;
-  platelet: string;
-}
-
-/* Avatar / cycle / date helpers now live in ./orderMasterCycles - a co-located
-   module (like consultation/doseCalculation.ts) so the cycle maths is
+/* Avatar / cycle / date / status helpers live in ./orderMasterCycles - a
+   co-located module (like consultation/doseCalculation.ts) so the maths is
    unit-tested in orderMasterCycles.spec.ts without mounting this page. */
-
-function fmtValue(n: number | string | null | undefined): string {
-  if (n === null || n === undefined || n === "") return "—";
-  return String(n);
-}
 
 function OrderActionMenu({
   onView,
   onExport,
   onPharmacySlip,
+  onDiscontinue,
+  showDiscontinue,
 }: {
   onView: () => void;
   onExport: () => void;
   onPharmacySlip: () => void;
+  onDiscontinue: () => void;
+  showDiscontinue: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -134,6 +146,7 @@ function OrderActionMenu({
   const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
   if (canView) items.push({ label: "View Order", onClick: onView });
   if (canView) items.push({ label: "Pharmacy Slip", onClick: onPharmacySlip });
+  if (showDiscontinue) items.push({ label: "Discontinue", onClick: onDiscontinue, danger: true });
   if (can("report.export")) items.push({ label: "Export Order", onClick: onExport });
 
   return (
@@ -141,7 +154,12 @@ function OrderActionMenu({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        aria-label="Order actions"
+        onClick={(e) => {
+          // The whole row opens the order; the kebab must not.
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
         className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
       >
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
@@ -151,6 +169,11 @@ function OrderActionMenu({
         createPortal(
           <div
             ref={menuRef}
+            // The menu is portalled to document.body, but React still bubbles
+            // its events through the component tree -- without this, clicking
+            // an item reaches the row's onClick and navigates away instead of
+            // running the action.
+            onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", top: coords.top, left: coords.left, zIndex: 9999 }}
             className="w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden"
           >
@@ -178,62 +201,21 @@ function OrderActionMenu({
   );
 }
 
-const STATUS_TABS: Array<"All" | OrderStatus> = [
-  "All",
-  "Scheduled",
-  "In Progress",
-  "Labs Pending",
-  "Held",
-  "Completed",
-  "Cancelled",
-];
-
-function LabStatusCell({
-  lab,
-  pending,
-}: {
-  lab: LabValue | null | undefined;
-  pending: boolean;
-}) {
-  if (pending) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-[#6B7280]">
-        <Loader2 className="w-3 h-3 animate-spin text-[#00488D]" />
-        Loading labs...
-      </div>
-    );
-  }
-  if (!lab) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600">
-        <FlaskConical className="w-3 h-3" />
-        Pending
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
-      <FlaskConical className="w-3 h-3" />
-      HB {lab.hemoglobin} · WBC {lab.wbc} · PLT {lab.platelet}
-    </span>
-  );
-}
-
 export default function OrderMaster() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { can } = usePermission();
+  const currentUser = getUser();
+  const currentRole = String(currentUser?.role_type ?? currentUser?.role ?? "").toUpperCase();
+  const isAdminView = ADMIN_ROLES.includes(currentRole);
 
+  const { selectedBranchId, isAllBranches, branches } = useBranchFilter();
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [labs, setLabs] = useState<Record<string, LabValue | null>>({});
-  const [labsLoading, setLabsLoading] = useState<Record<string, boolean>>({});
-
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"All" | OrderStatus>("All");
 
-  const [sortField, setSortField] = useState("date");
+  const [sortField, setSortField] = useState("start_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -241,13 +223,32 @@ export default function OrderMaster() {
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
 
+  const [discontinueOpen, setDiscontinueOpen] = useState(false);
+  const [discontinueRow, setDiscontinueRow] = useState<OrderRow | null>(null);
+
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const res = await chemotherapyApi.listPlans({ limit: 100 });
-      const list = res.data?.data ?? [];
+      // Load every page (the backend caps a page at 100) so statuses, tabs,
+      // stats and exports stay correct for rows beyond the first page. The
+      // cap is a guard against an infinite loop on a bad total, not a volume
+      // assumption.
+      const PAGE_LIMIT = 100;
+      const MAX_PAGES = 20;
+      const plans: ChemoPlan[] = [];
+      let page = 1;
+      let total = 0;
 
-      const mapped: OrderRow[] = list.map((p: ChemoPlan) => {
+      do {
+        const res = await chemotherapyApi.listPlans({ limit: PAGE_LIMIT, page });
+        const batch = res.data?.data ?? [];
+        total = res.data?.pagination?.total ?? batch.length;
+        plans.push(...batch);
+        if (batch.length < PAGE_LIMIT) break;
+        page += 1;
+      } while (page <= MAX_PAGES);
+
+      const mapped: OrderRow[] = plans.map((p: ChemoPlan) => {
         const cycles = summarizeCycles(p);
         const patient =
           p.patient_bio_data?.patient_first_name && p.patient_bio_data?.patient_last_name
@@ -256,36 +257,57 @@ export default function OrderMaster() {
         const protocolName = p.regimen_name ?? p.protocol_name ?? "—";
         const code = p.regimen_code ?? p.chemotherapy_regimen_protocol?.regimen_code ?? "";
         const avatar = avatarFor(p.patient_id || p.chemotherapy_plan_id);
+        const rawStatus = (p.treatment_status ?? "PLANNED").toUpperCase();
+
+        const oncologist =
+          [p.employees?.first_name, p.employees?.last_name]
+            .filter(Boolean)
+            .join(" ")
+            .trim() || "—";
+        const diagnosis =
+          [p.cancer_type, p.cancer_subtype, p.cancer_stage]
+            .filter(Boolean)
+            .join(" · ") || "—";
 
         return {
           plan_id: p.chemotherapy_plan_id,
-          // The schedule's own start date, not the row's creation timestamp
-          // (created_at always exists, so it used to win every time).
-          date: p.treatment_start_date ?? p.created_at ?? "",
+          // The plan's own start date. created_at is deliberately NOT a
+          // fallback here: it is the record's creation timestamp, which would
+          // make a future-dated plan look like it already started.
+          start_date: p.treatment_start_date ?? "",
           patient_id: p.patient_id,
           patient_name: patient,
           patient_initials: getInitials(patient),
           patient_avatar_color: avatar.avatarColor,
           patient_avatar_bg: avatar.initBg,
           intent: p.treatment_intent ?? "—",
+          branch: p.branch?.branch_name ?? "—",
+          branch_id: p.branch_id ?? "",
+          oncologist,
+          diagnosis,
           protocol: protocolName,
           protocol_code: code,
           cycle_label: cycles.cycleLabel,
           cycles_label: cycles.cyclesLabel,
           cycle_progress: cycles.progress,
           next_cycle_date: cycles.nextCycleDate,
-          raw_status: (p.treatment_status ?? "PLANNED").toUpperCase(),
-          current_cycle_id: cycles.currentCycleId,
+          raw_status: rawStatus,
+          status: orderStatusOf(rawStatus),
+          is_open: !CLOSED_PLAN_STATUSES.includes(rawStatus),
         };
       });
 
       setRows(mapped);
-      setLabs({});
-      setLabsLoading({});
+      if (total > plans.length) {
+        // Never fail silently: if the cap stopped us early, the page shows a
+        // subset and says so instead of quietly under-counting.
+        toast({
+          title: "Showing a partial list",
+          description: `Loaded ${plans.length} of ${total} plans. Narrow the filters to see the rest.`,
+        });
+      }
     } catch (e: any) {
       setRows([]);
-      setLabs({});
-      setLabsLoading({});
       // Surface the backend's own message: a failed fetch is otherwise
       // indistinguishable from a genuine empty result, so a 400 renders as
       // "No orders found" and hides the real cause entirely.
@@ -301,39 +323,95 @@ export default function OrderMaster() {
 
   useEffect(() => {
     void fetchOrders();
-  }, []);
+  }, [selectedBranchId, isAllBranches]);
 
-  const statusOf = (r: OrderRow): OrderStatus => {
-    const s = r.raw_status;
-    if (s === "COMPLETED") return "Completed";
-    if (s === "CANCELLED") return "Cancelled";
-    if (s === "DISCONTINUED") return "Held";
-    const hasLab = labs[r.current_cycle_id] != null;
-    if (s === "ACTIVE") return hasLab ? "In Progress" : "Labs Pending";
-    return "Scheduled";
+  // ---- Filters -----------------------------------------------------------
+  const { orderFilterFields } = useOrderFilters({ orderRows: rows });
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleFilterApply,
+    handleClear: handleFilterClear,
+    setAppliedFilter,
+  } = useFilterPanel(orderFilterFields);
+
+  const handleApplyFilter = () => {
+    handleFilterApply();
+    setCurrentPage(1);
+  };
+
+  const handleClearFilter = () => {
+    handleFilterClear();
+    setCurrentPage(1);
+  };
+
+  /* KPI quick-filters: clicking a KPI card sets applied filters directly
+     inside the filter engine (like ProtocolMaster), updating the active count
+     badge on the Filter button and pre-selecting options in the popover. */
+  const handleKpiClick = (kpiId: string) => {
+    switch (kpiId) {
+      case "total-plans":
+        setAppliedFilter("status", undefined);
+        setAppliedFilter("cycleAlert", undefined);
+        break;
+      case "active-chemo-orders":
+        setAppliedFilter("status", ["Scheduled", "In Progress"]);
+        setAppliedFilter("cycleAlert", undefined);
+        break;
+      case "patients-under-treatment":
+        setAppliedFilter("status", ["In Progress"]);
+        setAppliedFilter("cycleAlert", undefined);
+        break;
+      case "orders-due-today":
+        setAppliedFilter("cycleAlert", ["dueToday"]);
+        setAppliedFilter("status", undefined);
+        break;
+      case "delayed":
+        setAppliedFilter("cycleAlert", ["delayed"]);
+        setAppliedFilter("status", undefined);
+        break;
+    }
+    setCurrentPage(1);
   };
 
   const stats = useMemo(() => {
     const statusCounts = new Map<OrderStatus, number>();
     rows.forEach((r) => {
-      const s = statusOf(r);
+      const s = orderStatusOf(r.raw_status);
       statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
     });
-    const active = (statusCounts.get("In Progress") ?? 0) + (statusCounts.get("Labs Pending") ?? 0) + (statusCounts.get("Scheduled") ?? 0);
+    const active =
+      (statusCounts.get("In Progress") ?? 0) + (statusCounts.get("Scheduled") ?? 0);
     const patients = new Set(
-      rows.filter((r) => ["In Progress", "Labs Pending"].includes(statusOf(r))).map((r) => r.patient_id)
+      rows
+        .filter((r) => orderStatusOf(r.raw_status) === "In Progress")
+        .map((r) => r.patient_id)
     ).size;
     const dueToday = rows.filter((r) => isTodayIso(r.next_cycle_date)).length;
-    const delayed = rows.filter((r) => isOverdue(r.next_cycle_date) && ["In Progress", "Labs Pending", "Scheduled"].includes(statusOf(r))).length;
+    // Only open plans can be late; completed/cancelled courses are not.
+    const delayed = rows.filter(
+      (r) => isOverdue(r.next_cycle_date) && r.is_open
+    ).length;
     const total = rows.length;
     const completed = statusCounts.get("Completed") ?? 0;
     return { total, active, patients, dueToday, delayed, completed };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, labs]);
+  }, [rows]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     let list = rows;
+
+    if (!isAllBranches && selectedBranchId) {
+      list = list.filter(
+        (r) =>
+          r.branch_id === selectedBranchId ||
+          (r.branch && r.branch !== "—" && branches.some((b) => b.id === selectedBranchId && b.name === r.branch))
+      );
+    }
+
+    const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
         (r) =>
@@ -341,15 +419,22 @@ export default function OrderMaster() {
           r.patient_name.toLowerCase().includes(q) ||
           r.protocol.toLowerCase().includes(q) ||
           r.protocol_code.toLowerCase().includes(q) ||
-          r.intent.toLowerCase().includes(q)
+          r.intent.toLowerCase().includes(q) ||
+          r.oncologist.toLowerCase().includes(q) ||
+          r.diagnosis.toLowerCase().includes(q)
       );
     }
-    if (statusFilter !== "All") {
-      list = list.filter((r) => statusOf(r) === statusFilter);
+
+    if (appliedValues.cycleAlert?.includes("dueToday")) {
+      list = list.filter((r) => isTodayIso(r.next_cycle_date));
     }
-    return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, statusFilter, labs]);
+    if (appliedValues.cycleAlert?.includes("delayed")) {
+      list = list.filter((r) => isOpenPlan(r.raw_status) && isOverdue(r.next_cycle_date));
+    }
+
+    const { cycleAlert, ...cleanFilters } = appliedValues;
+    return filterDataByValues(list, cleanFilters, orderFilterFields) as unknown as OrderRow[];
+  }, [rows, isAllBranches, selectedBranchId, branches, search, appliedValues, orderFilterFields]);
 
   const sortedData = useMemo(() => {
     const list = [...filtered];
@@ -357,16 +442,21 @@ export default function OrderMaster() {
     list.sort((a, b) => {
       switch (sortField) {
         case "status":
-          return statusOf(a).localeCompare(statusOf(b)) * dir;
+          return orderStatusOf(a.raw_status).localeCompare(orderStatusOf(b.raw_status)) * dir;
         case "plan_id":
         case "patient_id":
         case "patient_name":
         case "protocol":
-        case "intent":
-          return String(a[sortField]).localeCompare(String(b[sortField])) * dir;
-        case "date":
+          return String(a[sortField as keyof OrderRow]).localeCompare(
+            String(b[sortField as keyof OrderRow])
+          ) * dir;
+        case "start_date":
         case "next_cycle_date":
-          return (toTime(a[sortField]) - toTime(b[sortField])) * dir;
+          return (
+            (toTime(a[sortField as keyof OrderRow] as string) -
+              toTime(b[sortField as keyof OrderRow] as string)) *
+            dir
+          );
         default:
           return 0;
       }
@@ -390,92 +480,32 @@ export default function OrderMaster() {
   const visibleStart = totalRecords === 0 ? 0 : (safePage - 1) * rowsPerPage + 1;
   const visibleEnd = Math.min(safePage * rowsPerPage, totalRecords);
 
-  /* Labs are only meaningful while a plan is still running, and they hang off
-     the cycle being treated rather than the highest cycle number. */
-  const labCycleIds = currentRows
-    .filter((r) => !CLOSED_PLAN_STATUSES.includes(r.raw_status))
-    .map((r) => r.current_cycle_id)
-    .filter(Boolean);
-  const labCycleKey = labCycleIds.join(",");
-
-  useEffect(() => {
-    const cycleIds = labCycleKey ? labCycleKey.split(",") : [];
-    if (cycleIds.length === 0) return;
-    let cancelled = false;
-
-    setLabsLoading((prev) => {
-      const next = { ...prev };
-      cycleIds.forEach((id) => {
-        if (!(id in labs)) next[id] = true;
-      });
-      return next;
-    });
-
-    void Promise.all(
-      cycleIds.map(async (cycleId) => {
-        try {
-          const res = await chemotherapyApi.listLabReviews(cycleId);
-          const review = res.data?.data?.[0];
-          if (!review) return { cycleId, lab: null as LabValue | null };
-          return {
-            cycleId,
-            lab: {
-              hemoglobin: fmtValue(review.hemoglobin),
-              wbc: fmtValue(review.wbc),
-              platelet: fmtValue(review.platelet_count),
-            } as LabValue,
-          };
-        } catch {
-          return { cycleId, lab: null as LabValue | null };
-        }
-      })
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, LabValue | null> = {};
-      results.forEach(({ cycleId, lab }) => {
-        next[cycleId] = lab;
-      });
-      setLabs((prev) => ({ ...prev, ...next }));
-      setLabsLoading((prev) => {
-        const n = { ...prev };
-        results.forEach(({ cycleId }) => delete n[cycleId]);
-        return n;
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labCycleKey]);
-
   const handleExport = (exportFormat: string) => {
     const source = sortedData;
     const rowsForExport = source.map((r) => ({
       ...r,
-      status: statusOf(r),
-      lab: labs[r.current_cycle_id] ?? null,
-      lab_label: labs[r.current_cycle_id]
-        ? `HB ${labs[r.current_cycle_id]?.hemoglobin} / WBC ${labs[r.current_cycle_id]?.wbc} / PLT ${labs[r.current_cycle_id]?.platelet}`
-        : "Pending",
+      status: orderStatusOf(r.raw_status),
     }));
+    const exportColumns = [
+      { header: "Start Date", cell: (r: any) => fmtDate(r.start_date) },
+      { header: "Patient ID", cell: (r: any) => r.patient_id },
+      { header: "Patient Name", cell: (r: any) => r.patient_name },
+      { header: "Branch", cell: (r: any) => r.branch },
+      { header: "Oncologist", cell: (r: any) => r.oncologist },
+      { header: "Diagnosis", cell: (r: any) => r.diagnosis },
+      { header: "Protocol", cell: (r: any) => r.protocol },
+      { header: "Cycle/Day", cell: (r: any) => r.cycle_label },
+      { header: "Cycles Done", cell: (r: any) => r.cycles_label },
+      { header: "Next Cycle Date", cell: (r: any) => fmtDate(r.next_cycle_date) },
+      { header: "Status", cell: (r: any) => r.status },
+    ];
+
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Chemotherapy Orders",
         subtitle: `${rowsForExport.length} order${rowsForExport.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
         filename: `chemotherapy-orders-${format(new Date(), "yyyy-MM-dd")}.pdf`,
-        columns: [
-          { header: "Date", cell: (r: any) => fmtDate(r.date) },
-          { header: "Patient ID", cell: (r: any) => r.patient_id },
-          { header: "Patient Name", cell: (r: any) => r.patient_name },
-          { header: "Intent", cell: (r: any) => r.intent },
-          { header: "Protocol", cell: (r: any) => r.protocol },
-          { header: "Cycle/Day", cell: (r: any) => r.cycle_label },
-          { header: "Cycles Done", cell: (r: any) => r.cycles_label },
-          { header: "Next Cycle Date", cell: (r: any) => fmtDate(r.next_cycle_date) },
-          { header: "Lab Status", cell: (r: any) => r.lab_label },
-          { header: "Status", cell: (r: any) => r.status },
-        ],
+        columns: exportColumns,
         rows: rowsForExport,
       });
       toast({ title: "Export complete", description: "The PDF file has been downloaded." });
@@ -483,21 +513,10 @@ export default function OrderMaster() {
     }
     if (exportFormat !== "csv") return;
     try {
-      const header = ["Date", "Patient ID", "Patient Name", "Intent", "Protocol", "Cycle/Day", "Cycles Done", "Next Cycle Date", "Lab Status", "Status"];
+      const header = exportColumns.map((c) => c.header);
       const lines = rowsForExport.map((r) =>
-        [
-          fmtDate(r.date),
-          r.patient_id,
-          r.patient_name,
-          r.intent,
-          r.protocol,
-          r.cycle_label,
-          r.cycles_label,
-          fmtDate(r.next_cycle_date),
-          r.lab_label,
-          r.status,
-        ]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        exportColumns
+          .map((c) => `"${String(c.cell(r)).replace(/"/g, '""')}"`)
           .join(",")
       );
       const blob = new Blob([[header.join(","), ...lines].join("\n")], {
@@ -525,13 +544,70 @@ export default function OrderMaster() {
     navigate(`/orders/${row.plan_id}/pharmacy-slip`);
   };
 
-  const statCards = [
-    { label: "Active Chemo Orders", value: stats.active, trend: "Currently scheduled / running", icon: HeartPulse, color: "#004785" },
-    { label: "Patients Under Treatment", value: stats.patients, trend: "On active plans", icon: UserRound, color: "#059669" },
-    { label: "Orders Due Today", value: stats.dueToday, trend: "Next cycle falls today", icon: CalendarDays, color: "#F59E0B" },
-    { label: "Delayed", value: stats.delayed, trend: "Past due next-cycle dates", icon: Clock, color: "#EF4444" },
-    { label: "Total Orders", value: stats.total, trend: `${stats.completed} completed`, icon: FileText, color: "#6B7280" },
-  ];
+  const kpiItems: KpiItem[] = useMemo(
+    () => [
+      {
+        id: "active-chemo-orders",
+        label: "Active Chemo Orders",
+        subLabel: "Currently scheduled / running",
+        value: stats.active,
+        valueColor: "#004785",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <HeartPulse className="w-[17px] h-[17px]" color="#004785" />,
+        onClick: () => handleKpiClick("active-chemo-orders"),
+      },
+      {
+        id: "patients-under-treatment",
+        label: "Patients Under Treatment",
+        subLabel: "On active plans",
+        value: stats.patients,
+        valueColor: "#059669",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <UserRound className="w-[17px] h-[17px]" color="#059669" />,
+        onClick: () => handleKpiClick("patients-under-treatment"),
+      },
+      {
+        id: "orders-due-today",
+        label: "Orders Due Today",
+        subLabel: "Next cycle falls today",
+        value: stats.dueToday,
+        valueColor: "#F59E0B",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <CalendarDays className="w-[17px] h-[17px]" color="#F59E0B" />,
+        onClick: () => handleKpiClick("orders-due-today"),
+      },
+      {
+        id: "delayed",
+        label: "Delayed",
+        subLabel: "Past due next-cycle dates",
+        value: stats.delayed,
+        valueColor: "#EF4444",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Clock className="w-[17px] h-[17px]" color="#EF4444" />,
+        onClick: () => handleKpiClick("delayed"),
+      },
+      {
+        id: "total-plans",
+        label: "Total Plans",
+        subLabel: `${stats.completed} completed`,
+        value: stats.total,
+        valueColor: "#6B7280",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <FileText className="w-[17px] h-[17px]" color="#6B7280" />,
+        onClick: () => handleKpiClick("total-plans"),
+      },
+    ],
+    [stats, handleKpiClick]
+  );
+
+  /* Bottom widgets driven by useState + useEffect, mirroring ProtocolMaster. */
+  const [upcomingCycles, setUpcomingCycles] = useState<OrderRow[]>(() => getUpcomingCycles(rows));
+  const [statusSnapshot, setStatusSnapshot] = useState(() => getStatusSnapshot(rows));
+
+  useEffect(() => {
+    setUpcomingCycles(getUpcomingCycles(rows));
+    setStatusSnapshot(getStatusSnapshot(rows));
+  }, [rows]);
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -542,7 +618,7 @@ export default function OrderMaster() {
           <div className="flex flex-col md:flex-row md:items-center justify-between">
             <div>
               <h1 className="hms-heading">Chemotherapy Orders</h1>
-              <p className="hms-subheading">Track chemotherapy orders, cycle scheduling, lab readiness and treatment status across patients.</p>
+              <p className="hms-subheading">Track chemotherapy orders, cycle scheduling and treatment status across patients.</p>
             </div>
             <div className="flex items-center gap-3">
               {can("report.export") && <ExportReport onExport={handleExport} />}
@@ -559,21 +635,15 @@ export default function OrderMaster() {
           </div>
 
           {/* ==================== STAT CARDS ==================== */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-            {statCards.map((card) => (
-              <div key={card.label} className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#6B7280]">{card.label}</span>
-                  <card.icon className="w-4 h-4" style={{ color: card.color }} />
-                </div>
-                <div className="mt-2 text-3xl font-bold text-[#191C1E]">{card.value}</div>
-                <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
-                  <TrendingUp className="w-3 h-3" />
-                  {card.trend}
-                </div>
-              </div>
-            ))}
-          </div>
+          <KpiSection
+            items={kpiItems}
+            layout="grid"
+            showHeader={false}
+            showDatePicker={false}
+            showShower={false}
+            enableUsageTracking={false}
+            enablePreferences={false}
+          />
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
@@ -592,22 +662,18 @@ export default function OrderMaster() {
               </div>
 
               <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-1 bg-[#F2F4F6] rounded-lg p-1">
-                  {STATUS_TABS.map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => { setStatusFilter(tab); setCurrentPage(1); }}
-                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                        statusFilter === tab
-                          ? "bg-white text-[#00488D] shadow-sm"
-                          : "text-[#6B7280] hover:text-[#00488D]"
-                      }`}
-                    >
-                      {tab === "All" ? "All" : tab}
-                      {tab === "All" ? ` (${rows.length})` : ` (${rows.filter((r) => statusOf(r) === tab).length})`}
-                    </button>
-                  ))}
-                </div>
+                <ToolbarFilter
+                  title="Filter Orders"
+                  fields={orderFilterFields}
+                  values={filterValues}
+                  appliedValues={appliedValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+
                 <RefreshButton onClick={fetchOrders} isLoading={loading} />
               </div>
             </div>
@@ -619,29 +685,10 @@ export default function OrderMaster() {
                 Loading orders...
               </div>
             ) : (
-              /* Flex column + [&>div]:flex-1 stretches HmsTable's root so the
-                 mt-auto pagination footer stays pinned to the bottom of the
-                 card (the wrapper keeps a 450px min-height even with few
-                 rows) — same behavior as Dashboard/Staff. */
-              <div className="flex-1 flex flex-col min-h-[450px] hide-scrollbar [&>div]:flex-1">
-                <HmsTable
-                  scrollable={true}
-                  minWidth="1200px"
+              <HmsTable
+                scrollable={true}
+                minWidth="1100px"
                   columns={[
-                    {
-                      key: "date",
-                      label: "Date",
-                      sortable: true,
-                      render: (r: any) => {
-                        const row = r as OrderRow;
-                        return (
-                          <div>
-                            <div className="hms-content-text text-[#191C1E] leading-4">{fmtDate(row.date)}</div>
-                            <div className="hms-id-text">{row.plan_id}</div>
-                          </div>
-                        );
-                      },
-                    },
                     {
                       key: "patient_name",
                       label: "Patient Name",
@@ -665,12 +712,18 @@ export default function OrderMaster() {
                       },
                     },
                     {
-                      key: "intent",
-                      label: "Intent of Treatment",
+                      key: "start_date",
+                      label: "Start Date",
                       sortable: true,
-                      render: (r: any) => (
-                        <span className="hms-content-text text-[#191C1E] leading-4">{(r as OrderRow).intent}</span>
-                      ),
+                      render: (r: any) => {
+                        const row = r as OrderRow;
+                        return (
+                          <div>
+                            <div className="hms-content-text text-[#191C1E] leading-4">{fmtDate(row.start_date)}</div>
+                            <div className="hms-id-text">{row.plan_id}</div>
+                          </div>
+                        );
+                      },
                     },
                     {
                       key: "protocol",
@@ -679,8 +732,8 @@ export default function OrderMaster() {
                       render: (r: any) => {
                         const row = r as OrderRow;
                         return (
-                          <div>
-                            <div className="hms-name-text">{row.protocol}</div>
+                          <div className="max-w-[180px]">
+                            <div className="hms-name-text truncate" title={row.protocol}>{row.protocol}</div>
                             {row.protocol_code && (
                               <div className="hms-department-text text-[#8C8D8F]">{row.protocol_code}</div>
                             )}
@@ -719,24 +772,24 @@ export default function OrderMaster() {
                       ),
                     },
                     {
-                      key: "lab",
-                      label: "Lab Status (HB/WBC/PLT)",
-                      sortable: false,
-                      render: (r: any) => {
-                        const row = r as OrderRow;
-                        return (
-                          <LabStatusCell
-                            lab={labs[row.current_cycle_id]}
-                            pending={!!labsLoading[row.current_cycle_id]}
-                          />
-                        );
-                      },
-                    },
-                    {
                       key: "status",
                       label: "Status",
                       sortable: true,
-                      render: (r: any) => <StatusBadge status={statusOf(r as OrderRow)} />,
+                      render: (r: any) => {
+                        const row = r as OrderRow;
+                        // DISCONTINUED has its own tone in StatusBadge, so show
+                        // it instead of the generic Cancelled bucket -- the pill
+                        // then matches the plan's real treatment_status.
+                        return (
+                          <StatusBadge
+                            status={
+                              row.raw_status === "DISCONTINUED"
+                                ? "discontinued"
+                                : orderStatusOf(row.raw_status)
+                            }
+                          />
+                        );
+                      },
                     },
                     {
                       key: "actions",
@@ -747,31 +800,47 @@ export default function OrderMaster() {
                       render: (r: any) => {
                         const row = r as OrderRow;
                         return (
-                          <OrderActionMenu
-                            onView={() => handleView(row)}
-                            onPharmacySlip={() => handlePharmacySlip(row)}
-                            onExport={() => {
-                              const single = [row];
-                              downloadExportPdf({
-                                title: "Chemotherapy Order",
-                                subtitle: `${row.patient_name} (${row.patient_id}) - ${row.protocol}`,
-                                filename: `order-${row.plan_id}.pdf`,
-                                columns: [
-                                  { header: "Order ID", cell: () => row.plan_id },
-                                  { header: "Patient ID", cell: () => row.patient_id },
-                                  { header: "Patient Name", cell: () => row.patient_name },
-                                  { header: "Intent", cell: () => row.intent },
-                                  { header: "Protocol", cell: () => row.protocol },
-                                  { header: "Cycle/Day", cell: () => row.cycle_label },
-                                  { header: "Cycles Done", cell: () => row.cycles_label },
-                                  { header: "Next Cycle Date", cell: () => fmtDate(row.next_cycle_date) },
-                                  { header: "Status", cell: () => statusOf(row) },
-                                ],
-                                rows: single,
-                              });
-                              toast({ title: "Export complete", description: "The order PDF has been downloaded." });
-                            }}
-                          />
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <OrderActionMenu
+                              showDiscontinue={
+                                row.is_open &&
+                                row.raw_status === "ACTIVE" &&
+                                can("chemo.plan.update") &&
+                                !isAdminView
+                              }
+                              onDiscontinue={() => {
+                                setDiscontinueRow(row);
+                                setDiscontinueOpen(true);
+                              }}
+                              onView={() => handleView(row)}
+                              onPharmacySlip={() => handlePharmacySlip(row)}
+                              onExport={() => {
+                                const single = [row];
+                                downloadExportPdf({
+                                  title: "Chemotherapy Order",
+                                  subtitle: `${row.patient_name} (${row.patient_id}) - ${row.protocol}`,
+                                  filename: `order-${row.plan_id}.pdf`,
+                                  columns: [
+                                    { header: "Order ID", cell: () => row.plan_id },
+                                    { header: "Patient ID", cell: () => row.patient_id },
+                                    { header: "Patient Name", cell: () => row.patient_name },
+                                    { header: "Oncologist", cell: () => row.oncologist },
+                                    { header: "Diagnosis", cell: () => row.diagnosis },
+                                    { header: "Protocol", cell: () => row.protocol },
+                                    { header: "Cycle/Day", cell: () => row.cycle_label },
+                                    { header: "Cycles Done", cell: () => row.cycles_label },
+                                    { header: "Next Cycle Date", cell: () => fmtDate(row.next_cycle_date) },
+                                    { header: "Status", cell: () => orderStatusOf(row.raw_status) },
+                                  ],
+                                  rows: single,
+                                });
+                                toast({
+                                  title: "Export complete",
+                                  description: "The order PDF has been downloaded.",
+                                });
+                              }}
+                            />
+                          </div>
                         );
                       },
                     },
@@ -788,43 +857,23 @@ export default function OrderMaster() {
                   visibleEnd={visibleEnd}
                   onPageChange={(p) => { setCurrentPage(p); }}
                   onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-                  rowsPerPageOptions={[10, 20, 50]}
+                  rowsPerPageOptions={[5, 10, 20, 50]}
                   emptyMessage="No orders found matching the current filters."
                   rowKey={(r: any) => String((r as OrderRow).plan_id)}
+                  onRowClick={(r: any) => handleView(r as OrderRow)}
                 />
-              </div>
             )}
           </div>
 
           {/* ==================== BOTTOM CARDS ==================== */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-            {/* LAB READINESS */}
-            <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[#191C1E]">Lab Readiness</h3>
-                <FlaskConical className="w-4 h-4 text-[#004785]" />
-              </div>
-              <div className="mt-4 flex flex-col gap-4">
-                {rows
-                  .filter((r) => statusOf(r) === "Labs Pending")
-                  .slice(0, 5)
-                  .map((r) => (
-                    <div key={r.plan_id}>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-[#424752] truncate">{r.patient_name}</span>
-                        <span className="font-bold text-[#B45309]">{r.protocol}</span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 w-full bg-[#F2F4F6] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#F59E0B] rounded-full" style={{ width: "35%" }} />
-                      </div>
-                    </div>
-                  ))}
-                {rows.filter((r) => statusOf(r) === "Labs Pending").length === 0 && (
-                  <p className="text-xs text-[#6B7280]">No orders awaiting lab results. All good.</p>
-                )}
-              </div>
-            </div>
+            {/* CYCLE PROGRESS (Using unified chart component with exact cycle progress logic & no StatusBadge) */}
+            <CycleProgressChart
+              compact
+              rows={rows}
+              onView={(r) => handleView(r as OrderRow)}
+            />
 
             {/* UPCOMING CYCLES */}
             <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
@@ -833,51 +882,44 @@ export default function OrderMaster() {
                 <CalendarDays className="w-4 h-4 text-[#004785]" />
               </div>
               <div className="mt-4 flex flex-col gap-3">
-                {rows
-                  .filter((r) => statusOf(r) === "Scheduled" || statusOf(r) === "In Progress" || statusOf(r) === "Labs Pending")
-                  .sort((a, b) => toTime(a.next_cycle_date) - toTime(b.next_cycle_date))
-                  .filter((r) => r.next_cycle_date && r.next_cycle_date !== "—")
-                  .slice(0, 5)
-                  .map((r) => (
-                    <div key={r.plan_id} className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0">
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[#191C1E] truncate">{r.patient_name}</div>
-                        <div className="hms-id-text">{r.protocol} · {r.cycle_label}</div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <StatusBadge status={statusOf(r)} />
-                        <span className="text-[10px] font-semibold text-[#6B7280]">{fmtDate(r.next_cycle_date)}</span>
-                      </div>
+                {upcomingCycles.map((r) => (
+                  <div key={r.plan_id} className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[#191C1E] truncate">{r.patient_name}</div>
+                      <div className="hms-id-text">{r.protocol} · {r.cycle_label}</div>
                     </div>
-                  ))}
-                {rows.filter((r) => r.next_cycle_date && r.next_cycle_date !== "—").length === 0 && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] font-semibold text-[#6B7280]">{fmtDate(upcomingDateOf(r))}</span>
+                    </div>
+                  </div>
+                ))}
+                {upcomingCycles.length === 0 && (
                   <p className="text-xs text-[#6B7280]">No upcoming cycles scheduled.</p>
                 )}
               </div>
             </div>
 
-            {/* STATUS SNAPSHOT */}
+            {/* ORDER STATUS SNAPSHOT */}
             <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-[#191C1E]">Order Status Snapshot</h3>
                 <CheckCircle2 className="w-4 h-4 text-[#004785]" />
               </div>
               <div className="mt-4 flex flex-col gap-3">
-                {(["Scheduled", "In Progress", "Labs Pending", "Held", "Completed", "Cancelled"] as OrderStatus[]).map((s) => {
-                  const count = rows.filter((r) => statusOf(r) === s).length;
-                  const pct = rows.length ? Math.round((count / rows.length) * 100) : 0;
+                {statusSnapshot.map((entry) => {
+                  const status = entry.status;
                   return (
-                    <div key={s} className="flex items-center justify-between py-1">
+                    <div key={status} className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-2">
-                        <StatusBadge status={s} />
-                        <span className="text-xs font-semibold text-[#6B7280]">{count}</span>
+                        <StatusBadge status={status} />
+                        <span className="text-xs font-semibold text-[#6B7280]">{entry.count}</span>
                       </div>
                       <div className="flex-1 mx-3">
                         <div className="h-1.5 w-full bg-[#F2F4F6] rounded-full overflow-hidden">
-                          <div className="h-full bg-[#004785] rounded-full" style={{ width: `${pct}%` }} />
+                          <div className="h-full bg-[#004785] rounded-full" style={{ width: `${entry.pct}%` }} />
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold text-[#424752] w-8 text-right">{pct}%</span>
+                      <span className="text-[10px] font-bold text-[#424752] w-8 text-right">{entry.pct}%</span>
                     </div>
                   );
                 })}
@@ -899,6 +941,16 @@ export default function OrderMaster() {
               navigate("/doctor");
             }}
             onCancel={() => setNewOrderOpen(false)}
+          />
+
+          {/* ==================== DISCONTINUE PLAN ==================== */}
+          <DiscontinuePlanDialog
+            open={discontinueOpen}
+            onOpenChange={setDiscontinueOpen}
+            planId={discontinueRow?.plan_id ?? null}
+            patientName={discontinueRow?.patient_name}
+            protocolName={discontinueRow?.protocol}
+            onDiscontinued={() => { void fetchOrders(); }}
           />
 
         </main>

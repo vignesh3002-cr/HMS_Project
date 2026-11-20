@@ -24,6 +24,17 @@ interface UsePatientFiltersResult {
 // fields (Diagnosis/Doctor vs Blood Group), same as before this extraction.
 // Status options are derived from the real patients passed in rather than a
 // fixed list.
+const BLOOD_GROUP_OPTIONS: SelectOption[] = [
+  { label: "A+", value: "A+" },
+  { label: "A-", value: "A-" },
+  { label: "B+", value: "B+" },
+  { label: "B-", value: "B-" },
+  { label: "AB+", value: "AB+" },
+  { label: "AB-", value: "AB-" },
+  { label: "O+", value: "O+" },
+  { label: "O-", value: "O-" },
+];
+
 export function usePatientFilters({ viewMode, patientRows }: UsePatientFiltersParams): UsePatientFiltersResult {
   const nameOptions = useMemo<SelectOption[]>(() => toNameIdOptions(patientRows), [patientRows]);
   const statusOptions = useMemo(() => toSortedOptions(patientRows.map((p) => p.status)), [patientRows]);
@@ -31,27 +42,51 @@ export function usePatientFilters({ viewMode, patientRows }: UsePatientFiltersPa
   const nameField: FilterField = {
     id: "name",
     label: "Patient Name / ID",
-    type: "combobox",
+    type: "multiselect",
     placeholder: "Search by name or ID",
     options: nameOptions,
     matchKeys: ["name", "id"],
+    compact: true,
+  };
+
+  const bloodGroupField: FilterField = {
+    id: "bloodGroup",
+    label: "Blood Group",
+    type: "multiselect",
+    options: BLOOD_GROUP_OPTIONS,
+    compact: true,
+  };
+
+  const statusField: FilterField = {
+    id: "status",
+    label: "Status",
+    type: "multiselect",
+    options: statusOptions,
+    defaultValue: ["Active"],
+  };
+
+  const priorityField: FilterField = {
+    id: "priority",
+    label: "Priority",
+    type: "multiselect",
+    options: [{ label: "Critical Only", value: "critical" }],
+    compact: true,
   };
 
   const listFilterFields: FilterField[] = [
     nameField,
+    bloodGroupField,
     { id: "diagnose", label: "Diagnosis", type: "text", placeholder: "Search diagnosis" },
     { id: "doctor", label: "Assigned Doctor", type: "text", placeholder: "Search doctor" },
-    // Defaults to "Active" only -- "Inactive" patients stay hidden until
-    // the user explicitly selects them in the filter.
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions, defaultValue: ["Active"] },
+    priorityField,
+    statusField,
   ];
 
   const gridFilterFields: FilterField[] = [
     nameField,
-    { id: "bloodGroup", label: "Blood Group", type: "text", placeholder: "Search blood group" },
-    // Defaults to "Active" only -- "Inactive" patients stay hidden until
-    // the user explicitly selects them in the filter.
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions, defaultValue: ["Active"] },
+    bloodGroupField,
+    priorityField,
+    statusField,
   ];
 
   return { patientFilterFields: viewMode === "grid" ? gridFilterFields : listFilterFields };
