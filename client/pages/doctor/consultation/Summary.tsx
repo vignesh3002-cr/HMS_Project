@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { InpatientDischargeHistory } from "../patient-details/InpatientDischargeHistory";
 import { useLocation, useNavigate } from "react-router-dom";
 import jsPDF from 'jspdf';
@@ -464,6 +464,228 @@ function VisitSectionView({ section }: { section: VisitSection }) {
   );
 }
 
+/* Consent signature capture types (module-level so the canvas component can
+   reference them without being recreated on every Summary render). */
+export type ConsentRole = "patient" | "witness" | "doctor";
+export interface ConsentSignature { dataUrl: string; width: number; height: number; }
+
+const CAPTURE_W = 400;
+const CAPTURE_H = 200;
+const DISPLAY_W = 260;
+const DISPLAY_H = 130;
+
+const CAPTURE_DELAY = 3000;
+
+type SignatureCanvasProps = {
+  role: ConsentRole;
+  label: string;
+  value: ConsentSignature | null;
+  onChange: (sig: ConsentSignature | null) => void;
+};
+
+/* HTML5 canvas signature capture with mouse + touch support.
+   Capture is debounced: after the user stops drawing, a 3-second countdown
+   starts; any new drawing restarts the countdown from 0. Capture only fires
+   after 3 seconds of true inactivity (or immediately via "Capture now"). */
+const SignatureCanvas: React.FC<SignatureCanvasProps> = ({
+  role, label, value, onChange,
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  /* Holds both the capture timeout and the countdown interval so cancelTimer
+     can clear both. */
+  const timerRef = useRef<{ timeout: ReturnType<typeof setTimeout> | null; tick: ReturnType<typeof setInterval> | null }>({ timeout: null, tick: null });
+  const startTimeRef = useRef<number>(0);
+  const [drawing, setDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const [pendingSeconds, setPendingSeconds] = useState(0);
+
+  const cancelTimer = () => {
+    if (timerRef.current.timeout) {
+      clearTimeout(timerRef.current.timeout);
+      timerRef.current.timeout = null;
+    }
+    if (timerRef.current.tick) {
+      clearInterval(timerRef.current.tick);
+      timerRef.current.tick = null;
+    }
+    setPendingSeconds(0);
+  };
+
+  const capture = () => {
+    cancelTimer();
+    const canvas = canvasRef.current;
+    if (!canvas || !hasDrawn) return;
+    const dataUrl = canvas.toDataURL("image/png");
+    const img = new Image();
+    img.onload = () =>
+      onChange({ dataUrl, width: img.width, height: img.height });
+    img.src = dataUrl;
+  };
+
+  const startTimer = () => {
+    cancelTimer();
+    startTimeRef.current = Date.now();
+    timerRef.current.timeout = setTimeout(() => {
+      timerRef.current.timeout = null;
+      setPendingSeconds(0);
+      capture();
+    }, CAPTURE_DELAY);
+    /* Countdown UI: update every second while pending. */
+    setPendingSeconds(Math.ceil(CAPTURE_DELAY / 1000));
+    timerRef.current.tick = setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current;
+      const remaining = Math.max(0, CAPTURE_DELAY - elapsed);
+      setPendingSeconds(Math.ceil(remaining / 1000));
+      if (remaining <= 0) {
+        if (timerRef.current.tick) {
+          clearInterval(timerRef.current.tick);
+          timerRef.current.tick = null;
+        }
+      }
+    }, 200);
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctxRef.current = ctx;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#111827";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, CAPTURE_W, CAPTURE_H);
+    if (value?.dataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, CAPTURE_W, CAPTURE_H);
+        ctx.drawImage(img, 0, 0, CAPTURE_W, CAPTURE_H);
+      };
+      img.src = value.dataUrl;
+    }
+    return () => cancelTimer();
+  }, [value?.dataUrl]);
+
+  const pos = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    return {
+      x: ((clientX - rect.left) / rect.width) * CAPTURE_W,
+      y: ((clientY - rect.top) / rect.height) * CAPTURE_H,
+    };
+  };
+
+  const start = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const ctx = ctxRef.current;
+    if (!canvasRef.current || !ctx) return;
+    cancelTimer();
+    setDrawing(true);
+    setHasDrawn(true);
+    const { x, y } = pos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const move = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const ctx = ctxRef.current;
+    if (!drawing || !ctx) return;
+    const { x, y } = pos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    startTimer();
+  };
+
+  const end = () => {
+    if (!drawing) return;
+    setDrawing(false);
+    startTimer();
+  };
+
+  const clear = () => {
+    cancelTimer();
+    const ctx = ctxRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas || !ctx) return;
+    setHasDrawn(false);
+    ctx.clearRect(0, 0, CAPTURE_W, CAPTURE_H);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, CAPTURE_W, CAPTURE_H);
+    onChange(null);
+  };
+
+  const captureNow = () => capture();
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-[10px] font-semibold text-slate-600 uppercase">{label}</span>
+      <canvas
+        ref={canvasRef}
+        width={CAPTURE_W}
+        height={CAPTURE_H}
+        className={`w-[${DISPLAY_W}px] h-[${DISPLAY_H}px] border border-slate-300 rounded bg-white cursor-crosshair ${value ? "" : "opacity-50"}`}
+        onMouseDown={start}
+        onMouseMove={move}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={(e) => { e.preventDefault(); start(e); }}
+        onTouchMove={(e) => { e.preventDefault(); move(e); }}
+        onTouchEnd={end}
+        onTouchCancel={end}
+      />
+      {value ? (
+        <>
+          <img
+            src={value.dataUrl}
+            alt="Signature preview"
+            className="w-[120px] h-[60px] object-contain border border-slate-200 rounded bg-slate-50"
+          />
+          <button
+            type="button"
+            onClick={clear}
+            className="text-[10px] text-red-600 hover:bg-red-50 rounded px-2 py-1"
+          >
+            Clear
+          </button>
+          <span className="text-[10px] text-green-600 font-medium">Captured</span>
+        </>
+      ) : (
+        <>
+          {pendingSeconds > 0 && (
+            <>
+              <span className="text-[10px] text-amber-600 font-medium">
+                Auto-capturing in {pendingSeconds}s…
+              </span>
+              <button
+                type="button"
+                onClick={captureNow}
+                className="text-[10px] text-blue-600 hover:bg-blue-50 rounded px-2 py-1"
+              >
+                Capture now
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={clear}
+            className="text-[10px] text-red-600 hover:bg-red-50 rounded px-2 py-1"
+          >
+            Clear
+          </button>
+          <span className={`text-[10px] ${hasDrawn ? "text-slate-600" : "text-slate-400"} italic`}>
+            {hasDrawn ? "Draw complete - wait for auto-capture" : "Not captured"}
+          </span>
+        </>
+      )}
+    </div>
+  );
+};
+
 const Summary: React.FC<{
   embedded?: boolean;
   patientId?: string;
@@ -538,6 +760,16 @@ const Summary: React.FC<{
   const [doctorInfo, setDoctorInfo] = useState({ name: "", regNo: "" });
   const [branchContact, setBranchContact] = useState("");
 
+  /* Consent signature capture (patient / witness / doctor), persisted to
+     localStorage so captured signatures survive refresh and re-print. */
+  const [consentSignatures, setConsentSignatures] =
+    useState<Record<ConsentRole, ConsentSignature | null>>({
+      patient: null,
+      witness: null,
+      doctor: null,
+    });
+  const [consentDate, setConsentDate] = useState("");
+
   const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
   const [summarySymptoms, setSummarySymptoms] = useState<string[]>([]);
   const [summaryReasonForVisit, setSummaryReasonForVisit] = useState("");
@@ -595,6 +827,55 @@ const Summary: React.FC<{
   const [visitDiagnosis, setVisitDiagnosis] = useState<StagingDetailRecord | null>(null);
   /* "Add To Print": the headings picked for the printout. */
   const [printSections, setPrintSections] = useState<string[]>([]);
+
+  /* Consent signature key: persists per patient + encounter so signatures
+     survive refresh and re-print. Falls back to patientId-only when the
+     encounter number isn't resolved yet. */
+  const consentStorageKey = () =>
+    `hms_consent_signatures_${resolvedPatientId}_${encounterNo || ""}`;
+
+  /* Load persisted consent signatures from localStorage on mount. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    const stored = localStorage.getItem(consentStorageKey());
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      const next: Record<ConsentRole, ConsentSignature | null> = {
+        patient: null,
+        witness: null,
+        doctor: null,
+      };
+      for (const role of ["patient", "witness", "doctor"] as ConsentRole[]) {
+        const entry = parsed?.[role];
+        if (entry && typeof entry.dataUrl === "string") next[role] = entry;
+      }
+      if (parsed.consentDate) setConsentDate(String(parsed.consentDate));
+      setConsentSignatures(next);
+    } catch {
+      /* Ignore corrupt storage. */
+    }
+  }, [resolvedPatientId, encounterNo]);
+
+  /* Persist consent signatures to localStorage whenever they change, and
+     auto-set the consent date once all three roles are captured. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    try {
+      localStorage.setItem(
+        consentStorageKey(),
+        JSON.stringify({ ...consentSignatures, consentDate })
+      );
+    } catch {
+      /* localStorage quota exceeded - keep working in memory only. */
+    }
+    const allCaptured = ["patient", "witness", "doctor"].every(
+      (role) => Boolean(consentSignatures[role]?.dataUrl)
+    );
+    if (allCaptured && !consentDate) {
+      setConsentDate(formatDateDMY(new Date().toISOString()));
+    }
+  }, [resolvedPatientId, encounterNo, consentSignatures, consentDate]);
 
   useEffect(() => {
     if (!appointmentId) return;
@@ -2438,7 +2719,11 @@ const Summary: React.FC<{
 
     /* Signature block #1 */
     const blockWidth = (consentWidth - 2 * 16) / 3;
-    const sig1Height = 6 + 3 * 20;
+    const sigImgHeight = 20;
+    const sig1HasImage = ["patient", "witness", "doctor"].some(
+      (role) => Boolean(consentSignatures[role]?.dataUrl)
+    );
+    const sig1Height = 6 + 3 * 20 + (sig1HasImage ? sigImgHeight : 0);
     if (y + sig1Height > contentBottom) {
       doc.addPage();
       y = drawConsentTitle();
@@ -2448,6 +2733,7 @@ const Summary: React.FC<{
       ["Name:", "1. Name:", ""],
       ["2. Relations:", "", ""],
     ];
+    const consentRoles: ConsentRole[] = ["patient", "witness", "doctor"];
     sig1Rows.forEach((row, rowIndex) => {
       const rowY = y + 6 + rowIndex * 20;
       row.forEach((cell, cellIndex) => {
@@ -2458,9 +2744,26 @@ const Summary: React.FC<{
         doc.text(cell, x, rowY);
         if (rowIndex > 0) {
           const lineX = x + doc.getTextWidth(cell) + 4;
-          doc.setDrawColor(160, 160, 160);
-          doc.setLineWidth(0.5);
-          doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+          const role = consentRoles[cellIndex];
+          const sig = consentSignatures[role];
+          if (rowIndex === 1 && sig) {
+            const availW = x + blockWidth - lineX;
+            const aspect = sig.width / sig.height;
+            const drawH = sigImgHeight;
+            const drawW = Math.min(availW, drawH * aspect);
+            doc.addImage(
+              sig.dataUrl,
+              "PNG",
+              lineX + (availW - drawW) / 2,
+              rowY + 1,
+              drawW,
+              drawH
+            );
+          } else {
+            doc.setDrawColor(160, 160, 160);
+            doc.setLineWidth(0.5);
+            doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+          }
         }
       });
     });
@@ -2517,7 +2820,10 @@ const Summary: React.FC<{
     });
 
     /* Signature block #2 */
-    const sig2Height = 6 + 3 * 20;
+    const sig2HasImage = ["patient", "witness", "doctor"].some(
+      (role) => Boolean(consentSignatures[role]?.dataUrl)
+    );
+    const sig2Height = 6 + 3 * 20 + (sig2HasImage ? sigImgHeight : 0);
     if (y + sig2Height > contentBottom) {
       doc.addPage();
       y = drawConsentTitle();
@@ -2537,13 +2843,34 @@ const Summary: React.FC<{
         doc.text(cell, x, rowY);
         if (rowIndex > 0) {
           const lineX = x + doc.getTextWidth(cell) + 4;
-          doc.setDrawColor(160, 160, 160);
-          doc.setLineWidth(0.5);
-          doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+          const role = consentRoles[cellIndex];
+          const sig = consentSignatures[role];
+          if (rowIndex === 1 && sig) {
+            const availW = x + blockWidth - lineX;
+            const aspect = sig.width / sig.height;
+            const drawH = sigImgHeight;
+            const drawW = Math.min(availW, drawH * aspect);
+            doc.addImage(
+              sig.dataUrl,
+              "PNG",
+              lineX + (availW - drawW) / 2,
+              rowY + 1,
+              drawW,
+              drawH
+            );
+          } else {
+            doc.setDrawColor(160, 160, 160);
+            doc.setLineWidth(0.5);
+            doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+          }
         }
       });
     });
     y += sig2Height;
+
+    if (consentDate) {
+      writeConsent(`Consent date: ${consentDate}`, { gap: 4 });
+    }
 
     /* Representative consent */
     writeConsent("Signature for consent when given by representative of the patient", { bold: true, gap: 4 });
@@ -3729,6 +4056,54 @@ const Summary: React.FC<{
           </section>
         </div>
       </div>
+
+      {/* ===================================================
+          CONSENT SIGNATURES (shown when a chemo plan exists)
+      ==================================================== */}
+      {plan && (
+        <section className="mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-xs font-semibold text-slate-900">Consent Signatures</h3>
+            <span className="text-[10px] text-slate-500">
+              Draw each signature below before printing.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <SignatureCanvas
+              role="patient"
+              label="Patient Signature"
+              value={consentSignatures.patient}
+              onChange={(sig) =>
+                setConsentSignatures((prev) => ({ ...prev, patient: sig }))
+              }
+            />
+            <SignatureCanvas
+              role="witness"
+              label="Witness Signature"
+              value={consentSignatures.witness}
+              onChange={(sig) =>
+                setConsentSignatures((prev) => ({ ...prev, witness: sig }))
+              }
+            />
+            <SignatureCanvas
+              role="doctor"
+              label="Doctor Signature"
+              value={consentSignatures.doctor}
+              onChange={(sig) =>
+                setConsentSignatures((prev) => ({ ...prev, doctor: sig }))
+              }
+            />
+          </div>
+          {consentDate && (
+            <p className="mt-3 text-[10px] text-slate-500">
+              Consent date: {consentDate}
+            </p>
+          )}
+          <p className="mt-2 text-[10px] text-slate-400">
+            Uncaptured roles print as blank underline lines in the PDF.
+          </p>
+        </section>
+      )}
 
       {/* ===================================================
           ACTION BUTTONS
