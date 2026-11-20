@@ -27,6 +27,7 @@ import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
@@ -300,7 +301,12 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     reason: doc.reason_for_visit || "",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
-    status: formatAppointmentStatus(doc.status ?? ""),
+    // Display-only: dated before today (branch timezone) reads as "No Show".
+    // rawRecord below keeps the real DB status for anything that needs it
+    // (chemo metrics) -- nothing is written back to the API or the database.
+    status: isPastAppointmentNoShow(doc.appointment_date)
+      ? "No Show"
+      : formatAppointmentStatus(doc.status ?? ""),
     appointmentDateISO: doc.appointment_date,
     visitType: doc.Patient_visit_type || "",
     chemo_fitness: doc.chemo_fitness,
@@ -974,7 +980,9 @@ export default function Dashboard() {
 
     for (const appt of list) {
       const visitType = String(appt.visitType || appt.reason || "").toLowerCase();
-      const status = String(appt.status || "").toLowerCase();
+      // Chemo / OP metrics follow the STORED status: `appt.status` may be the
+      // frontend-only past-appointment "No Show" label, which must not skew them.
+      const status = String(appt.rawRecord?.status ?? appt.status ?? "").toLowerCase();
       const id = String(appt.id || appt.appointmentNo || "");
 
       const backendFitness = (appt.chemo_fitness || (appt.rawRecord as any)?.chemo_fitness || "") as string;
@@ -1209,7 +1217,12 @@ export default function Dashboard() {
           appt.id === targetId
             ? cancelled && cancelled.patient_bio_data
               ? mapAppointmentRecord(cancelled, index)
-              : { ...appt, status: "Cancelled" }
+              : {
+                  ...appt,
+                  status: isPastAppointmentNoShow(appt.appointmentDateISO as string)
+                    ? "No Show"
+                    : "Cancelled",
+                }
             : appt,
         ),
       );

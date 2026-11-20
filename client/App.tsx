@@ -92,6 +92,22 @@ import RoleManagement from "./pages/admin/RoleManagement";
 import AccessDenied from "./pages/AccessDenied";
 
 // ============================================================
+// SYSTEM OWNER
+// ============================================================
+
+import OwnerLogin from "./pages/OwnerLogin";
+import OwnerDashboard from "./pages/OwnerDashboard";
+
+// ============================================================
+// SUPER ADMIN
+// ============================================================
+
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+import Hospitals from "./pages/Hospitals";
+import UsersPage from "./pages/Users";
+import Branches from "./pages/Branches";
+
+// ============================================================
 // DOCTOR PORTAL
 // ============================================================
 
@@ -433,6 +449,44 @@ const protectedRoutes = [
   },
 
   // ----------------------------------------------------------
+  // System Owner
+  // ----------------------------------------------------------
+
+  {
+    path: "/owner-dashboard",
+    element: <OwnerDashboard />,
+    permission: "hospital.read",
+  },
+
+  // ----------------------------------------------------------
+  // Super Admin
+  // ----------------------------------------------------------
+
+  {
+    path: "/super-admin",
+    element: <SuperAdminDashboard />,
+    permission: "hospital.read",
+  },
+
+  {
+    path: "/hospitals",
+    element: <Hospitals />,
+    permission: "hospital.read",
+  },
+
+  {
+    path: "/users",
+    element: <UsersPage />,
+    permission: "employee.read",
+  },
+
+  {
+    path: "/branches",
+    element: <Branches />,
+    permission: "branch.read",
+  },
+
+  // ----------------------------------------------------------
   // Staff
   // ----------------------------------------------------------
 
@@ -586,6 +640,11 @@ const App = () => (
             <Route
               path="/"
               element={<Login />}
+            />
+
+            <Route
+              path="/owner-login"
+              element={<OwnerLogin />}
             />
 
             {/* ==================================================

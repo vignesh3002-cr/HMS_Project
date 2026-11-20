@@ -28,6 +28,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
@@ -174,7 +175,12 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time, record.duration_minutes),
     sortDate,
-    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    // Display-only: everything dated before today (branch timezone) reads as
+    // "No Show". rawStatus below keeps the real DB value for the flows that
+    // need it (sandwich queue, cancel) -- nothing is ever written back.
+    status: isPastAppointmentNoShow(record.appointment_date)
+      ? "No Show"
+      : STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
     rawStatus: record.status,
     durationMinutes: record.duration_minutes,
     appointmentDateISO: record.appointment_date,
