@@ -72,6 +72,8 @@ interface LabValue {
   platelet: string;
 }
 
+const CYCLE_DAY_REGEX = /Cycle\s*(\d+)\s*\/\s*Day\s*(\d+)/i;
+
 /* Avatar / cycle / date helpers now live in ./orderMasterCycles - a co-located
    module (like consultation/doseCalculation.ts) so the cycle maths is
    unit-tested in orderMasterCycles.spec.ts without mounting this page. */
@@ -523,7 +525,16 @@ export default function OrderMaster() {
   };
 
   const handlePharmacySlip = (row: OrderRow) => {
-    navigate(`/orders/${row.plan_id}/pharmacy-slip`);
+    const match = row.cycle_label.match(CYCLE_DAY_REGEX);
+    const cycle = match ? match[1] : "";
+    const day = match ? match[2] : "";
+    const params = new URLSearchParams();
+    if (cycle) params.set("cycle", cycle);
+    if (day) params.set("day", day);
+    if (row.patient_id) params.set("patientId", row.patient_id);
+    navigate(
+      `/orders/${row.plan_id}/pharmacy-slip?${params.toString()}`
+    );
   };
 
   const statCards = [
