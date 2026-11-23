@@ -358,6 +358,17 @@ export function allocateQuantity({
     return { baseQuantity: 1, extra: null };
   }
 
+  // The selected strength reaches the dose in whole units exactly
+  // (e.g. patient dose 100 mg, selected strength 50 mg -> 2 units, no top-up line).
+  const exactRatio = targetValue / selectedValue;
+  const exactUnits = Math.round(exactRatio);
+  if (
+    Number.isFinite(exactRatio) &&
+    Math.abs(exactRatio - exactUnits) < 1e-9
+  ) {
+    return { baseQuantity: exactUnits, extra: null };
+  }
+
   const remaining = targetValue - selectedValue;
 
   // Only strengths below the selected one can top it up. A brand with none

@@ -104,6 +104,59 @@ describe("allocateQuantity", () => {
     expect(plan.extra).toBeNull();
   });
 
+  it("TC5: exact multiple (patient dose 100 mg, selected strength 50 mg, brand also offers 10 mg) -> 50 x 2, no top-up", () => {
+    const plan = allocateQuantity({
+      patientDose: 100,
+      patientDoseUnit: "mg",
+      selectedDose: 50,
+      selectedUnit: "mg",
+      strengths: [strength(50), strength(10)],
+    });
+
+    expect(plan.baseQuantity).toBe(2);
+    expect(plan.extra).toBeNull();
+  });
+
+  it("TC6: larger exact multiple (patient dose 200 mg, selected strength 50 mg) -> 50 x 4, no top-up", () => {
+    const plan = allocateQuantity({
+      patientDose: 200,
+      patientDoseUnit: "mg",
+      selectedDose: 50,
+      selectedUnit: "mg",
+      strengths: [strength(50), strength(10)],
+    });
+
+    expect(plan.baseQuantity).toBe(4);
+    expect(plan.extra).toBeNull();
+  });
+
+  it("TC7: unit-converted exact multiple (patient dose 0.2 g, selected strength 100 mg) -> 100 mg x 2", () => {
+    const plan = allocateQuantity({
+      patientDose: 0.2,
+      patientDoseUnit: "g",
+      selectedDose: 100,
+      selectedUnit: "mg",
+      strengths: [strength(100)],
+    });
+
+    expect(plan.baseQuantity).toBe(2);
+    expect(plan.extra).toBeNull();
+  });
+
+  it("TC8: non-exact multiple keeps top-up behavior (patient dose 150 mg, selected strength 120 mg)", () => {
+    const plan = allocateQuantity({
+      patientDose: 150,
+      patientDoseUnit: "mg",
+      selectedDose: 120,
+      selectedUnit: "mg",
+      strengths: [strength(120), strength(30), strength(20)],
+    });
+
+    expect(plan.baseQuantity).toBe(1);
+    expect(plan.extra?.strength.value).toBe(30);
+    expect(plan.extra?.quantity).toBe(1);
+  });
+
   it("converts units before comparing (0.15 g patient dose vs 150 mg strength)", () => {
     const plan = allocateQuantity({
       patientDose: 0.15,
