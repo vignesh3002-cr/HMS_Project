@@ -363,8 +363,15 @@ export default function Calendar({
   };
 
   const isSelectedSingle = (date: Date): boolean => {
-    if (mode !== "single") return false;
-    return selected && isSameDay(date, selected as Date);
+    if (mode === "week") return false;
+    if (!selected) return false;
+    if (selected instanceof Date) {
+      return isSameDay(date, selected);
+    }
+    if (typeof selected === "object" && "from" in selected && (selected as any).from instanceof Date) {
+      return isSameDay(date, (selected as any).from);
+    }
+    return false;
   };
 
   const isSelectedRange = (date: Date): boolean => {
@@ -421,32 +428,9 @@ export default function Calendar({
     setHoverDate(null);
   };
 
-  // Handle click (single or shift+click for range, double-click/Ctrl+click for multi)
-  const handleClick = (date: Date, shiftKey: boolean, ctrlKey: boolean = false, isDoubleClick: boolean = false) => {
+  // Handle click (strictly single-click selection)
+  const handleClick = (date: Date) => {
     if (isDisabled(date)) return;
-
-    if (mode === "single") {
-      setInternalSelected(date);
-      onSelect?.(date);
-      return;
-    }
-
-    if (mode === "multi") {
-      // Double-click or Ctrl+Click to toggle multi-selection
-      if (isDoubleClick || ctrlKey) {
-        const newMultiSelected = isSelectedMulti(date)
-          ? multiSelected.filter((d) => !isSameDay(d, date))
-          : [...multiSelected, date];
-        setInternalMultiSelected(newMultiSelected);
-        onDatesChange?.(newMultiSelected);
-      } else {
-        // Single click in multi mode = replace with single date (like single mode)
-        setInternalMultiSelected([date]);
-        onDatesChange?.([date]);
-        onSelect?.(date);
-      }
-      return;
-    }
 
     if (mode === "week") {
       // Click in week mode selects the week
@@ -461,18 +445,9 @@ export default function Calendar({
       return;
     }
 
-    // Range mode
-    if (shiftKey && rangeStart) {
-      // Shift+click: create range from rangeStart to clicked date
-      const range = getRange(rangeStart, date);
-      setInternalSelected(range);
-      onSelect?.(range);
-      setRangeStart(null);
-    } else if (!isDragging) {
-      // First click: set range start
-      setRangeStart(date);
-      setHoverDate(date);
-    }
+    // Single click only: immediately select the date
+    setInternalSelected(date);
+    onSelect?.(date);
   };
 
   // Handle keyboard for accessibility
@@ -480,7 +455,7 @@ export default function Calendar({
     if (isDisabled(date)) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      handleClick(date, e.shiftKey);
+      handleClick(date);
     }
   };
 
@@ -606,22 +581,15 @@ export default function Calendar({
               <button
                 type="button"
                 key={i}
-                onClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, false)}
-                onDoubleClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, true)}
-                onMouseDown={() => handleMouseDown(date)}
-                onMouseEnter={() => handleMouseEnter(date)}
+                onClick={() => handleClick(date)}
                 onKeyDown={(e) => handleKeyDown(e, date)}
                 disabled={disabled}
                 className="cal-day"
                 data-in-month={inMonth}
                 data-today={isToday}
-                data-selected={selectedSingle || selectedRange || selectedMulti || weekSelected || highlighted}
-                data-multi-selected={selectedMulti}
+                data-selected={selectedSingle || weekSelected || highlighted}
                 data-week-selected={weekSelected}
                 data-highlighted={highlighted}
-                data-range-start={rangeStart}
-                data-range-end={rangeEnd}
-                data-in-range={inRange}
                 data-disabled={disabled}
                 tabIndex={disabled ? -1 : 0}
               >

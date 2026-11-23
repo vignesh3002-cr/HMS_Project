@@ -311,7 +311,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
   return (
     <BranchFilterProvider>
-      <div className="flex h-screen font-[Manrope,sans-serif] bg-[#F7F9FB]">
+      <div className="flex h-screen font-[Manrope,sans-serif] bg-[#F7F9FB] dark:bg-slate-950">
         {/* Mobile overlay */}
         {sidebarOpen && (
           <div
@@ -323,7 +323,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
         {/* SIDEBAR */}
         <aside
           className={cn(
-            "fixed lg:static z-30 lg:z-auto flex flex-col w-56 h-full bg-[#F2F4F6] px-4 py-6 transition-transform duration-200",
+            "fixed lg:static z-30 lg:z-auto flex flex-col w-56 h-full bg-[#F2F4F6] dark:bg-slate-900 border-r border-transparent dark:border-slate-800 px-4 py-6 transition-transform duration-200",
             sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
           )}
         >
@@ -356,7 +356,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                             ? isIpdSectionActive
                             : false)
                         ? "bg-[#00488D] text-white shadow-sm"
-                        : "text-[#475569] hover:bg-[#E6E8EA]",
+                        : "text-[#475569] dark:text-slate-400 hover:bg-[#E6E8EA] dark:hover:bg-slate-800 dark:hover:text-slate-200",
                     )}
                   >
                     {navIcon[item.label]}
@@ -381,7 +381,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                               "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
                               isActive
                                 ? "bg-[#00488D] text-white shadow-sm"
-                                : "text-[#475569] hover:bg-[#E6E8EA]",
+                                : "text-[#475569] dark:text-slate-400 hover:bg-[#E6E8EA] dark:hover:bg-slate-800 dark:hover:text-slate-200",
                             )
                           }
                         >
@@ -402,7 +402,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                       description: "This module is coming soon.",
                     })
                   }
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize text-[#475569] hover:bg-[#E6E8EA]"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize text-[#475569] dark:text-slate-400 hover:bg-[#E6E8EA] dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 >
                   {navIcon[item.label]}
                   {item.label}
@@ -425,7 +425,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                       "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
                       active
                         ? "bg-[#00488D] text-white shadow-sm"
-                        : "text-[#475569] hover:bg-[#E6E8EA]",
+                        : "text-[#475569] dark:text-slate-400 hover:bg-[#E6E8EA] dark:hover:bg-slate-800 dark:hover:text-slate-200",
                     );
                   }}
                 >
@@ -437,12 +437,19 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           </nav>
 
           {/* BOTTOM NAV */}
-          <div className="border-t border-[rgba(194,198,212,0.10)] pt-4 flex flex-col gap-1">
+          <div className="border-t border-[rgba(194,198,212,0.10)] dark:border-slate-800 pt-4 flex flex-col gap-1">
             {bottomNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
-                className="flex items-center gap-2 px-3 py-2 rounded-[4px] text-[#475569] hover:bg-[#E6E8EA] text-xs font-semibold"
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold",
+                    isActive
+                      ? "bg-[#00488D] text-white shadow-sm"
+                      : "text-[#475569] dark:text-slate-400 hover:bg-[#E6E8EA] dark:hover:bg-slate-800 dark:hover:text-slate-200",
+                  )
+                }
               >
                 {bottomNavIcon[item.label]}
                 {item.label}
@@ -452,7 +459,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
           {/* USER */}
           <div className="pt-4">
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6] dark:bg-slate-800/80">
               <UserAvatar
                 src={adminPhoto || undefined}
                 name={userData.username || "HMS Admin"}
@@ -461,13 +468,13 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                 spinnerClass="w-4 h-4"
               />
               <div>
-                <div className="text-[#191C1E] font-bold text-[12px]">
+                <div className="text-[#191C1E] dark:text-slate-100 font-bold text-[12px]">
                   {userData.username || "HMS Admin"}
                 </div>
-                <div className="text-[#64748B] text-[11px]">
+                <div className="text-[#64748B] dark:text-slate-400 text-[11px]">
                   {userData.user_id || "User"}
                 </div>
-                <div className="text-[#64748B] text-[10px]">
+                <div className="text-[#64748B] dark:text-slate-400 text-[10px]">
                   Branch: {userData.branch || userData.branch_id || "N/A"}
                 </div>
               </div>
@@ -478,12 +485,12 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
         {/* MAIN */}
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           {/* HEADER */}
-          <header className="flex h-16 items-center justify-between bg-white/90 backdrop-blur-sm border-b border-slate-200 px-8 shadow-sm sticky top-0 z-30">
+          <header className="flex h-16 items-center justify-between bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 px-8 shadow-sm sticky top-0 z-30">
             {/* LEFT */}
             <div className="flex items-center gap-3">
               {/* MOBILE BUTTON */}
               <button
-                className="lg:hidden p-2 rounded-md hover:bg-slate-100 text-[#334155]"
+                className="lg:hidden p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-[#334155] dark:text-slate-300"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
               >
                 <Menu size={20} />

@@ -21,6 +21,7 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import DoctorLayout from "@/components/layout/DoctorLayout";
 import { PermissionProvider } from "@/context/PermissionContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { FollowUpAlertProvider } from "@/context/FollowUpAlertContext";
 import { LabNotificationProvider } from "@/context/LabNotificationContext";
@@ -44,8 +45,7 @@ import PatientProfile from "@/components/Forms/view/patientProfile";
 import PatientDetailView from "@/components/Forms/view/viewpatient";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import AdmissionDetails from "@/components/Forms/view/Admission Details";
-import Profile from "@/components/Forms/view/view profile ";
-import Security from "@/components/Forms/view/Security";
+import SettingsPage from "@/pages/Settings";
 
 // ============================================================
 // MAIN PAGES
@@ -57,6 +57,7 @@ import InpatientDutyRoster from "./pages/InpatientDutyRoster";
 import BedMaster from "./pages/BedMaster";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
+import Authenticate from "./pages/Authenticate";
 import NotFound from "./pages/NotFound";
 import Notifications from "./pages/Notifications";
 import Patients from "./pages/Patients";
@@ -187,7 +188,7 @@ const doctorRoutes = [
   },
   {
     path: "/doctor/profile",
-    element: <Profile />,
+    element: <DoctorProfile />,
   },
   {
     path: "/doctor/notifications",
@@ -212,14 +213,26 @@ const protectedRoutes = [
   // Profile & Security
   // ----------------------------------------------------------
 
+  // ----------------------------------------------------------
+  // Settings (unified hub — profile, security, notifications,
+  // appearance, integrations, billing)
+  // ----------------------------------------------------------
+
+  {
+    path: "/settings",
+    element: <SettingsPage />,
+  },
+
+  // Legacy standalone routes — redirect into the settings hub
+  // so old bookmarks and AI-chat nav links still land correctly.
   {
     path: "/profile",
-    element: <Profile />,
+    element: <Navigate to="/settings" replace />,
   },
 
   {
     path: "/security",
-    element: <Security />,
+    element: <Navigate to="/settings?tab=security" replace />,
   },
 
   // ----------------------------------------------------------
@@ -624,8 +637,8 @@ const App = () => (
       <Sonner />
 
       <BrowserRouter>
-
-        <PermissionProvider>
+        <ThemeProvider>
+          <PermissionProvider>
           <NotificationProvider employeeId={getUser()?.employee_id ?? null}>
           <FollowUpAlertProvider>
 
@@ -645,6 +658,11 @@ const App = () => (
             <Route
               path="/owner-login"
               element={<OwnerLogin />}
+            />
+
+            <Route
+              path="/authenticate"
+              element={<Authenticate />}
             />
 
             {/* ==================================================
@@ -896,6 +914,7 @@ const App = () => (
           </FollowUpAlertProvider>
         </NotificationProvider>
       </PermissionProvider>
+      </ThemeProvider>
 
       </BrowserRouter>
 

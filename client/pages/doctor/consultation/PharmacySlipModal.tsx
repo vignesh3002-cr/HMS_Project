@@ -6,9 +6,11 @@ import {
   ChevronDown,
   Loader2,
   Lock,
+  Plus,
   Printer,
   RotateCcw,
   Save,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -18,23 +20,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { SingleSelectDropdown } from "@/components/ui/single-select-dropdown";
 import { pharmacyApi, type PharmacyMasterItem, type PharmacySlipRecord } from "@/api/pharmacy.api";
 import {
   applySavedSlip,
   buildBrandOptions,
+  buildDraftRowsFromSaved,
+  cloneDraftRow,
+  computeRemovedRowKeys,
   createDraftRow,
   effectiveBaseQuantity,
   effectiveExtraQuantity,
   formatNumber,
   parseDoseText,
   pickDefaultStrength,
+  savedSlipHasRowKeys,
   slipFrequencyDuration,
   slipRoleLabel,
   suggestionFor,
   strengthsOfBrand,
   toDisplayRows,
   toSlipOrderItems,
+  type QuantityExtra,
   type SlipDisplayRow,
   type SlipDraftRow,
   type SlipSourceRow,
@@ -107,6 +115,12 @@ export function PharmacySlipModal({
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [dirty, setDirty] = useState(false);
+  /* Row keys that were on the slip when it opened (or were added since), so a
+     removed ordered row stays removed when the slip is saved again. */
+  const [knownRowKeys, setKnownRowKeys] = useState<string[]>([]);
+  const [masterItems, setMasterItems] = useState<PharmacyMasterItem[]>([]);
+  /* A chemotherapy row whose REMOVE is waiting for confirmation. */
+  const [pendingRemoval, setPendingRemoval] = useState<SlipDraftRow | null>(null);
 
   const readOnly = savedSlip?.slip_status === "ISSUED";
 
@@ -169,21 +183,66 @@ export function PharmacySlipModal({
         ? pharmacyApi.getByOrder(planId, cycleNumber, cycleDay)
         : Promise.resolve({ data: { data: null as PharmacySlipRecord | null } }),
     ])
-      .then(([masterResponse, slipResponse]) => {
+      .then(async ([masterResponse, slipResponse]) => {
         if (cancelled) return;
 
-        const master: PharmacyMasterItem[] = masterResponse.data.data ?? [];
         const saved = slipResponse.data.data ?? null;
+        const savedItems = saved?.pharmacy_slip_item ?? [];
+        let master: PharmacyMasterItem[] = masterResponse.data.data ?? [];
 
-        let nextRows = rowsForLoad.map((row) =>
-          createDraftRow(row, buildBrandOptions(row, master))
+        /* Saved lines can belong to a medicine the current order no longer
+           lists (removed after the slip was saved). Fetch its master rows so
+           its brand / strengths still resolve instead of showing an empty
+           dropdown. */
+        const missingMedicineIds = Array.from(
+          new Set(
+            savedItems
+              .map((item) => item.medicine_id)
+              .filter((id): id is string => Boolean(id))
+              .filter((id) => !master.some((row) => row.medicine_id === id))
+          )
         );
 
-        if (saved?.pharmacy_slip_item?.length) {
-          nextRows = applySavedSlip(nextRows, saved.pharmacy_slip_item);
+        if (missingMedicineIds.length > 0) {
+          const extra = await pharmacyApi.masterItems(missingMedicineIds, []);
+          if (cancelled) return;
+          master = [...master, ...(extra.data.data ?? [])];
         }
 
+        const sourceKeys = rowsForLoad.map((row) => row.key);
+        const savedKeys = savedItems
+          .map((item) => item.source_row_key)
+          .filter((key): key is string => Boolean(key));
+        const removedKeys = Array.isArray(saved?.removed_row_keys)
+          ? saved.removed_row_keys
+          : [];
+
+        let nextRows: SlipDraftRow[];
+
+        if (savedItems.length > 0 && savedSlipHasRowKeys(savedItems)) {
+          /* Rows the doctor added / removed in the popup are rebuilt exactly
+             from the saved lines and the slip's removed-row list. */
+          nextRows = buildDraftRowsFromSaved({
+            sourceRows: rowsForLoad,
+            savedItems,
+            removedKeys,
+            masterItems: master,
+          });
+        } else {
+          nextRows = rowsForLoad.map((row) =>
+            createDraftRow(row, buildBrandOptions(row, master))
+          );
+
+          if (savedItems.length > 0) {
+            nextRows = applySavedSlip(nextRows, savedItems);
+          }
+        }
+
+        setMasterItems(master);
         setRows(nextRows);
+        setKnownRowKeys(
+          Array.from(new Set([...sourceKeys, ...savedKeys, ...removedKeys]))
+        );
         setSavedSlip(saved);
       })
       .catch((requestError: any) => {
@@ -195,7 +254,9 @@ export function PharmacySlipModal({
             "Failed to load the pharmacy slip."
         );
         // Still show the order rows so the doctor can work.
+        setMasterItems([]);
         setRows(rowsForLoad.map((row) => createDraftRow(row, [])));
+        setKnownRowKeys(rowsForLoad.map((row) => row.key));
       })
       .finally(() => {
         if (!cancelled) setLoadingRows(false);
@@ -217,6 +278,9 @@ export function PharmacySlipModal({
     setSaveError("");
     setSaveMessage("");
     setDirty(false);
+    setMasterItems([]);
+    setKnownRowKeys([]);
+    setPendingRemoval(null);
   }, [open]);
 
   const updateRow = useCallback(
@@ -248,6 +312,7 @@ export function PharmacySlipModal({
         pharmacyItemId: best?.pharmacyItemId ?? "",
         quantityOverride: "",
         extraQuantityOverride: "",
+        extraSuppressed: false,
       };
     });
   };
@@ -262,6 +327,7 @@ export function PharmacySlipModal({
         pharmacyItemId: strength?.pharmacyItemId ?? "",
         quantityOverride: "",
         extraQuantityOverride: "",
+        extraSuppressed: false,
       };
     });
   };
@@ -276,8 +342,141 @@ export function PharmacySlipModal({
       pharmacyItemId: "",
       quantityOverride: "",
       extraQuantityOverride: "",
+      extraSuppressed: false,
     }));
   };
+
+  /* ------------------------------------------------------------
+     ADD / REMOVE ROWS
+
+     ADD copies the row directly below it: same drug, form, patient dose,
+     brand, F/D and type; the dosage (from the copied brand's strengths) and
+     the quantity stay editable. REMOVE drops the row from this slip only -
+     the chemotherapy order and the Discharge Medication table are untouched.
+     ------------------------------------------------------------ */
+
+  const addedRowSeq = useRef(0);
+
+  const nextRowKey = () => {
+    addedRowSeq.current += 1;
+    return `ADD:${Date.now().toString(36)}:${addedRowSeq.current}`;
+  };
+
+  const insertAfter = (row: SlipDraftRow, added: SlipDraftRow) => {
+    setRows((current) => {
+      const index = current.findIndex((entry) => entry.key === row.key);
+      const next = [...current];
+      next.splice(index === -1 ? next.length : index + 1, 0, added);
+      return next;
+    });
+    setKnownRowKeys((current) =>
+      current.includes(added.sourceRowKey)
+        ? current
+        : [...current, added.sourceRowKey]
+    );
+    setDirty(true);
+    setSaveMessage("");
+  };
+
+  const addRow = (row: SlipDraftRow) => {
+    if (readOnly || saving) return;
+    insertAfter(row, cloneDraftRow(row, nextRowKey()));
+  };
+
+  /* ADD on the automatic top-up line makes the top-up strength its own row
+     with the same quantity, so the pharmacist can adjust it independently. */
+  const addTopUpRow = (row: SlipDraftRow, extra: QuantityExtra) => {
+    if (readOnly || saving) return;
+
+    const clone = cloneDraftRow(row, nextRowKey());
+    const quantity = effectiveExtraQuantity(row, suggestionFor(row));
+
+    insertAfter(row, {
+      ...clone,
+      strengthLabel: extra.strength.label,
+      selectedDose: formatNumber(extra.strength.value),
+      selectedUnit: extra.strength.unit,
+      pharmacyItemId: extra.strength.pharmacyItemId,
+      quantityOverride: quantity === null ? "" : String(quantity),
+      extraQuantityOverride: "",
+      extraSuppressed: true,
+    });
+  };
+
+  const removeRow = (row: SlipDraftRow) => {
+    if (readOnly || saving) return;
+    setRows((current) => current.filter((entry) => entry.key !== row.key));
+    setDirty(true);
+    setSaveMessage("");
+  };
+
+  /* A chemotherapy row is confirmed first: a slip that quietly loses a
+     primary drug is clinically significant. */
+  const requestRemove = (row: SlipDraftRow) => {
+    if (readOnly || saving) return;
+    if (row.role === "PRIMARY") {
+      setPendingRemoval(row);
+      return;
+    }
+    removeRow(row);
+  };
+
+  /* Removes a row's automatic top-up line; Reset suggestions brings it back. */
+  const suppressExtra = (row: SlipDraftRow) => {
+    if (readOnly || saving) return;
+    updateRow(row.key, () => ({
+      extraSuppressed: true,
+      extraQuantityOverride: "",
+    }));
+  };
+
+  /* Re-adds ordered rows the doctor removed and puts the slip back in the
+     order's sequence, keeping the choices already made and the added copies. */
+  const restoreRows = () => {
+    if (readOnly || saving) return;
+
+    const currentByKey = new Map(rows.map((row) => [row.sourceRowKey, row]));
+    const clonesByOrigin = new Map<string, SlipDraftRow[]>();
+
+    for (const row of rows) {
+      if (!row.isAdded) continue;
+      const list = clonesByOrigin.get(row.originKey) ?? [];
+      list.push(row);
+      clonesByOrigin.set(row.originKey, list);
+    }
+
+    const next: SlipDraftRow[] = [];
+    const seen = new Set<string>();
+
+    for (const source of sourceRowsRef.current) {
+      next.push(
+        currentByKey.get(source.key) ??
+          createDraftRow(source, buildBrandOptions(source, masterItems))
+      );
+      seen.add(source.key);
+      next.push(...(clonesByOrigin.get(source.key) ?? []));
+    }
+
+    /* Rows whose ordered source is no longer on the order stay put. */
+    for (const row of rows) {
+      if (row.isAdded) {
+        if (!seen.has(row.originKey)) next.push(row);
+      } else if (!seen.has(row.sourceRowKey)) {
+        next.push(row);
+      }
+    }
+
+    setRows(next);
+    setKnownRowKeys(sourceRowsRef.current.map((row) => row.key));
+    setDirty(true);
+    setSaveMessage("");
+    setSaveError("");
+  };
+
+  const removedRowKeys = useMemo(
+    () => computeRemovedRowKeys(knownRowKeys, rows),
+    [knownRowKeys, rows]
+  );
 
   const blockers = useMemo(
     () =>
@@ -326,16 +525,22 @@ export function PharmacySlipModal({
 
           return rowWarnings;
         })
-        .filter(Boolean),
+        .filter(Boolean)
+        .filter((warning, index, all) => all.indexOf(warning) === index),
     [rows]
   );
 
   const displayRows = useMemo(
     () =>
-      rows.map((row) => ({
-        row,
-        plan: suggestionFor(row),
-      })),
+      rows.map((row) => {
+        const plan = suggestionFor(row);
+        const showExtra = Boolean(
+          plan.extra &&
+            !row.extraSuppressed &&
+            effectiveExtraQuantity(row, plan) !== null
+        );
+        return { row, plan, showExtra };
+      }),
     [rows]
   );
 
@@ -354,21 +559,21 @@ export function PharmacySlipModal({
 
     return {
       medicines: rows.length,
-      lines: displayRows.length,
+      lines: displayRows.filter((entry) => entry.showExtra).length + rows.length,
       missingBrand,
       missingDose,
       missingQuantity,
     };
-  }, [rows, displayRows.length]);
+  }, [rows, displayRows]);
 
   /* Continuous "No." across the base lines and the top-up lines. */
   const rowNumbers = useMemo(() => {
     const numbers = new Map<string, { base: number; extra?: number }>();
     let no = 0;
 
-    for (const { row, plan } of displayRows) {
+    for (const { row, showExtra } of displayRows) {
       const base = ++no;
-      const extra = plan.extra ? ++no : undefined;
+      const extra = showExtra ? ++no : undefined;
       numbers.set(row.key, { base, extra });
     }
 
@@ -399,6 +604,7 @@ export function PharmacySlipModal({
         cycle_day: cycleDay,
         encounter_no: encounterNo ?? null,
         appointment_id: appointmentId ?? null,
+        removed_row_keys: removedRowKeys,
         items: toSlipOrderItems(rows),
       });
 
@@ -422,6 +628,7 @@ export function PharmacySlipModal({
       ...row,
       quantityOverride: "",
       extraQuantityOverride: "",
+      extraSuppressed: false,
     })));
     setDirty(true);
     setSaveMessage("");
@@ -499,8 +706,38 @@ export function PharmacySlipModal({
     printWindow.document.close();
   };
 
+  const renderRowActions = (row: SlipDraftRow, extra?: QuantityExtra) => (
+    <div className="flex flex-wrap items-center gap-1">
+      <button
+        type="button"
+        onClick={() => (extra ? addTopUpRow(row, extra) : addRow(row))}
+        disabled={readOnly || saving}
+        aria-label={`Add a row for ${row.drugName || "this medicine"}`}
+        title={
+          extra
+            ? "Add this top-up as its own row"
+            : "Add a copy of this row below it"
+        }
+        className="inline-flex items-center gap-0.5 rounded-md border border-[#D8DEE6] bg-white px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide text-[#00488D] transition-colors hover:border-[#00488D] hover:bg-[#F2F6FC] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Plus className="h-3 w-3" /> Add
+      </button>
+      <button
+        type="button"
+        onClick={() => (extra ? suppressExtra(row) : requestRemove(row))}
+        disabled={readOnly || saving}
+        aria-label={`Remove ${row.drugName || "this row"}${extra ? " top-up" : ""}`}
+        title={extra ? "Remove this top-up line" : "Remove this row from the slip"}
+        className="inline-flex items-center gap-0.5 rounded-md border border-[#F1C4C4] bg-white px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide text-[#B42318] transition-colors hover:border-[#B42318] hover:bg-[#FDF3F3] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Trash2 className="h-3 w-3" /> Remove
+      </button>
+    </div>
+  );
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
+    <>
+      <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
       <DialogContent className="w-[96vw] max-w-[1180px] gap-0 overflow-hidden p-0 font-[Manrope,sans-serif]">
         {/* Header */}
         <DialogHeader className="space-y-0 border-b border-[#E5E7EB] bg-white px-6 py-4">
@@ -607,22 +844,33 @@ export function PharmacySlipModal({
                 Save the Chemotherapy Order for this cycle day first, then open the
                 pharmacy slip again. Discharge medicines you add below appear here too.
               </p>
+              {!readOnly && sourceRows.length > 0 && knownRowKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={restoreRows}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-[#D8DEE6] bg-white px-3 py-2 text-[11px] font-semibold text-[#00488D] transition-colors hover:border-[#00488D] hover:bg-[#F2F6FC]"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Restore all rows
+                </button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
-              <table className="w-full min-w-[1040px] border-collapse text-left">
+              <table className="w-full min-w-[1160px] border-collapse text-left">
                 <thead className="sticky top-0 z-10 bg-white/95 backdrop-blur">
                   <tr className="border-b border-[#E5E7EB]">
                     {[
                       { label: "No.", className: "w-12" },
-                      { label: "Drug Name", className: "w-[16%]" },
-                      { label: "Drug Form", className: "w-[9%]" },
-                      { label: "Patient Dosage", className: "w-[10%]" },
-                      { label: "Brand Name", className: "w-[16%]" },
-                      { label: "Dosage", className: "w-[11%]" },
-                      { label: "Quantity", className: "w-[9%]" },
-                      { label: "F/D", className: "w-[8%]" },
-                      { label: "Type", className: "w-[9%]" },
+                      { label: "Drug Name", className: "w-[15%]" },
+                      { label: "Drug Form", className: "w-[8%]" },
+                      { label: "Patient Dosage", className: "w-[9%]" },
+                      { label: "Brand Name", className: "w-[14%]" },
+                      { label: "Dosage", className: "w-[10%]" },
+                      { label: "Quantity", className: "w-[8%]" },
+                      { label: "F/D", className: "w-[7%]" },
+                      { label: "Type", className: "w-[8%]" },
+                      { label: "Action", className: "w-[13%]" },
                     ].map((column) => (
                       <th
                         key={column.label}
@@ -635,7 +883,7 @@ export function PharmacySlipModal({
                 </thead>
 
                 <tbody className="text-[11px] text-[#374151]">
-                  {displayRows.map(({ row, plan }) => {
+                  {displayRows.map(({ row, plan, showExtra }) => {
                     const baseQuantity = effectiveBaseQuantity(row, plan);
                     const extraQuantity = effectiveExtraQuantity(row, plan);
                     const baseValue =
@@ -666,6 +914,11 @@ export function PharmacySlipModal({
                             <p className="font-semibold text-[#191C1E]">
                               {row.drugName || "—"}
                             </p>
+                            {row.isAdded && (
+                              <span className="mt-1 inline-flex rounded-full bg-[#EEF4FF] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#00488D] ring-1 ring-[#C7D8F5]">
+                                Added
+                              </span>
+                            )}
                             {row.route && (
                               <p className="mt-0.5 text-[10px] text-[#9AA4B2]">
                                 {row.route}
@@ -696,7 +949,12 @@ export function PharmacySlipModal({
                               placeholder={
                                 row.medicineId ? "Select brand" : "Not in master"
                               }
-                              disabled={readOnly || !row.medicineId || row.brandOptions.length === 0}
+                              disabled={
+                                readOnly ||
+                                row.isAdded ||
+                                !row.medicineId ||
+                                row.brandOptions.length === 0
+                              }
                               className="h-8 min-w-[130px] rounded-md px-2 text-[11px]"
                             />
                           </td>
@@ -810,9 +1068,13 @@ export function PharmacySlipModal({
                               {slipRoleLabel(row.role)}
                             </span>
                           </td>
+
+                          <td className="px-3 py-2.5 align-top">
+                            {renderRowActions(row)}
+                          </td>
                         </tr>
 
-                        {plan.extra && extraQuantity !== null && (
+                        {showExtra && plan.extra && extraQuantity !== null && (
                           <tr className="border-b border-[#F0F2F5] bg-[#FBFCFE] transition-colors hover:bg-[#F8FAFC]">
                             <td className="px-3 py-2.5 align-top text-[11px] font-semibold text-[#6B7280]">
                               {numbers?.extra ?? ""}
@@ -898,6 +1160,10 @@ export function PharmacySlipModal({
                                 {slipRoleLabel(row.role)} · top-up
                               </span>
                             </td>
+
+                            <td className="px-3 py-2.5 align-top">
+                              {renderRowActions(row, plan.extra)}
+                            </td>
                           </tr>
                         )}
                       </Fragment>
@@ -938,6 +1204,18 @@ export function PharmacySlipModal({
           </p>
 
           <div className="flex items-center gap-2">
+            {!readOnly && (removedRowKeys.length > 0 || rows.some((row) => row.isAdded)) && (
+              <button
+                type="button"
+                onClick={restoreRows}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#D8DEE6] bg-white px-3 py-2 text-[11px] font-semibold text-[#00488D] transition-colors hover:border-[#00488D] hover:bg-[#F2F6FC] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Restore rows
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleReset}
@@ -985,6 +1263,25 @@ export function PharmacySlipModal({
         </div>
       </DialogContent>
     </Dialog>
+
+      <ConfirmationDialog
+        open={pendingRemoval !== null}
+        type="danger"
+        title="Remove chemotherapy row?"
+        description={
+          pendingRemoval
+            ? `${pendingRemoval.drugName || "This chemotherapy medicine"} will be removed from this pharmacy slip. The chemotherapy order itself is not changed.`
+            : ""
+        }
+        confirmText="Remove row"
+        cancelText="Keep row"
+        onConfirm={() => {
+          if (pendingRemoval) removeRow(pendingRemoval);
+          setPendingRemoval(null);
+        }}
+        onCancel={() => setPendingRemoval(null)}
+      />
+    </>
   );
 }
 

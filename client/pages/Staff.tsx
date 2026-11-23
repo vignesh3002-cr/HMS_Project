@@ -31,7 +31,7 @@ interface StaffMember {
   dept: string;
   deptClass: string;
   branch: string[];
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "deactivated";
 }
 
 interface MedicalStaffRow {
@@ -44,7 +44,7 @@ interface MedicalStaffRow {
   deptClass: string;
   branch: string;
   roleType: string;
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "deactivated";
   photo: string;
 }
 
@@ -61,7 +61,7 @@ interface AdministrativeStaffRow {
   branch: string;
   login: string;
   loginDot: "green" | "orange";
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "deactivated";
   photo: string;
 }
 
@@ -75,7 +75,7 @@ interface SupportStaffRow {
   deptClass: "blue" | "purple" | "yellow" | "green" | "red";
   branch: string;
   roleType: string;
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "deactivated";
   photo: string;
 }
 
@@ -168,7 +168,13 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
+  const isDeactivated = Boolean(emp.deleted_at);
   const isActive = emp.emp_status === true || emp.user_table?.user_status === 0;
+  const staffStatus: "active" | "inactive" | "deactivated" = isDeactivated
+    ? "deactivated"
+    : isActive
+      ? "active"
+      : "inactive";
   const branchName = formatBranch(emp.branch);
   const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
 
@@ -183,7 +189,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       deptClass: "bg-[#D6E3FF] text-[#475C7F]",
       branch: branchName,
       roleType,
-      status: isActive ? "active" : "inactive",
+      status: staffStatus,
       photo: emp.employee_photo_URL || "",
     } as MedicalStaffRow;
   } else if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") {
@@ -200,7 +206,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       branch: branchName,
       login: isActive ? "Online" : "Offline",
       loginDot: isActive ? "green" : "orange",
-      status: isActive ? "active" : "inactive",
+      status: staffStatus,
       photo: emp.employee_photo_URL || "",
     } as AdministrativeStaffRow;
   } else if (roleType === "STAFF") {
@@ -220,7 +226,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       deptClass: "blue",
       branch: branchName,
       roleType,
-      status: isActive ? "active" : "inactive",
+      status: staffStatus,
       photo: emp.employee_photo_URL || "",
     } as SupportStaffRow;
   }
@@ -234,7 +240,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     deptClass: "bg-[#D6E3FF] text-[#475C7F]",
     branch: branchName,
     roleType,
-    status: isActive ? "active" : "inactive",
+    status: staffStatus,
     photo: emp.employee_photo_URL || "",
   } as MedicalStaffRow;
 }
@@ -572,6 +578,8 @@ export default function Staff() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
+    setAppliedFilter,
+    removeAppliedFilter,
   } = useFilterPanel(staffFilterFields);
 
   // ---- SEARCH & FILTER ----
@@ -588,10 +596,15 @@ export default function Staff() {
       );
     }
 
-    result = filterDataByValues(result, appliedValues, staffFilterFields);
+    if (showDeactivated) {
+      const { status, ...otherFilters } = appliedValues;
+      result = filterDataByValues(result, otherFilters, staffFilterFields);
+    } else {
+      result = filterDataByValues(result, appliedValues, staffFilterFields);
+    }
 
     return result;
-  }, [searchQuery, appliedValues, tabRows]);
+  }, [searchQuery, appliedValues, tabRows, staffFilterFields, showDeactivated]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -860,6 +873,7 @@ export default function Staff() {
                   title="Filters"
                   fields={staffFilterFields}
                   values={filterValues}
+                  appliedValues={showDeactivated ? (({ status, ...rest }) => rest)(appliedValues) : appliedValues}
                   onChange={handleFilterChange}
                   onApply={handleApplyFilter}
                   onClear={handleClearFilter}

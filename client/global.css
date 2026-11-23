@@ -8,29 +8,28 @@
 
 @layer utilities {
    .back-button {
-    @apply text-lg font-bold text-[#0F172A] leading-tight;
+    @apply text-lg font-bold text-[#0F172A] dark:text-slate-100 leading-tight;
   }
   .hms-heading {
-    @apply text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px];
+    @apply text-[#191C1E] dark:text-slate-100 font-extrabold text-2xl leading-8 tracking-[-0.6px];
   }
    .form-heading {
-    @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
-    @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
+    @apply text-[#111827] dark:text-slate-100 text-2xl font-bold leading-tight tracking-[-0.03em];
    }
   .hms-subheading {
-   @apply text-[#424752] text-xs font-medium leading-4;
+   @apply text-[#424752] dark:text-slate-400 text-xs font-medium leading-4;
  }
   .hms-table-header {
-    @apply text-[12px] font-bold text-[#01091a] tracking-[0.9px] capitalize;
+    @apply text-[12px] font-bold text-[#01091a] dark:text-slate-300 tracking-[0.9px] capitalize;
   }
   .hms-avatar-text {
   @apply text-[12px] font-semibold;
 }
   .hms-name-text {
-  @apply text-[#111827] font-semibold text-sm leading-[1.2];
+  @apply text-[#111827] dark:text-slate-100 font-semibold text-sm leading-[1.2];
 }
   .hms-id-text {
-  @apply text-[#8C8D8F] font-semibold text-[10px] uppercase;
+  @apply text-[#8C8D8F] dark:text-slate-400 font-semibold text-[10px] uppercase;
 }
   .hms-department-text {
   @apply text-[11px] font-semibold; /* 10 */
@@ -39,7 +38,7 @@
   @apply font-medium text-[13px]; /* 11 */
 }
 .hms-columnHeading-style {
-  @apply bg-slate-100;
+  @apply bg-slate-100 dark:bg-slate-800 dark:text-slate-200;
 }
   .hide-scrollbar {
     /* Hide scrollbar for IE, Edge and Firefox */

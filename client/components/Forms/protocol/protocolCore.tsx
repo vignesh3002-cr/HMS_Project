@@ -188,9 +188,10 @@ export const PROTOCOL_OTHERS_INPUT_CLS =
 
 export const PROTOCOL_DURATION_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
 
-export const CLEAN_DOSE_UNITS = ["mg", "g", "mcg", "u", "kg", "mg/m²", "mg/kg"];
+export const CLEAN_CLINICAL_UNITS = ["mg", "g", "mcg", "mL", "u", "kg"];
+export const CLEAN_DOSE_UNITS = CLEAN_CLINICAL_UNITS;
 export const CLEAN_VOLUME_UNITS = ["mL", "L", "CC"];
-export const CLEAN_DISCHARGE_UNITS = ["mg", "g", "mcg", "Tab", "Cap", "mL", "Puff", "Drops", "Patch"];
+export const CLEAN_DISCHARGE_UNITS = CLEAN_CLINICAL_UNITS;
 
 export const DOSE_CALC_OPTIONS = [
   "BSA (mg/m²)",
@@ -551,6 +552,7 @@ export interface ParsedProtocol {
   standardCycles: number;
   cycleIntervalDays: number;
   notes: string;
+  reviewDate?: string | null;
   days: ProtocolDay[];
   loadedItemIds: string[];
   itemsData?: ParsedProtocolItems;
@@ -609,6 +611,7 @@ export const parseProtocolPayload = (p: any): ParsedProtocol => {
     standardCycles: p.standard_cycles ?? 6,
     cycleIntervalDays: p.cycle_interval_days ?? p.no_of_days ?? 21,
     notes: p.notes ?? (p as any).guideline_source ?? "",
+    reviewDate: p.review_date ? new Date(p.review_date).toISOString().split("T")[0] : null,
     days: loadedDays,
     loadedItemIds,
   };

@@ -379,17 +379,21 @@ const AppointmentPage: React.FC = () => {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
+    removeAppliedFilter,
   } = useFilterPanel();
 
-  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows: appointments });
+  const { appointmentFilterFields } = useAppointmentFilters({
+    appointmentRows: appointments,
+    filterValues,
+  });
 
   // Search & filter
   const searchableFields: (keyof Appointment)[] = [
     "id",
+    "tokenId",
     "patient",
     "patientId",
     "branch",
-    "date",
     "doctor",
     "doctorId",
     "visitType",
@@ -410,12 +414,13 @@ const AppointmentPage: React.FC = () => {
     }
 
     result = filterDataByValues(
-      result as unknown as Record<string, string | number>[],
+      result as unknown as Record<string, any>[],
       appliedValues,
+      appointmentFilterFields,
     ) as unknown as Appointment[];
 
     return result;
-  }, [searchQuery, appliedValues, appointments]);
+  }, [searchQuery, appliedValues, appointments, appointmentFilterFields]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -670,6 +675,7 @@ const AppointmentPage: React.FC = () => {
                       title="Filters"
                       fields={appointmentFilterFields}
                       values={filterValues}
+                      appliedValues={appliedValues}
                       onChange={handleFilterChange}
                       onApply={() => {
                         handleApplyFilter();

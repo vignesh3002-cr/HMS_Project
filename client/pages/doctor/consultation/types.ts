@@ -1,3 +1,5 @@
+import type { StageIhcDraft, StagingDraftRecord } from "./stagingDraft";
+
 export interface ConsultationState {
   patientId?: string;
   appointmentId?: string;
@@ -71,6 +73,12 @@ export type FormData = {
   tStage: string[];
   nStage: string[];
   mStage: string[];
+  /* TNM staging module: one draft stage per cancer type + context, saved on
+     Save & Next. The legacy T/N/M arrays above are kept only so older drafts
+     and staging details still load. */
+  stages: StagingDraftRecord[];
+  /* p16 / p40 typed beside the staging card; saved on the IHC report. */
+  stageIhc: StageIhcDraft;
   icdCode: string;
   notes: string;
   /* Investigation Results: the visit's Report Date (DD-MM-YYYY; empty

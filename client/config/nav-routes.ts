@@ -51,9 +51,13 @@ export const NAV_ROUTES: Record<string, string> = {
     notifications: "/notifications",
     notification: "/notifications",
 
-    // Profile
-    profile: "/profile",
-    security: "/security",
+    // Profile & Settings
+    profile: "/settings",
+    security: "/settings?tab=security",
+    settings: "/settings",
+    "app settings": "/settings",
+    appearance: "/settings?tab=appearance",
+    billing: "/settings?tab=billing",
 
     // Admin
     admin: "/admin",

@@ -4,6 +4,25 @@ import { saveToken, saveUser } from "../utils/token";
 import { toast } from "@/hooks/use-toast";
 import api from "../api/axios";
 import ElasticPulse from "@/components/ui/Elasticpulse";
+import { usePermission } from "@/context/PermissionContext";
+import { Logo } from "@/components/hms/Logo";
+import {
+  Smartphone,
+  Mail,
+  MessageCircle,
+  Phone,
+  KeyRound,
+  ChevronRight,
+  X,
+  ShieldCheck,
+  RefreshCw,
+} from "lucide-react";
+import {
+  getAvailableLoginMethods,
+  resendLoginOtp,
+  verifyCustomLoginFactor,
+  type LoginMethodOption,
+} from "@/api/twoFactor.api";
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -84,37 +103,54 @@ function formatTime(seconds: number): string {
 
 export default function Authenticate() {
   const navigate = useNavigate();
+  const { refetch: refetchPermissions } = usePermission();
 
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [errors, setErrors] = useState<boolean[]>(Array(OTP_LENGTH).fill(false));
   const [timeLeft, setTimeLeft] = useState(TIMER_START);
   const [isExpired, setIsExpired] = useState(false);
-  const [isSendingOtp, setIsSendingOtp] = useState(true);
-  const [otpSent, setOtpSent] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(() => sessionStorage.getItem("otpSent") !== "true");
+  const [otpSent, setOtpSent] = useState(() => sessionStorage.getItem("otpSent") === "true");
   const [isLoading, setIsLoading] = useState(false);
+
+  // Multi-Factor & Alternative Verification States
+  const [authMode, setAuthMode] = useState<"EMAIL_OTP" | "TOTP" | "RECOVERY">("EMAIL_OTP");
+  const [activeChannelLabel, setActiveChannelLabel] = useState<string>("your registered email");
+  // Channel explicitly chosen in the "Choose verification method" modal.
+  // null = the default delivery used by /auth/send-otp (email).
+  const [activeChannel, setActiveChannel] = useState<string | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState<string>("");
+  const [showMethodModal, setShowMethodModal] = useState<boolean>(false);
+  const [availableMethods, setAvailableMethods] = useState<LoginMethodOption[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState<boolean>(false);
 
   const inputRefs = Array.from({ length: OTP_LENGTH }, () =>
     useRef<HTMLInputElement>(null)
   );
 
-  // Send OTP on mount
+  // Send OTP on mount only if not already sent during login
   useEffect(() => {
-    const sendOtp = async () => {
+    const checkOrSendOtp = async () => {
       const username = sessionStorage.getItem("pendingUsername");
-      const rememberMe =
-        sessionStorage.getItem("rememberMe") === "true";
       if (!username) {
         toast({
-          title: "Error",
-          description: "No username found. Please login again.",
+          title: "Session Expired",
+          description: "No pending session found. Please login again.",
           variant: "destructive",
         });
         navigate("/");
         return;
       }
 
+      if (sessionStorage.getItem("otpSent") === "true") {
+        setOtpSent(true);
+        setIsSendingOtp(false);
+        return;
+      }
+
       try {
         await api.post("/auth/send-otp", { username });
+        sessionStorage.setItem("otpSent", "true");
         setOtpSent(true);
         toast({ title: "OTP Sent", description: "Check your email for the 6-digit code" });
       } catch (error: any) {
@@ -128,7 +164,7 @@ export default function Authenticate() {
       }
     };
 
-    sendOtp();
+    checkOrSendOtp();
   }, [navigate]);
 
   // Countdown timer
@@ -198,55 +234,147 @@ export default function Authenticate() {
   };
 
   const handleVerify = async () => {
-    const code = digits.join("");
-    
-    if (code.length < OTP_LENGTH) {
-      const nextErrors = digits.map((d) => !d);
-      setErrors(nextErrors);
-      const firstEmpty = digits.findIndex((d) => !d);
-      focusBox(firstEmpty);
-      setTimeout(() => setErrors(Array(OTP_LENGTH).fill(false)), 900);
-      return;
-    }
-
     const username = sessionStorage.getItem("pendingUsername");
-    const rememberMe =
-      sessionStorage.getItem("rememberMe") === "true";
+    const rememberMe = sessionStorage.getItem("rememberMe") === "true";
 
-
-   console.log("OTP entered:", code);
-   console.log("Username:", username);
-   console.log("Remember Me:", rememberMe);
     if (!username) {
       toast({ title: "Error", description: "Session expired. Please login again.", variant: "destructive" });
       navigate("/");
       return;
+    }
+
+    let code = digits.join("");
+    if (authMode === "RECOVERY") {
+      code = recoveryCode.trim();
+      if (!code) {
+        toast({ title: "Code required", description: "Please enter your emergency recovery code.", variant: "destructive" });
+        return;
+      }
+    } else {
+      if (code.length < OTP_LENGTH) {
+        const nextErrors = digits.map((d) => !d);
+        setErrors(nextErrors);
+        const firstEmpty = digits.findIndex((d) => !d);
+        focusBox(firstEmpty);
+        setTimeout(() => setErrors(Array(OTP_LENGTH).fill(false)), 900);
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
-      const res = await api.post("/auth/verify-otp", { username, code, rememberMe });
-      
-      if (res.data.success) { 
-        const { token, user } = res.data.data;
+      let authPayload: any = null;
+
+      if (authMode === "TOTP" || authMode === "RECOVERY") {
+        authPayload = await verifyCustomLoginFactor(username, code, authMode);
+      } else {
+        const res = await api.post("/auth/verify-otp", { username, code, rememberMe });
+        if (!res.data.success) throw new Error(res.data.message);
+        authPayload = res.data.data;
+      }
+
+      if (authPayload) {
+        const { token, user } = authPayload;
+
+        try {
+          localStorage.removeItem("permissions");
+          localStorage.removeItem("userPermissions");
+          sessionStorage.removeItem("permissions");
+          sessionStorage.removeItem("userPermissions");
+        } catch {}
+
         saveToken(token, rememberMe);
         saveUser(user, rememberMe);
         sessionStorage.removeItem("pendingUsername");
-        navigate("/dashboard");
-      } else {
-        throw new Error(res.data.message);
+        sessionStorage.removeItem("otpSent");
+        try {
+          sessionStorage.setItem("justLoggedIn", "true");
+        } catch {}
+
+        try {
+          await refetchPermissions();
+        } catch {}
+
+        const roleType = String(user?.role_type ?? "").trim().toUpperCase();
+        if (roleType === "LAB_TECHNICIAN") {
+          navigate("/lab/dashboard", { replace: true, state: { fromLogin: true } });
+        } else {
+          navigate("/dashboard", { replace: true, state: { fromLogin: true } });
+        }
       }
     } catch (error: any) {
-      const msg = error.response?.data?.message || "Invalid OTP";
+      const msg = error.response?.data?.message || error.message || "Verification failed";
       toast({ title: "Verification Failed", description: msg, variant: "destructive" });
       setErrors(Array(OTP_LENGTH).fill(true));
       setTimeout(() => setErrors(Array(OTP_LENGTH).fill(false)), 900);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
-  const handleResend = async () => {
+  const handleOpenTryAnotherWay = async () => {
+    const username = sessionStorage.getItem("pendingUsername");
+    if (!username) return;
+
+    setShowMethodModal(true);
+    setLoadingMethods(true);
+    try {
+      const data = await getAvailableLoginMethods(username);
+      setAvailableMethods(data.methods || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to load alternative verification methods", variant: "destructive" });
+    } finally {
+      setLoadingMethods(false);
+    }
+  };
+
+  const handleSelectMethod = async (method: LoginMethodOption) => {
+    const username = sessionStorage.getItem("pendingUsername");
+    if (!username) return;
+
+    setShowMethodModal(false);
+
+    if (method.id === "TOTP") {
+      setAuthMode("TOTP");
+      setDigits(Array(OTP_LENGTH).fill(""));
+      setErrors(Array(OTP_LENGTH).fill(false));
+      setActiveChannelLabel("your Authenticator App");
+      toast({ title: "Authenticator App", description: "Enter the 6-digit code from your app" });
+      setTimeout(() => inputRefs[0].current?.focus(), 50);
+      return;
+    }
+
+    if (method.id === "RECOVERY") {
+      setAuthMode("RECOVERY");
+      setRecoveryCode("");
+      setActiveChannelLabel("your emergency recovery code");
+      toast({ title: "Recovery Code", description: "Enter one of your 8-character backup codes" });
+      return;
+    }
+
+    // OTP channels: PRIMARY_EMAIL, ALT_EMAIL, PRIMARY_MOBILE, ALT_MOBILE, SMS, WHATSAPP
+    setAuthMode("EMAIL_OTP");
+    setActiveChannel(method.id);
+    setIsSendingOtp(true);
+    try {
+      const res = await resendLoginOtp(username, method.id as any);
+      setDigits(Array(OTP_LENGTH).fill(""));
+      setErrors(Array(OTP_LENGTH).fill(false));
+      setTimeLeft(TIMER_START);
+      setIsExpired(false);
+      setOtpSent(true);
+      setActiveChannelLabel(res.destination || method.label);
+      toast({ title: "Code Dispatched", description: res.message });
+    } catch (err: any) {
+      toast({ title: "Failed to send code", description: err.response?.data?.message || err.message, variant: "destructive" });
+    } finally {
+      setIsSendingOtp(false);
+      setTimeout(() => inputRefs[0].current?.focus(), 50);
+    }
+  };
+
+  const handleResend = async (channelOverride?: string) => {
     const username = sessionStorage.getItem("pendingUsername");
     if (!username) {
       toast({ title: "Error", description: "Session expired. Please login again.", variant: "destructive" });
@@ -254,15 +382,25 @@ export default function Authenticate() {
       return;
     }
 
+    const channel = channelOverride ?? activeChannel;
+
     setIsSendingOtp(true);
     try {
-      await api.post("/auth/send-otp", { username });
+      if (channel) {
+        // Resend on the channel the user picked, so choosing "Primary Mobile"
+        // never silently falls back to email.
+        const res = await resendLoginOtp(username, channel as any);
+        setActiveChannelLabel(res.destination || activeChannelLabel);
+        toast({ title: "Code Dispatched", description: res.message });
+      } else {
+        await api.post("/auth/send-otp", { username });
+        toast({ title: "OTP Resent", description: "Check your email for the new code" });
+      }
       setDigits(Array(OTP_LENGTH).fill(""));
       setErrors(Array(OTP_LENGTH).fill(false));
       setTimeLeft(TIMER_START);
       setIsExpired(false);
       setOtpSent(true);
-      toast({ title: "OTP Resent", description: "Check your email for the new code" });
     } catch (error: any) {
       toast({ title: "Failed to Resend", description: error.response?.data?.message || "Try again", variant: "destructive" });
     } finally {
@@ -279,92 +417,149 @@ export default function Authenticate() {
         <div className="bg-white flex flex-col justify-center w-full md:w-[468px] flex-shrink-0 p-8 md:p-10 relative">
 
           {/* Logo */}
-          <span className="absolute top-7 left-10 text-[20px] font-extrabold text-clinical-blue tracking-[-0.5px]">
-            HMS
-          </span>
+          <div className="mb-6 -ml-2">
+            <Logo className="h-16 sm:h-[72px] w-auto max-w-[320px]" iconPosition="left" />
+          </div>
 
           {/* Heading */}
           <div className="mb-8">
             <h1 className="text-[28px] leading-[1.15] tracking-[-0.5px] font-extrabold text-clinical-blue mb-2">
-              Two-Step Verification
+              {authMode === "RECOVERY"
+                ? "Account Recovery"
+                : authMode === "TOTP"
+                ? "Authenticator App"
+                : "Two-Step Verification"}
             </h1>
-            <p className="text-sm font-medium leading-relaxed text-clinical-body max-w-[300px]">
-              Please sign in to your clinical environment. We've sent a 6-digit
-              code to your registered device.
+            <p className="text-sm font-medium leading-relaxed text-clinical-body max-w-[320px]">
+              {authMode === "RECOVERY"
+                ? "Enter one of your 8-character emergency backup recovery codes."
+                : authMode === "TOTP"
+                ? "Enter the 6-digit code from Google Authenticator, Microsoft Authenticator, or Bitwarden."
+                : `Please enter the 6-digit code sent to ${activeChannelLabel}.`}
             </p>
           </div>
 
-          {/* OTP */}
+          {/* OTP / Recovery Input */}
           {isSendingOtp ? (
             <div className="flex flex-col items-center justify-center py-8">
               <ElasticPulse size={28} color="#00488D" />
-              <p className="mt-3 text-sm font-medium text-clinical-body">Sending code to your email...</p>
+              <p className="mt-3 text-sm font-medium text-clinical-body">
+                Sending verification code...
+              </p>
             </div>
           ) : (
             <>
-              <OtpInput
-                values={digits}
-                hasError={errors}
-                inputRefs={inputRefs}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-              />
+              {authMode === "RECOVERY" ? (
+                <div className="mb-5">
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+                    placeholder="XXXX-XXXX"
+                    autoFocus
+                    className="w-full h-14 rounded-[6px] text-center text-xl font-bold font-mono tracking-widest text-[#00488D] bg-[#EEF4FC] border-[1.5px] border-[#B5D4F4] focus:outline-none focus:border-[#00488D] transition-all"
+                  />
+                  <p className="mt-2 text-center text-xs text-clinical-body">
+                    Single-use emergency recovery code
+                  </p>
+                </div>
+              ) : (
+                <OtpInput
+                  values={digits}
+                  hasError={errors}
+                  inputRefs={inputRefs}
+                  onChange={handleChange}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                />
+              )}
 
-              {/* Timer */}
-              <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-[#9DA3AE] mb-6">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#B5D4F4] inline-block" />
-                {isExpired ? (
-                  <span className="text-[#e24b4a] font-semibold">Code expired</span>
-                ) : (
-                  <>
-                    Code expires in{" "}
-                    <strong className="text-clinical-blue">{formatTime(timeLeft)}</strong>
-                  </>
-                )}
-              </div>
+              {/* Timer (only for time-expiring OTPs) */}
+              {authMode === "EMAIL_OTP" && (
+                <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-[#9DA3AE] mb-6">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#B5D4F4] inline-block" />
+                  {isExpired ? (
+                    <span className="text-[#e24b4a] font-semibold">Code expired</span>
+                  ) : (
+                    <>
+                      Code expires in{" "}
+                      <strong className="text-clinical-blue">{formatTime(timeLeft)}</strong>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Verify button */}
               <div className="pt-1 mb-4">
-<button
-  type="button"
-  onClick={handleVerify}
-  disabled={isLoading || isExpired}
-  className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
->
-  {isLoading ? (
-    <div className="flex w-full justify-center">
-      <ElasticPulse size={20} color="white" />
-    </div>
-  ) : (
-    <>
-      <span className="text-base font-bold leading-5 text-white">
-        Verify Access
-      </span>
-      <IconArrowRight />
-    </>
-  )}
-</button>
-              </div>
-
-              {/* Resend */}
-              <div className="text-center mb-3">
                 <button
                   type="button"
-                  onClick={handleResend}
-                  className="text-xs font-bold text-clinical-blue hover:underline"
+                  onClick={handleVerify}
+                  disabled={isLoading || (authMode === "EMAIL_OTP" && isExpired)}
+                  className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Resend Code
+                  {isLoading ? (
+                    <div className="flex w-full justify-center">
+                      <ElasticPulse size={20} color="white" />
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-base font-bold leading-5 text-white">
+                        Verify Access
+                      </span>
+                      <IconArrowRight />
+                    </>
+                  )}
                 </button>
               </div>
 
-              {/* Alt method */}
+              {/* Action row: Resend on LEFT, Try another way on RIGHT */}
+              <div className="flex items-center justify-between mb-4 px-1">
+                {authMode === "EMAIL_OTP" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleResend()}
+                    disabled={isLoading || isSendingOtp}
+                    className="text-xs font-bold text-clinical-blue hover:underline disabled:opacity-50"
+                  >
+                    {isSendingOtp ? "Sending..." : "Resend Code"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode("EMAIL_OTP");
+                      setActiveChannel("PRIMARY_EMAIL");
+                      handleResend("PRIMARY_EMAIL");
+                    }}
+                    className="text-xs font-bold text-clinical-blue hover:underline"
+                  >
+                    Send Email Code
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleOpenTryAnotherWay}
+                  className="text-xs font-semibold text-clinical-body hover:text-clinical-blue transition-colors flex items-center gap-1"
+                >
+                  <span>Try another way</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Back to login */}
               <button
                 type="button"
+                onClick={() => {
+                  sessionStorage.removeItem("pendingUsername");
+                  sessionStorage.removeItem("otpSent");
+                  navigate("/");
+                }}
                 className="flex items-center justify-center gap-2 text-xs font-medium text-clinical-body hover:text-clinical-label transition-colors w-full"
               >
                 <IconDevice />
-                Use a different method
+                Back to login
               </button>
             </>
           )}
@@ -414,6 +609,105 @@ export default function Authenticate() {
         </div>
 
       </div>
+
+      {/* ── Try Another Way Modal ── */}
+      {showMethodModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => setShowMethodModal(false)}
+          />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-[#00488D]">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Choose verification method</h3>
+                  <p className="text-[11px] text-gray-500">Select an alternative way to prove your identity</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMethodModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-2.5 max-h-[420px] overflow-y-auto">
+              {loadingMethods ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <ElasticPulse size={24} color="#00488D" />
+                  <p className="mt-3 text-xs text-gray-500">Checking configured channels...</p>
+                </div>
+              ) : availableMethods.length === 0 ? (
+                <div className="p-4 rounded-xl border border-dashed border-gray-200 text-center">
+                  <p className="text-xs text-gray-500">No other methods configured yet.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Configure 2FA, alternate email, or mobile in Settings &gt; Security.</p>
+                </div>
+              ) : (
+                availableMethods.map((m) => {
+                  let IconComp = Mail;
+                  let iconBg = "bg-blue-50 text-blue-600";
+                  if (m.id === "TOTP") {
+                    IconComp = Smartphone;
+                    iconBg = "bg-indigo-50 text-indigo-600";
+                  } else if (m.id === "WHATSAPP") {
+                    IconComp = MessageCircle;
+                    iconBg = "bg-emerald-50 text-emerald-600";
+                  } else if (m.id === "PRIMARY_MOBILE") {
+                    IconComp = Phone;
+                    iconBg = "bg-sky-50 text-sky-600";
+                  } else if (m.id === "ALT_MOBILE") {
+                    IconComp = Smartphone;
+                    iconBg = "bg-violet-50 text-violet-600";
+                  } else if (m.id === "SMS") {
+                    IconComp = Phone;
+                    iconBg = "bg-sky-50 text-sky-600";
+                  } else if (m.id === "RECOVERY") {
+                    IconComp = KeyRound;
+                    iconBg = "bg-amber-50 text-amber-600";
+                  }
+
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => handleSelectMethod(m)}
+                      className="w-full flex items-center justify-between p-3.5 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${iconBg}`}>
+                          <IconComp className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-gray-900 group-hover:text-blue-700">
+                            {m.label}
+                          </div>
+                          <div className="text-[11px] text-gray-500 line-clamp-1">
+                            {m.description}
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <button
+                onClick={() => setShowMethodModal(false)}
+                className="px-4 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -220,19 +220,22 @@ function formatAllBranches(branches: EmployeeRecord["branches"]): string {
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+  const isDeactivated = Boolean(emp.deleted_at);
   const isActive = emp.emp_status === true || emp.user_table?.user_status === 0;
   // Daily status comes straight from the backend (GET /employees with
   // `date` computes doctor_status server-side: Active/Leave/Inactive).
   // Doctors without a daily record fall back to account-level state.
-  const status = emp.doctor_status
-    ? emp.doctor_status === "LEAVE"
-      ? "Leave"
-      : emp.doctor_status === "INACTIVE"
-        ? "Inactive"
-        : "Active"
-    : isActive
-      ? "Active"
-      : "Inactive";
+  const status = isDeactivated
+    ? "Deactivated"
+    : emp.doctor_status
+      ? emp.doctor_status === "LEAVE"
+        ? "Leave"
+        : emp.doctor_status === "INACTIVE"
+          ? "Inactive"
+          : "Active"
+      : isActive
+        ? "Active"
+        : "Inactive";
   return {
     id: emp.employee_id,
     name: fullName,
@@ -342,6 +345,7 @@ export default function Doctor() {
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
     setAppliedFilter,
+    removeAppliedFilter,
   } = useFilterPanel(doctorFilterFields);
 
   useEffect(() => {
@@ -350,9 +354,21 @@ export default function Doctor() {
     }
   }, [statusParam, setAppliedFilter]);
 
-  const isStatusParamActive = Boolean(
-    statusParam && Array.isArray(appliedValues.status) && appliedValues.status.includes(statusParam)
-  );
+  const handleClear = useCallback(() => {
+    if (searchParams.has("status")) {
+      searchParams.delete("status");
+      setSearchParams(searchParams, { replace: true });
+    }
+    handleClearFilter();
+  }, [searchParams, setSearchParams, handleClearFilter]);
+
+  const handleApply = useCallback(() => {
+    if (searchParams.has("status") && (!filterValues.status || !filterValues.status.includes(statusParam))) {
+      searchParams.delete("status");
+      setSearchParams(searchParams, { replace: true });
+    }
+    handleApplyFilter();
+  }, [searchParams, setSearchParams, filterValues.status, statusParam, handleApplyFilter]);
 
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
@@ -447,10 +463,15 @@ useEffect(() => {
       );
     }
  
-    result = filterDataByValues(result, appliedValues, doctorFilterFields);
+    if (showDeactivated) {
+      const { status, ...otherFilters } = appliedValues;
+      result = filterDataByValues(result, otherFilters, doctorFilterFields);
+    } else {
+      result = filterDataByValues(result, appliedValues, doctorFilterFields);
+    }
 
     return result;
-  }, [searchQuery, appliedValues, doctorRows, doctorFilterFields]);
+  }, [searchQuery, appliedValues, doctorRows, doctorFilterFields, showDeactivated]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -758,37 +779,16 @@ useEffect(() => {
                   title="Filters"
                   fields={doctorFilterFields}
                   values={filterValues}
+                  appliedValues={showDeactivated ? (({ status, ...rest }) => rest)(appliedValues) : appliedValues}
                   onChange={handleFilterChange}
-                  onApply={handleApplyFilter}
-                  onClear={handleClearFilter}
+                  onApply={handleApply}
+                  onClear={handleClear}
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
                 <RefreshButton onClick={fetchDoctors} isLoading={isDoctorsLoading} />
               </div>
             </div>
-
-            {isStatusParamActive && (
-              <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-2.5 text-sm text-amber-900 transition-all">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  <span className="font-semibold">Filtered by Doctor Status: {statusParam}</span>
-                  <span className="text-amber-700 text-xs">
-                    (Showing {displayData.length} doctor{displayData.length === 1 ? "" : "s"} on {statusParam})
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    searchParams.delete("status");
-                    setSearchParams(searchParams);
-                    handleClearFilter();
-                  }}
-                  className="inline-flex items-center gap-1 rounded bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200 hover:text-amber-900 transition-colors"
-                >
-                  Clear Status Filter
-                </button>
-              </div>
-            )}
 
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (table via HmsTable)                            */}

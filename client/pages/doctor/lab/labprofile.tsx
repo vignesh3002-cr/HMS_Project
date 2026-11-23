@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import LabNav from "./labnav";
-import Profile from "@/components/Forms/view/view profile ";
+import SettingsPage from "@/pages/Settings";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
@@ -109,7 +109,7 @@ export default function LabProfile() {
 
           {/* Profile View Content */}
           <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-            <Profile />
+            <SettingsPage />
           </main>
         </div>
 

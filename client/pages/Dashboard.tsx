@@ -35,6 +35,7 @@ import type { CriticalInfo } from "@/components/hms/CriticalPatientIndicator";
 import { WardOccupancyWidget } from "@/components/hms/dashboard/WardOccupancyWidget";
 import { SystemIntegrityWidget } from "@/components/hms/dashboard/SystemIntegrityWidget";
 import { AdminQuickActionToolbar } from "@/components/hms/dashboard/AdminQuickActionToolbar";
+import { KpiSection } from "@/components/hms/dashboard/KpiSection";
 
 function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
   const reasons: string[] = [];
@@ -71,8 +72,6 @@ function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
   }
   return reasons;
 }
-import { getKpiPreferences, saveKpiPreferences, getKpiUsage, saveKpiUsage } from "@/api/userPreferences.api";
-
 const navItems = [
   {
     label: "Dashboard",
@@ -286,13 +285,18 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   return {
     id: doc.appointment_id,
     appointmentNo: doc.appointment_id,
+    tokenId: doc.token_number != null ? String(doc.token_number) : "—",
+    patient: patientName,
     patientName,
     patientId: doc.patient_id,
     avatar: getInitials(patientName),
+    patientInitial: getInitials(patientName),
     avatarColor: patientPalette.avatarColor,
     avatarBg: patientPalette.initBg,
+    doctor: doctorName,
     doctorName,
     doctorId: doc.employee_id ? doc.employee_id : "",
+    doctorInitial: getInitials(doctorName),
     doctorAvatar: getInitials(doctorName),
     doctorAvatarcolor: doctorPalette.avatarColor,
     doctorAvatarBg: doctorPalette.initBg,
@@ -315,80 +319,6 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   };
 }
 
-function parseStatValue(value: string | number | undefined | null): number {
-  if (value == null) return 0;
-  if (typeof value === "number") return isNaN(value) ? 0 : value;
-  const num = Number(String(value).replace(/,/g, "").trim());
-  return isNaN(num) ? 0 : num;
-}
-
-function formatStatValue(value: number): string {
-  return value.toLocaleString();
-}
-
-function CountUp({ target, duration = 900 }: { target: number; duration?: number }) {
-  const safeTarget = typeof target === "number" && !isNaN(target) ? Math.round(target) : 0;
-  const [count, setCount] = useState(0);
-  const countRef = useRef(0);
-  countRef.current = count;
-
-  const prevTargetRef = useRef<number | null>(null);
-  const rafIdRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    // If target is 0 and we're already at 0, nothing to animate
-    if (safeTarget === 0 && countRef.current === 0) {
-      prevTargetRef.current = 0;
-      return;
-    }
-
-    // If target has not changed and count already reached it, don't re-animate
-    if (prevTargetRef.current === safeTarget && countRef.current === safeTarget) {
-      return;
-    }
-
-    const startVal = countRef.current;
-    const endVal = safeTarget;
-    prevTargetRef.current = safeTarget;
-
-    if (startVal === endVal) {
-      return;
-    }
-
-    let startTime: number | null = null;
-
-    const animate = (now: number) => {
-      if (startTime === null) startTime = now;
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // Smooth ease-out cubic: starts quickly, lands smoothly
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const nextValue = Math.round(startVal + (endVal - startVal) * eased);
-
-      setCount(nextValue);
-
-      if (progress < 1) {
-        rafIdRef.current = requestAnimationFrame(animate);
-      } else {
-        setCount(endVal);
-        rafIdRef.current = null;
-      }
-    };
-
-    rafIdRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-    };
-  }, [safeTarget, duration]);
-
-  return <>{formatStatValue(count)}</>;
-}
-
 const ALL_KPI_IDS = [
   "doctors",
   "patients",
@@ -407,8 +337,6 @@ const ALL_KPI_IDS = [
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
-  const [selectedKpis, setSelectedKpis] = useState<string[]>(ALL_KPI_IDS);
-  const [isKpiShowerOpen, setIsKpiShowerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showWardOccupancy, setShowWardOccupancy] = useState(false);
   const { toast } = useToast();
@@ -420,123 +348,6 @@ export default function Dashboard() {
   const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
   const queryClient = useQueryClient();
 
-  // Track if KPI preferences have been loaded from backend. Kept as state (not
-  // only a ref) so the auto-save effect can re-run once hydration finishes.
-  const [kpiHydrated, setKpiHydrated] = useState(false);
-  // Set right before hydration applies its result so the very first
-  // auto-save effect run after hydration is skipped -- loading preferences
-  // from the server is not a user edit and must never be saved back.
-  const skipNextKpiSaveRef = useRef(false);
-
-  // Fetch saved KPI preferences from backend (once after permissions load)
-  useEffect(() => {
-    if (permissionsLoading) return;
-    if (kpiHydrated) return;
-
-    getKpiPreferences()
-      .then((saved) => {
-        skipNextKpiSaveRef.current = true;
-        if (saved.length > 0) {
-          setSelectedKpis(saved);
-        }
-        setKpiHydrated(true);
-      })
-      .catch(() => {
-        skipNextKpiSaveRef.current = true;
-        setKpiHydrated(true);
-      });
-  }, [permissionsLoading, kpiHydrated]);
-
-  // Debounced auto-save for user-initiated KPI selection changes only.
-  useEffect(() => {
-    if (!kpiHydrated) return; // don't save before initial load
-    if (skipNextKpiSaveRef.current) {
-      skipNextKpiSaveRef.current = false;
-      return;
-    }
-    const timer = setTimeout(() => {
-      saveKpiPreferences(selectedKpis).catch(() => {});
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [kpiHydrated, selectedKpis]);
-
-  // ---- KPI usage tracking (frequency-based ordering) ----
-  // Hydrated once from the backend; used only for sorting so the order
-  // stays stable for the whole session (re-sorts on next page load).
-  const [kpiUsageSnapshot, setKpiUsageSnapshot] = useState<Record<string, number>>({});
-  // Live mutable counts — incremented on click, never drives a re-render,
-  // so cards don't jump around mid-session. Flushed to the backend on a
-  // debounce and on unmount.
-  const kpiUsageRef = useRef<Record<string, number>>({});
-  const [kpiUsageHydrated, setKpiUsageHydrated] = useState(false);
-  const skipNextUsageSaveRef = useRef(false);
-  const kpiUsageSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Master toggle: when off, KPIs keep their default order regardless of
-  // usage counts. Persisted in localStorage (pure UI preference).
-  const [usageSortEnabled, setUsageSortEnabled] = useState(() => {
-    return localStorage.getItem("hms_kpi_usage_sort") !== "off";
-  });
-
-  const toggleUsageSort = useCallback(() => {
-    setUsageSortEnabled((prev) => {
-      const next = !prev;
-      localStorage.setItem("hms_kpi_usage_sort", next ? "on" : "off");
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (permissionsLoading) return;
-    if (kpiUsageHydrated) return;
-
-    getKpiUsage()
-      .then((usage) => {
-        skipNextUsageSaveRef.current = true;
-        kpiUsageRef.current = { ...usage };
-        setKpiUsageSnapshot(usage);
-        setKpiUsageHydrated(true);
-      })
-      .catch(() => {
-        skipNextUsageSaveRef.current = true;
-        setKpiUsageHydrated(true);
-      });
-  }, [permissionsLoading, kpiUsageHydrated]);
-
-  const flushKpiUsageSave = useCallback(() => {
-    const usage = { ...kpiUsageRef.current };
-    if (Object.keys(usage).length > 0) {
-      saveKpiUsage(usage).catch(() => {});
-    }
-  }, []);
-
-  const trackKpiUsage = useCallback((kpiId: string) => {
-    if (!kpiUsageHydrated) return;
-    kpiUsageRef.current = {
-      ...kpiUsageRef.current,
-      [kpiId]: (kpiUsageRef.current[kpiId] ?? 0) + 1,
-    };
-    if (kpiUsageSaveTimerRef.current) clearTimeout(kpiUsageSaveTimerRef.current);
-    kpiUsageSaveTimerRef.current = setTimeout(() => {
-      flushKpiUsageSave();
-      kpiUsageSaveTimerRef.current = null;
-    }, 2000);
-  }, [kpiUsageHydrated, flushKpiUsageSave]);
-
-  // Persist any pending usage counts on unmount (page refresh/navigation).
-  useEffect(() => {
-    return () => {
-      if (kpiUsageSaveTimerRef.current) {
-        clearTimeout(kpiUsageSaveTimerRef.current);
-        kpiUsageSaveTimerRef.current = null;
-        const usage = { ...kpiUsageRef.current };
-        if (Object.keys(usage).length > 0) {
-          saveKpiUsage(usage).catch(() => {});
-        }
-      }
-    };
-  }, []);
-
- 
 
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(() => {
     const cached: any = queryClient.getQueryData(["dashboard-employees", isAllBranches ? "all" : selectedBranchId, getTodayInActiveTimezone()]);
@@ -585,53 +396,6 @@ export default function Dashboard() {
   // depends on it to scope the Appointments tab to the selected day.
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const [isKpiCalendarOpen, setIsKpiCalendarOpen] = useState(false);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const updateScrollButtons = useCallback(() => {
-    const el = trackRef.current;
-    if (!el) return;
-    const maxScroll = el.scrollWidth - el.clientWidth;
-    setCanScrollLeft(el.scrollLeft > 4);
-    setCanScrollRight(maxScroll > 0 && el.scrollLeft < maxScroll - 4);
-  }, []);
-
-  const handleKpiScroll = (direction: "left" | "right") => {
-    const el = trackRef.current;
-    if (!el) return;
-    const scrollAmount = 320;
-    el.scrollBy({
-      left: direction === "left" ? -scrollAmount : scrollAmount,
-      behavior: "smooth",
-    });
-  };
-
-  useEffect(() => {
-    const el = trackRef.current;
-    if (!el) return;
-
-    updateScrollButtons();
-
-    const handleScroll = () => {
-      updateScrollButtons();
-    };
-
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", updateScrollButtons);
-
-    const ro = new ResizeObserver(() => {
-      updateScrollButtons();
-    });
-    ro.observe(el);
-
-    return () => {
-      el.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", updateScrollButtons);
-      ro.disconnect();
-    };
-  }, [updateScrollButtons]);
 
   const canReadEmployees = permissions.some((p) => p === "employee.read" || p === "doctor.read");
   // React Query: fetch employees once and keep them cached keyed by branch + date.
@@ -1527,7 +1291,97 @@ export default function Dashboard() {
         iconBg: "rgba(168, 200, 255, 0.25)",
         icon: <CalendarIcon className="w-[17px] h-[17px]" color="#00488D" />,
         isActive: activeTab === "appointments" && !searchQuery,
-        isDropdown: true,
+        // Full Popover (trigger + status-filter content) so the appointments
+        // KPI card keeps its inline dropdown behaviour inside KpiSection.
+        tagContent: (
+          <Popover open={isApptStatusDropdownOpen} onOpenChange={setIsApptStatusDropdownOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsApptStatusDropdownOpen((prev) => !prev);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                  }
+                }}
+                style={{ color: "#00488D" }}
+                className="text-[11px] font-bold px-[8px] py-[2px] rounded-full tracking-[-0.2px] bg-white/70 shadow-sm inline-flex items-center gap-1 cursor-pointer transition-all duration-150 hover:bg-white hover:scale-105 active:scale-95 select-none"
+                title="Filter by appointment status"
+              >
+                {selectedApptStatus ? `${selectedApptStatus}: ${appointmentStatusCounts[selectedApptStatus] ?? 0}` : `All: ${currentAppointments}`}
+                <ChevronDown
+                  className={`w-3 h-3 transition-transform duration-200 ${isApptStatusDropdownOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              sideOffset={6}
+              className="w-60 p-2 shadow-xl rounded-xl z-50 bg-white border border-gray-100 text-[#1c1e21]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-gray-100">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Filter by Status</span>
+                {selectedApptStatus && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAppointmentStatus(null)}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col gap-0.5 max-h-60 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <button
+                  type="button"
+                  onClick={() => handleSelectAppointmentStatus(null)}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    !selectedApptStatus
+                      ? "bg-blue-50 text-blue-700 font-semibold"
+                      : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                    <span>All Appointments</span>
+                  </div>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
+                    {appointmentCount}
+                  </span>
+                </button>
+                {availableAppointmentStatuses.map((status) => {
+                  const count = appointmentStatusCounts[status] ?? 0;
+                  const isSelected = selectedApptStatus === status;
+                  const dotColor = getStatusDotColor(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => handleSelectAppointmentStatus(status)}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-blue-50 text-blue-700 font-semibold"
+                          : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
+                        <span className="truncate">{status}</span>
+                      </div>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+        ),
         onClick: () => {
           if (activeTab !== "appointments") {
             skipClearFilterRef.current = true;
@@ -1535,10 +1389,6 @@ export default function Dashboard() {
           }
           setSearchQuery("");
           setCurrentPage(1);
-          setIsApptStatusDropdownOpen(true);
-        },
-        onTagClick: () => {
-          setIsApptStatusDropdownOpen((prev) => !prev);
         },
       },
       {
@@ -1690,35 +1540,6 @@ export default function Dashboard() {
     switchToTabWithFilter,
   ]);
 
-  const visibleStats = useMemo(() => {
-    return allKpiItems.filter((stat) => !stat.permission || can(stat.permission));
-  }, [allKpiItems, can]);
-
-  // Filter to selected KPIs, then (when the usage-sort toggle is on) order
-  // by usage frequency — most-clicked first (left), least-clicked last
-  // (right). Ties keep the default order from allKpiItems. Uses the
-  // hydrated snapshot so the order only changes on the next page load,
-  // not mid-session.
-  const displayedStats = useMemo(() => {
-    const filtered = visibleStats
-      .filter((stat) => selectedKpis.includes(stat.id))
-      .map((stat, defaultIndex) => ({ stat, defaultIndex }));
-    if (usageSortEnabled) {
-      filtered.sort((a, b) => {
-        const usageA = kpiUsageSnapshot[a.stat.id] ?? 0;
-        const usageB = kpiUsageSnapshot[b.stat.id] ?? 0;
-        if (usageA !== usageB) return usageB - usageA;
-        return a.defaultIndex - b.defaultIndex;
-      });
-    }
-    return filtered.map((entry) => entry.stat);
-  }, [visibleStats, selectedKpis, kpiUsageSnapshot, usageSortEnabled]);
-
-  useEffect(() => {
-    const timer = setTimeout(updateScrollButtons, 150);
-    return () => clearTimeout(timer);
-  }, [displayedStats.length, updateScrollButtons]);
-
   // Only the very first load (waiting on permissions) shows the full-page
   // skeleton. Branch/date changes and manual refreshes just flip
   // isEmployeesLoading/isAppointmentsLoading  those are handled inline
@@ -1745,458 +1566,15 @@ export default function Dashboard() {
         {/* Content */}
         <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
           {/* Key Performance Indicators - Unified Scrollable Row */}
-          <div className="flex flex-col gap-3">
-            {/* KPI Header with Date Picker */}
-            <div className="flex items-center justify-between flex-wrap gap-2 px-1">
-              <div>
-                <h2 className="text-base font-bold text-[#1c1e21] tracking-tight">Key Performance Indicators</h2>
-                <p className="text-xs text-[#70747c]">Real-time operational & clinical metrics across departments</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {isUpdatingKpi && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-[#00488D] font-medium bg-blue-50 px-2.5 py-1 rounded-full animate-fade-in">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00488D]" />
-                    <span>Updating KPIs...</span>
-                  </span>
-                )}
-                <div className="flex items-center bg-white border border-[#E5E7EB] rounded-lg shadow-sm">
-                  <button
-                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
-                    className="flex items-center justify-center w-[28px] h-[28px] rounded-l-lg transition-colors hover:bg-[#F2F4F6] text-slate-600"
-                    title="Previous Day"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-                  <Popover open={isKpiCalendarOpen} onOpenChange={setIsKpiCalendarOpen}>
-                    <PopoverTrigger asChild>
-                      <button className="flex items-center justify-center h-[28px] px-2.5 text-xs font-semibold text-slate-700 hover:bg-[#F2F4F6] transition-colors border-x border-[#E5E7EB]">
-                        <CalendarIcon className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-                        {isTodayInActiveTimezone(selectedDate)
-                          ? "Today"
-                          : isYesterdayInActiveTimezone(selectedDate)
-                            ? "Yesterday"
-                            : isTomorrowInActiveTimezone(selectedDate)
-                              ? "Tomorrow"
-                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
-                      <CalendarPicker
-                        selected={selectedDate}
-                        hideThemePicker
-                        onSelect={(date) => {
-                          if (date instanceof Date) {
-                            setSelectedDate(date);
-                            setIsKpiCalendarOpen(false);
-                          }
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <button
-                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
-                    className="flex items-center justify-center w-[28px] h-[28px] rounded-r-lg transition-colors hover:bg-[#F2F4F6] text-slate-600"
-                    title="Next Day"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                {/* KPI Shower - Multi-select and Selected KPI display */}
-                <Popover open={isKpiShowerOpen} onOpenChange={setIsKpiShowerOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex items-center h-[28px] px-2.5 bg-white border border-[#E5E7EB] rounded-lg shadow-sm hover:bg-[#F2F4F6] transition-colors gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer select-none"
-                      title="KPI Shower - Click to select and view KPIs"
-                    >
-                      <Activity className="w-3.5 h-3.5 text-slate-500" />
-                      {selectedKpis.length === 0 ? (
-                        <span className="text-slate-500 font-normal">Select KPIs</span>
-                      ) : selectedKpis.length === 1 ? (
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="w-2 h-2 rounded-full"
-                            style={{
-                              backgroundColor:
-                                visibleStats.find((s) => s.id === selectedKpis[0])?.valueColor || "#00488D",
-                            }}
-                          />
-                          <span className="truncate max-w-[130px] sm:max-w-[160px]">
-                            {visibleStats.find((s) => s.id === selectedKpis[0])?.label || "1 Selected"}
-                          </span>
-                        </div>
-                      ) : selectedKpis.length === visibleStats.length ? (
-                        <span className="text-slate-700 font-semibold">
-                          All KPIs ({visibleStats.length})
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <div className="flex -space-x-1">
-                            {visibleStats
-                              .filter((s) => selectedKpis.includes(s.id))
-                              .slice(0, 3)
-                              .map((s) => (
-                                <span
-                                  key={s.id}
-                                  className="w-2 h-2 rounded-full border border-white"
-                                  style={{ backgroundColor: s.valueColor }}
-                                />
-                              ))}
-                          </div>
-                          <span>{selectedKpis.length} KPIs Selected</span>
-                        </div>
-                      )}
-                      <ChevronDown
-                        className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${
-                          isKpiShowerOpen ? "rotate-180" : ""
-                        }`}
-                      />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="end"
-                    sideOffset={6}
-                    className="w-72 p-0 shadow-xl rounded-xl z-50 bg-white border border-gray-100 text-[#1c1e21]"
-                  >
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-800">KPI Shower</span>
-                        <span className="text-[11px] font-medium text-slate-500">
-                          ({selectedKpis.length}/{visibleStats.length})
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedKpis(visibleStats.map((s) => s.id))}
-                          className="text-[11px] text-[#00488D] hover:underline font-semibold cursor-pointer"
-                        >
-                          Select All
-                        </button>
-                        <span className="text-slate-300">|</span>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedKpis([])}
-                          className="text-[11px] text-slate-500 hover:text-slate-700 hover:underline font-medium cursor-pointer"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </div>
+          <KpiSection
+            items={allKpiItems}
+            isUpdating={isUpdatingKpi}
+            selectedDate={selectedDate}
+            onDateChange={setSelectedDate}
+            defaultSelectedKpis={ALL_KPI_IDS}
+          />
 
-                    {/* Usage-based sort toggle */}
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-slate-50/60">
-                      <div className="flex flex-col gap-[1px] min-w-0">
-                        <span className="text-[11px] font-semibold text-slate-700 leading-tight">
-                          Sort by most used
-                        </span>
-                        <span className="text-[10px] text-slate-400 leading-tight truncate">
-                          {usageSortEnabled
-                            ? "Frequently clicked KPIs appear first"
-                            : "KPIs stay in default order"}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={usageSortEnabled}
-                        onClick={toggleUsageSort}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00488D] focus-visible:ring-offset-2 ${
-                          usageSortEnabled ? "bg-[#00488D]" : "bg-slate-300"
-                        }`}
-                        title={usageSortEnabled ? "Disable usage-based sorting" : "Enable usage-based sorting"}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ${
-                            usageSortEnabled ? "translate-x-[19px]" : "translate-x-[3px]"
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    {/* KPI Multi-select List */}
-                    <div className="max-h-64 overflow-y-auto p-1 space-y-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                      {visibleStats.map((stat) => {
-                        const isChecked = selectedKpis.includes(stat.id);
-                        return (
-                          <div
-                            key={stat.id}
-                            onClick={() => {
-                              setSelectedKpis((prev) =>
-                                prev.includes(stat.id)
-                                  ? prev.filter((id) => id !== stat.id)
-                                  : [...prev, stat.id]
-                              );
-                            }}
-                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-xs select-none ${
-                              isChecked ? "bg-slate-50 font-medium" : "hover:bg-slate-50 text-slate-600"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => {}}
-                                className="w-3.5 h-3.5 rounded border-slate-300 text-[#00488D] focus:ring-0 cursor-pointer"
-                              />
-                              <div
-                                style={{ background: stat.iconBg }}
-                                className="w-6 h-6 rounded flex items-center justify-center shrink-0"
-                              >
-                                {stat.icon}
-                              </div>
-                              <span className="truncate text-xs text-slate-800">{stat.label}</span>
-                            </div>
-                            <span
-                              className="text-[11px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-2"
-                              style={{ color: stat.valueColor, background: stat.bg }}
-                            >
-                              {stat.value}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-
-            {/* Scrollable KPI Track Container */}
-            <div className="relative">
-              {/* Left Arrow Button */}
-              {canScrollLeft && (
-                <button
-                  type="button"
-                  onClick={() => handleKpiScroll("left")}
-                  aria-label="Scroll left"
-                  className="absolute -left-3 top-[calc(50%-16px)] w-8 h-8 rounded-full bg-white border border-[#e6e7eb] shadow-[0_2px_8px_rgba(0,0,0,0.08)] flex items-center justify-center cursor-pointer z-10 transition-all duration-150 hover:bg-[#fafafa] hover:scale-105 text-[#1c1e21]"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              )}
-
-              {/* Left Fade Gradient */}
-              <div
-                className={`absolute left-0 top-0 bottom-2 w-12 pointer-events-none z-[2] transition-opacity duration-200 bg-gradient-to-r from-[#F7F9FB] to-transparent ${
-                  canScrollLeft ? "opacity-100" : "opacity-0"
-                }`}
-              />
-
-              {/* Scroll Track */}
-              <div
-                ref={trackRef}
-                className="flex gap-[14px] overflow-x-auto scroll-smooth py-[6px] px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              >
-                {displayedStats.length === 0 ? (
-                  <div className="flex items-center justify-center w-full py-8 text-xs text-slate-500 font-medium">
-                    No KPIs selected. Select KPIs from the dropdown above to display them.
-                  </div>
-                ) : (
-                  displayedStats.map((card) => (
-                    <div
-                      key={card.id}
-                      onClick={() => {
-                        trackKpiUsage(card.id);
-                        card.onClick();
-                      }}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          trackKpiUsage(card.id);
-                          card.onClick();
-                        }
-                      }}
-                      style={{
-                        background: card.bg,
-                        border: card.isActive ? `2.5px solid ${card.valueColor}` : "2.5px solid transparent",
-                        boxShadow: card.isActive
-                          ? `0 0 0 1px ${card.valueColor}20, 0 6px 18px ${card.valueColor}28`
-                          : "0 2px 10px rgba(0,0,0,0.06)",
-                      }}
-                      className="flex-[0_0_206px] min-w-[206px] rounded-[12px] p-[14px_16px] flex flex-col gap-[10px] cursor-pointer transition-all duration-200 select-none hover:-translate-y-[2px] hover:shadow-[0_6px_20px_rgba(0,0,0,0.10)]"
-                    >
-                    <div className="flex items-center justify-between">
-                      <div
-                        style={{ background: card.iconBg }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
-                      >
-                        {card.icon}
-                      </div>
-                      {card.tag && (
-                        card.isDropdown ? (
-                          <Popover open={isApptStatusDropdownOpen} onOpenChange={setIsApptStatusDropdownOpen}>
-                            <PopoverTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setIsApptStatusDropdownOpen((prev) => !prev);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.stopPropagation();
-                                  }
-                                }}
-                                style={{ color: card.valueColor }}
-                                className="text-[11px] font-bold px-[8px] py-[2px] rounded-full tracking-[-0.2px] bg-white/70 shadow-sm inline-flex items-center gap-1 cursor-pointer transition-all duration-150 hover:bg-white hover:scale-105 active:scale-95 select-none"
-                                title="Filter by appointment status"
-                              >
-                                <span>{card.tag}</span>
-                                <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isApptStatusDropdownOpen ? "rotate-180" : ""}`} />
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              align="end"
-                              sideOffset={6}
-                              className="w-60 p-2 shadow-xl rounded-xl z-50 bg-white border border-gray-100 text-[#1c1e21]"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-gray-100">
-                                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Filter by Status</span>
-                                {selectedApptStatus && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectAppointmentStatus(null)}
-                                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
-                                  >
-                                    Reset
-                                  </button>
-                                )}
-                              </div>
-                              <div className="flex flex-col gap-0.5 max-h-60 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSelectAppointmentStatus(null)}
-                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                                    !selectedApptStatus
-                                      ? "bg-blue-50 text-blue-700 font-semibold"
-                                      : "text-gray-700 hover:bg-gray-50"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
-                                    <span>All Appointments</span>
-                                  </div>
-                                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
-                                    {appointmentCount}
-                                  </span>
-                                </button>
-                                {availableAppointmentStatuses.map((status) => {
-                                  const count = appointmentStatusCounts[status] ?? 0;
-                                  const isSelected = selectedApptStatus === status;
-                                  const dotColor = getStatusDotColor(status);
-                                  return (
-                                    <button
-                                      key={status}
-                                      type="button"
-                                      onClick={() => handleSelectAppointmentStatus(status)}
-                                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                                        isSelected
-                                          ? "bg-blue-50 text-blue-700 font-semibold"
-                                          : "text-gray-700 hover:bg-gray-50"
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                                        <span className="truncate">{status}</span>
-                                      </div>
-                                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
-                                        {count}
-                                      </span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        ) : card.onTagClick ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              card.onTagClick?.();
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.stopPropagation();
-                              }
-                            }}
-                            style={{ color: card.valueColor }}
-                            className="text-[11px] font-bold px-[8px] py-[2px] rounded-full tracking-[-0.2px] bg-white/70 shadow-sm inline-flex items-center cursor-pointer transition-all duration-150 hover:bg-white hover:scale-105 active:scale-95 select-none"
-                            title="Click to toggle filter (Active / All)"
-                          >
-                            {card.tag}
-                          </button>
-                        ) : (
-                          <span
-                            style={{ color: card.valueColor }}
-                            className="text-[11px] font-bold px-[7px] py-[2px] rounded-full tracking-[-0.2px] bg-white/60 shadow-sm"
-                          >
-                            {card.tag}
-                          </span>
-                        )
-                      )}
-                    </div>
-
-                    <div
-                      style={{ color: card.valueColor }}
-                      className="text-[26px] font-extrabold leading-[1.05] tracking-[-0.6px]"
-                    >
-                      {card.loading ? (
-                        <div
-                          style={{ backgroundColor: card.valueColor, opacity: 0.15 }}
-                          className="w-14 h-7 rounded-md animate-pulse"
-                        />
-                      ) : (
-                        <CountUp target={typeof card.value === "number" ? card.value : parseStatValue(String(card.value))} />
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-[2px] min-w-0">
-                      <span
-                        style={{ color: card.valueColor }}
-                        className="text-[12.5px] font-bold tracking-tight truncate"
-                      >
-                        {card.label}
-                      </span>
-                      <span
-                        style={{ color: card.valueColor, opacity: 0.75 }}
-                        className="text-[11px] font-medium truncate"
-                      >
-                        {card.subLabel}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-              {/* Right Fade Gradient */}
-              <div
-                className={`absolute right-0 top-0 bottom-2 w-12 pointer-events-none z-[2] transition-opacity duration-200 bg-gradient-to-l from-[#F7F9FB] to-transparent ${
-                  canScrollRight ? "opacity-100" : "opacity-0"
-                }`}
-              />
-
-              {/* Right Arrow Button */}
-              {canScrollRight && (
-                <button
-                  type="button"
-                  onClick={() => handleKpiScroll("right")}
-                  aria-label="Scroll right"
-                  className="absolute -right-3 top-[calc(50%-16px)] w-8 h-8 rounded-full bg-white border border-[#e6e7eb] shadow-[0_2px_8px_rgba(0,0,0,0.08)] flex items-center justify-center cursor-pointer z-10 transition-all duration-150 hover:bg-[#fafafa] hover:scale-105 text-[#1c1e21]"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              )}
-          </div>
-          </div>
-
-{/* Overview Header */}
+          {/* Overview Header */}
            <div className="flex items-center justify-between flex-wrap gap-3">
              <div>
                <h2 className="hms-heading">Admin Overview</h2>
@@ -2240,7 +1618,6 @@ export default function Dashboard() {
                     data-tab={tab.key}
                     onClick={() => {
                       setActiveTab(tab.key);
-                      setSelectedKpis((prev) => prev.includes(tab.key) ? prev : [...prev, tab.key]);
                       setCurrentPage(1);
                     }}
                     className="relative pb-2 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
@@ -2320,6 +1697,7 @@ export default function Dashboard() {
                   title="Advanced Filters"
                   fields={activeFilterFields}
                   values={filterValues}
+                  appliedValues={appliedValues}
                   onChange={handleFilterChange}
                   onApply={handleApplyFilter}
                   onClear={handleClearFilter}
@@ -2355,55 +1733,61 @@ export default function Dashboard() {
               <HmsTable
                 scrollable={false}
                 columns={activeTab === "appointments" ? [
-                  { key: "patientName", label: "Patient Name", className: "relative", render: (r: any) => {
+                  { key: "id", label: "AppointmentNo", className: "!whitespace-normal", render: (r: any) => (
+                    <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
+                  )},
+                  { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: any) => (
+                    <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
+                  )},
+                  { key: "patient", label: "Patient", className: "!whitespace-normal relative", render: (r: any) => {
                     const crit = getLiveCriticalInfo(r.patientId);
                     return (
                     <>
                       <CriticalCorner reasons={crit.reasons} />
                       <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
-                        <div data-critical-avatar className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.avatar}</div>
-                        <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                        <div data-critical-avatar className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.patientInitial || r.avatar}</div>
+                        <div><div className="hms-name-text capitalize">{r.patient || r.patientName}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
                       </CriticalWrapper>
                     </>
                     );
                   }},
-                  { key: "appointmentNo", label: "Appointment No", render: (r: any) => (
-                    <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>{r.appointmentNo}</span>
-                  )},
-                  { key: "doctorName", label: "Assigned Doctor", render: (r: any) => (
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
-                      <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
-                    </div>
-                  )},
-                  { key: "branch", label: "Branch", render: (r: any) => (
+                  { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span>
                   )},
-                  { key: "reason", label: "Reason / Type", render: (r: any) => (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[#191C1E] hms-content-text leading-4">{r.reason}</span>
-                      {r.visitType && (
-                        <span
-                          className={`inline-block w-fit text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                            r.visitType.toLowerCase().includes("chemo")
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : r.visitType.toLowerCase().includes("lab")
-                              ? "bg-purple-50 text-purple-700 border-purple-200"
-                              : "bg-blue-50 text-blue-700 border-blue-200"
-                          }`}
-                        >
-                          {r.visitType}
-                        </span>
-                      )}
-                    </div>
+                  { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: any) => (
+                    !r.doctor || r.doctor === "—" || r.doctor === "Unassigned" ? (
+                      <span className="text-gray-400 font-semibold pl-2">—</span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar || r.doctorInitial}</div>
+                        <div><div className="hms-name-text capitalize">{r.doctor || r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                      </div>
+                    )
                   )},
-                  { key: "date", label: "Timing", render: (r: any) => (
+                  { key: "visitType", label: "Visit Type", className: "!whitespace-normal", render: (r: any) => (
+                    r.visitType ? (
+                      <span
+                        className={`inline-block w-fit text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
+                          r.visitType.toLowerCase().includes("chemo")
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : r.visitType.toLowerCase().includes("lab")
+                            ? "bg-purple-50 text-purple-700 border-purple-200"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
+                        }`}
+                      >
+                        {r.visitType}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 font-medium text-xs">—</span>
+                    )
+                  )},
+                  { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: any) => (
                     <div className="text-[#191C1E] hms-content-text leading-4"><div>{r.date}</div><div className="text-[#8C8D8F] hms-department-text">{r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: any) => (
                     <StatusBadge status={String(r.status)} />
                   )},
-                  { key: "actions", label: "Action", sortable: false, render: (r: any) => (
+                  { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: any) => (
                     <AppointmentActionMenu
                       status={r.status}
                       appointmentDateISO={r.appointmentDateISO}
