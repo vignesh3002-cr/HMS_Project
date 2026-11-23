@@ -19,13 +19,15 @@ export interface LoginResponse {
 export const login = async (
   username: string,
   password: string,
-  rememberMe: boolean
+  rememberMe: boolean,
+  directLogin: boolean = false
 ): Promise<LoginResponse> => {
   try {
     const res = await API.post("/auth/login", {
       username,
       password,
       rememberMe,
+      directLogin,
     });
 
     if (!res.data.success) {

@@ -18,6 +18,17 @@ export default function Login() {
   const { refetch: refetchPermissions } = usePermission();
 
   const [rememberMe, setRememberMe] = useState(false);
+  const [directLogin, setDirectLogin] = useState(() => {
+    return localStorage.getItem("hms_direct_login") === "true";
+  });
+
+  const toggleDirectLogin = () => {
+    setDirectLogin((prev) => {
+      const next = !prev;
+      localStorage.setItem("hms_direct_login", String(next));
+      return next;
+    });
+  };
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -45,7 +56,8 @@ export default function Login() {
       const response = await login(
         username.trim(),
         password,
-        rememberMe
+        rememberMe,
+        directLogin
       );
 
       // If OTP is required (2-step verification)
@@ -422,6 +434,43 @@ export default function Login() {
                 className="text-xs font-bold leading-4 text-clinical-blue hover:underline"
               >
                 Forgot Password?
+              </button>
+            </div>
+
+            {/* Direct Login Toggle (Cloud / Testing mode) */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition-colors">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <span>⚡ Direct Login</span>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      directLogin
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {directLogin ? "ENABLED" : "DISABLED"}
+                  </span>
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Skip email OTP (for Render cloud testing)
+                </span>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={directLogin}
+                onClick={toggleDirectLogin}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  directLogin ? "bg-[#00488D]" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    directLogin ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
 
