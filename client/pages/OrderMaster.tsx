@@ -13,6 +13,8 @@ import {
   HeartPulse,
   FlaskConical,
   UserRound,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { formatInBranchTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
@@ -28,6 +30,7 @@ import { downloadExportPdf } from "@/lib/exportPdf";
 import {
   chemotherapyApi,
   type ChemoPlan,
+  type ChemoPlanCycle,
   type LabReviewRecord,
 } from "@/api/chemotherapy.api";
 import {
@@ -42,6 +45,18 @@ import {
 } from "./orderMasterCycles";
 
 type OrderStatus = "Scheduled" | "In Progress" | "Labs Pending" | "Held" | "Completed" | "Cancelled";
+
+interface CycleHistoryEntry {
+  plan_order_id: string;
+  cycle_number: number;
+  cycle_day: number;
+  order_status: string;
+  planned_date: string | null;
+  actual_date: string | null;
+  next_cycle_date: string | null;
+  cycle_status: string | null;
+  chemotherapy_cycle_id: string;
+}
 
 interface OrderRow {
   plan_id: string;
@@ -64,6 +79,8 @@ interface OrderRow {
   /* The cycle the labs are read from - the one being treated, not the
      highest cycle number. */
   current_cycle_id: string;
+  /* Saved cycle-day orders navigable via the up/down arrows. */
+  cycleHistory: CycleHistoryEntry[];
 }
 
 interface LabValue {
@@ -81,6 +98,19 @@ const CYCLE_DAY_REGEX = /Cycle\s*(\d+)\s*\/\s*Day\s*(\d+)/i;
 function fmtValue(n: number | string | null | undefined): string {
   if (n === null || n === undefined || n === "") return "—";
   return String(n);
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function orderStatusPill(status: string): JSX.Element {
+  const s = status.toUpperCase();
+  const base = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold";
+  if (s === "COMPLETED") return <span className={`${base} bg-emerald-50 text-emerald-700`}>{status}</span>;
+  if (s === "IN_ADMINISTRATION") return <span className={`${base} bg-amber-50 text-amber-700`}>{status}</span>;
+  if (s === "ORDERED") return <span className={`${base} bg-blue-50 text-blue-700`}>{status}</span>;
+  return <span className={`${base} bg-[#F2F4F6] text-[#6B7280]`}>{status}</span>;
 }
 
 function OrderActionMenu({
@@ -244,6 +274,35 @@ export default function OrderMaster() {
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
 
+  /* Per-row pointer into cycleHistory (index 0 = most recent cycle). Kept in
+     separate state so arrow clicks don't re-map every row. */
+  const [cycleIndexByPlan, setCycleIndexByPlan] = useState<Record<string, number>>({});
+
+  const defaultHistoryIndex = (row: OrderRow): number => {
+    const h = row.cycleHistory;
+    const ordered = h.findIndex((e) => String(e.order_status).toUpperCase() === "ORDERED");
+    return ordered > -1 ? ordered : 0;
+  };
+
+  const selectedEntry = (row: OrderRow): CycleHistoryEntry | undefined => {
+    const h = row.cycleHistory;
+    if (!h.length) return undefined;
+    const idx = clamp(cycleIndexByPlan[row.plan_id] ?? defaultHistoryIndex(row), 0, h.length - 1);
+    return h[idx];
+  };
+
+  const moveHistory = (planId: string, delta: number) => {
+    setCycleIndexByPlan((prev) => {
+      const row = rows.find((r) => r.plan_id === planId);
+      if (!row) return prev;
+      const h = row.cycleHistory;
+      if (!h.length) return prev;
+      const next = clamp((prev[planId] ?? defaultHistoryIndex(row)) + delta, 0, h.length - 1);
+      if (next === prev[planId]) return prev;
+      return { ...prev, [planId]: next };
+    });
+  };
+
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -259,6 +318,34 @@ export default function OrderMaster() {
         const protocolName = p.regimen_name ?? p.protocol_name ?? "—";
         const code = p.regimen_code ?? p.chemotherapy_regimen_protocol?.regimen_code ?? "";
         const avatar = avatarFor(p.patient_id || p.chemotherapy_plan_id);
+
+        /* Build per-row cycle-day history from saved plan_orders, newest first,
+           enriched with the cycle row's actual / next cycle dates. */
+        const orders = (p.plan_orders ?? []).filter((o) =>
+          ["ORDERED", "IN_ADMINISTRATION", "COMPLETED"].includes(String(o.order_status ?? "").toUpperCase())
+        );
+        orders.sort((a, b) => {
+          if (b.cycle_number !== a.cycle_number) return b.cycle_number - a.cycle_number;
+          return b.cycle_day - a.cycle_day;
+        });
+        const cycleById = new Map<string, ChemoPlanCycle>();
+        (p.chemotherapy_cycle ?? []).forEach((c) => {
+          if (c.chemotherapy_cycle_id) cycleById.set(c.chemotherapy_cycle_id, c);
+        });
+        const cycleHistory: CycleHistoryEntry[] = orders.map((o) => {
+          const cycle = cycleById.get(o.chemotherapy_cycle_id);
+          return {
+            plan_order_id: o.plan_order_id,
+            cycle_number: o.cycle_number,
+            cycle_day: o.cycle_day,
+            order_status: o.order_status,
+            planned_date: o.planned_date ?? cycle?.planned_date ?? null,
+            actual_date: cycle?.actual_date ?? null,
+            next_cycle_date: cycle?.next_cycle_date ?? null,
+            cycle_status: cycle?.cycle_status ?? null,
+            chemotherapy_cycle_id: o.chemotherapy_cycle_id,
+          };
+        });
 
         return {
           plan_id: p.chemotherapy_plan_id,
@@ -279,6 +366,7 @@ export default function OrderMaster() {
           next_cycle_date: cycles.nextCycleDate,
           raw_status: (p.treatment_status ?? "PLANNED").toUpperCase(),
           current_cycle_id: cycles.currentCycleId,
+          cycleHistory,
         };
       });
 
@@ -397,7 +485,7 @@ export default function OrderMaster() {
      the cycle being treated rather than the highest cycle number. */
   const labCycleIds = currentRows
     .filter((r) => !CLOSED_PLAN_STATUSES.includes(r.raw_status))
-    .map((r) => r.current_cycle_id)
+    .map((r) => selectedEntry(r)?.chemotherapy_cycle_id ?? r.current_cycle_id)
     .filter(Boolean);
   const labCycleKey = labCycleIds.join(",");
 
@@ -454,14 +542,21 @@ export default function OrderMaster() {
 
   const handleExport = (exportFormat: string) => {
     const source = sortedData;
-    const rowsForExport = source.map((r) => ({
-      ...r,
-      status: statusOf(r),
-      lab: labs[r.current_cycle_id] ?? null,
-      lab_label: labs[r.current_cycle_id]
-        ? `HB ${labs[r.current_cycle_id]?.hemoglobin} / WBC ${labs[r.current_cycle_id]?.wbc} / PLT ${labs[r.current_cycle_id]?.platelet}`
-        : "Pending",
-    }));
+    const rowsForExport = source.map((r) => {
+      const entry = selectedEntry(r);
+      const cycleId = entry?.chemotherapy_cycle_id ?? r.current_cycle_id;
+      const lab = labs[cycleId] ?? null;
+      return {
+        ...r,
+        status: statusOf(r),
+        lab,
+        cycle_label: entry ? `Cycle ${entry.cycle_number} / Day ${entry.cycle_day}` : r.cycle_label,
+        next_cycle_date: entry?.next_cycle_date ?? r.next_cycle_date,
+        lab_label: lab
+          ? `HB ${lab.hemoglobin} / WBC ${lab.wbc} / PLT ${lab.platelet}`
+          : "Pending",
+      };
+    });
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Chemotherapy Orders",
@@ -525,9 +620,16 @@ export default function OrderMaster() {
   };
 
   const handlePharmacySlip = (row: OrderRow) => {
-    const match = row.cycle_label.match(CYCLE_DAY_REGEX);
-    const cycle = match ? match[1] : "";
-    const day = match ? match[2] : "";
+    const entry = selectedEntry(row);
+    let cycle = entry ? String(entry.cycle_number) : "";
+    let day = entry ? String(entry.cycle_day) : "";
+    if (!entry) {
+      const match = row.cycle_label.match(CYCLE_DAY_REGEX);
+      if (match) {
+        cycle = match[1];
+        day = match[2];
+      }
+    }
     const params = new URLSearchParams();
     if (cycle) params.set("cycle", cycle);
     if (day) params.set("day", day);
@@ -646,9 +748,12 @@ export default function OrderMaster() {
                       sortable: true,
                       render: (r: any) => {
                         const row = r as OrderRow;
+                        const entry = selectedEntry(row);
                         return (
                           <div>
-                            <div className="hms-content-text text-[#191C1E] leading-4">{fmtDate(row.date)}</div>
+                            <div className="hms-content-text text-[#191C1E] leading-4">
+                              {fmtDate(entry?.actual_date ?? entry?.planned_date ?? row.date)}
+                            </div>
                             <div className="hms-id-text">{row.plan_id}</div>
                           </div>
                         );
@@ -706,9 +811,47 @@ export default function OrderMaster() {
                       sortable: false,
                       render: (r: any) => {
                         const row = r as OrderRow;
+                        const entry = selectedEntry(row);
+                        const history = row.cycleHistory;
+                        const canNavigate = history.length > 1;
+                        const idx = canNavigate
+                          ? clamp(cycleIndexByPlan[row.plan_id] ?? defaultHistoryIndex(row), 0, history.length - 1)
+                          : 0;
                         return (
                           <div className="min-w-[132px]">
-                            <div className="hms-name-text">{row.cycle_label}</div>
+                            {canNavigate ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => moveHistory(row.plan_id, +1)}
+                                  disabled={idx >= history.length - 1}
+                                  title="Previous cycle"
+                                  className="flex items-center justify-center w-6 h-6 text-xs border border-[#E5E7EB] rounded-md hover:bg-[#F2F4F6] disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </button>
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <div className="hms-name-text">
+                                    {entry ? `Cycle ${entry.cycle_number} / Day ${entry.cycle_day}` : row.cycle_label}
+                                  </div>
+                                  {entry && orderStatusPill(entry.order_status)}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => moveHistory(row.plan_id, -1)}
+                                  disabled={idx <= 0}
+                                  title="Most recent cycle"
+                                  className="flex items-center justify-center w-6 h-6 text-xs border border-[#E5E7EB] rounded-md hover:bg-[#F2F4F6] disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </button>
+                                <span className="text-[10px] font-semibold text-[#6B7280]">
+                                  {idx + 1} / {history.length}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="hms-name-text">{row.cycle_label}</div>
+                            )}
                             <div className="hms-department-text text-[#8C8D8F]">{row.cycles_label}</div>
                             {/* Same thin progress track as the bottom cards,
                                 filled by completed_cycles / planned_cycles. */}
@@ -726,9 +869,15 @@ export default function OrderMaster() {
                       key: "next_cycle_date",
                       label: "Next Cycle Date",
                       sortable: true,
-                      render: (r: any) => (
-                        <span className="hms-content-text text-[#191C1E] leading-4">{fmtDate((r as OrderRow).next_cycle_date)}</span>
-                      ),
+                      render: (r: any) => {
+                        const row = r as OrderRow;
+                        const entry = selectedEntry(row);
+                        return (
+                          <span className="hms-content-text text-[#191C1E] leading-4">
+                            {fmtDate(entry?.next_cycle_date ?? row.next_cycle_date)}
+                          </span>
+                        );
+                      },
                     },
                     {
                       key: "lab",
@@ -736,10 +885,12 @@ export default function OrderMaster() {
                       sortable: false,
                       render: (r: any) => {
                         const row = r as OrderRow;
+                        const entry = selectedEntry(row);
+                        const cycleId = entry?.chemotherapy_cycle_id ?? row.current_cycle_id;
                         return (
                           <LabStatusCell
-                            lab={labs[row.current_cycle_id]}
-                            pending={!!labsLoading[row.current_cycle_id]}
+                            lab={labs[cycleId]}
+                            pending={!!labsLoading[cycleId]}
                           />
                         );
                       },
@@ -762,27 +913,36 @@ export default function OrderMaster() {
                           <OrderActionMenu
                             onView={() => handleView(row)}
                             onPharmacySlip={() => handlePharmacySlip(row)}
-                            onExport={() => {
-                              const single = [row];
-                              downloadExportPdf({
-                                title: "Chemotherapy Order",
-                                subtitle: `${row.patient_name} (${row.patient_id}) - ${row.protocol}`,
-                                filename: `order-${row.plan_id}.pdf`,
-                                columns: [
-                                  { header: "Order ID", cell: () => row.plan_id },
-                                  { header: "Patient ID", cell: () => row.patient_id },
-                                  { header: "Patient Name", cell: () => row.patient_name },
-                                  { header: "Intent", cell: () => row.intent },
-                                  { header: "Protocol", cell: () => row.protocol },
-                                  { header: "Cycle/Day", cell: () => row.cycle_label },
-                                  { header: "Cycles Done", cell: () => row.cycles_label },
-                                  { header: "Next Cycle Date", cell: () => fmtDate(row.next_cycle_date) },
-                                  { header: "Status", cell: () => statusOf(row) },
-                                ],
-                                rows: single,
-                              });
-                              toast({ title: "Export complete", description: "The order PDF has been downloaded." });
-                            }}
+                          onExport={() => {
+                            const row = r as OrderRow;
+                            const entry = selectedEntry(row);
+                            const single = [row];
+                            downloadExportPdf({
+                              title: "Chemotherapy Order",
+                              subtitle: `${row.patient_name} (${row.patient_id}) - ${row.protocol}`,
+                              filename: `order-${row.plan_id}.pdf`,
+                              columns: [
+                                { header: "Order ID", cell: () => row.plan_id },
+                                { header: "Patient ID", cell: () => row.patient_id },
+                                { header: "Patient Name", cell: () => row.patient_name },
+                                { header: "Intent", cell: () => row.intent },
+                                { header: "Protocol", cell: () => row.protocol },
+                                {
+                                  header: "Cycle/Day",
+                                  cell: () =>
+                                    entry ? `Cycle ${entry.cycle_number} / Day ${entry.cycle_day}` : row.cycle_label,
+                                },
+                                { header: "Cycles Done", cell: () => row.cycles_label },
+                                {
+                                  header: "Next Cycle Date",
+                                  cell: () => fmtDate(entry?.next_cycle_date ?? row.next_cycle_date),
+                                },
+                                { header: "Status", cell: () => statusOf(row) },
+                              ],
+                              rows: single,
+                            });
+                            toast({ title: "Export complete", description: "The order PDF has been downloaded." });
+                          }}
                           />
                         );
                       },
