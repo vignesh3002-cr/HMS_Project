@@ -9,6 +9,9 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { useFilterPanel, useRescheduleQueueFilters } from "@/components/Filter";
+import { filterDataByValues } from "@/components/Filter/utils";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
@@ -26,7 +29,8 @@ import {
 } from "@/api/doctorTransfer.api";
 import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
 import { doctorLeaveApi, DoctorLeaveRecord, LeaveStatus } from "@/api/doctorLeave.api";
-import { useBranches, useDoctors } from "@/hooks/useMasterData";
+import { useDoctors } from "@/hooks/useMasterData";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 import { employeeApi, EmployeeRecord, DoctorScheduleRecord } from "@/api/employee.api";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -176,8 +180,27 @@ export default function RescheduleQueue() {
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
   const [search, setSearch] = useState("");
-  const { branches } = useBranches();
-  const { doctors: queryDoctors } = useDoctors(undefined, roleOk);
+
+  const { selectedBranchId, isAllBranches, branches } = useBranchFilter();
+
+  // Branch scope: a Branch Admin may only ever see / act on their own branch.
+  // Head Admin and Super Admin stay multi-branch. Resolved once from the stored
+  // session so it cannot drift between renders or be widened by the filter UI.
+  const { isBranchAdmin, userBranchId } = useMemo(() => {
+    const user = getUser();
+    const role = String(user?.role_type || user?.role || "").trim().toUpperCase();
+    return {
+      isBranchAdmin: role === "BRANCH_ADMIN",
+      userBranchId: String(user?.branch_id || "").trim(),
+    };
+  }, []);
+
+  const effectiveBranchId = isBranchAdmin ? userBranchId : (isAllBranches ? undefined : selectedBranchId);
+
+  const { doctors: queryDoctors } = useDoctors(
+    effectiveBranchId || undefined,
+    roleOk && (!isBranchAdmin || Boolean(userBranchId)),
+  );
   const [extraDoctors, setExtraDoctors] = useState<EmployeeRecord[]>([]);
   const doctors = useMemo(() => {
     const byId = new Map(queryDoctors.map((d) => [d.employee_id, d]));
@@ -244,6 +267,33 @@ export default function RescheduleQueue() {
   const [leaveConflictDialogOpen, setLeaveConflictDialogOpen] = useState(false);
   const [pendingApprove, setPendingApprove] = useState<DoctorLeaveRecord | null>(null);
 
+  const {
+    values: queueFilterValues,
+    appliedValues: queueAppliedValues,
+    isOpen: isQueueFilterOpen,
+    setIsOpen: setIsQueueFilterOpen,
+    handleChange: handleQueueFilterChange,
+    handleApply: handleQueueApply,
+    handleClear: handleQueueClear,
+  } = useFilterPanel();
+
+  const {
+    values: leaveFilterValues,
+    appliedValues: leaveAppliedValues,
+    isOpen: isLeaveFilterOpen,
+    setIsOpen: setIsLeaveFilterOpen,
+    handleChange: handleLeaveFilterChange,
+    handleApply: handleLeaveApply,
+    handleClear: handleLeaveClear,
+  } = useFilterPanel();
+
+  const { queueFilterFields, leaveFilterFields } = useRescheduleQueueFilters({
+    entries,
+    leaveEntries,
+    doctors,
+    branches,
+  });
+
   useEffect(() => {
     const user = getUser();
     const role = (user?.role_type || user?.role || "").toUpperCase();
@@ -305,11 +355,19 @@ export default function RescheduleQueue() {
   }, [assignBranchId, assignDate]);
 
   const fetchQueue = useCallback(async () => {
+    // Branch Admin is always pinned to their own branch.
+    if (isBranchAdmin && !userBranchId) {
+      setEntries([]);
+      setTotal(0);
+      setTotalPages(1);
+      setQueueLoading(false);
+      return;
+    }
     setQueueLoading(true);
     try {
       const res = await doctorTransferApi.getRescheduleQueue({
         status: statusFilter || undefined,
-        branchId: branchFilter || undefined,
+        branchId: effectiveBranchId || undefined,
         page,
         limit: pageSize,
       });
@@ -325,13 +383,21 @@ export default function RescheduleQueue() {
     } finally {
       setQueueLoading(false);
     }
-  }, [statusFilter, branchFilter, page, pageSize, toast]);
+  }, [statusFilter, page, pageSize, toast, isBranchAdmin, userBranchId, effectiveBranchId]);
 
   const fetchLeaves = useCallback(async () => {
+    if (isBranchAdmin && !userBranchId) {
+      setLeaveEntries([]);
+      setLeaveTotal(0);
+      setLeaveTotalPages(1);
+      setLeaveLoading(false);
+      return;
+    }
     setLeaveLoading(true);
     try {
       const res = await doctorLeaveApi.getAll({
         status: leaveStatusFilter || undefined,
+        branchId: effectiveBranchId || undefined,
         page: leavePage,
         limit: leavePageSize,
       });
@@ -347,17 +413,17 @@ export default function RescheduleQueue() {
     } finally {
       setLeaveLoading(false);
     }
-  }, [leaveStatusFilter, leavePage, leavePageSize, toast]);
+  }, [leaveStatusFilter, leavePage, leavePageSize, toast, isBranchAdmin, userBranchId, effectiveBranchId]);
 
   useEffect(() => {
     if (roleOk) fetchQueue();
-  }, [roleOk, fetchQueue]);
+  }, [roleOk, fetchQueue, effectiveBranchId]);
 
   useEffect(() => {
     if (roleOk && viewMode === "leave") {
       fetchLeaves();
     }
-  }, [roleOk, viewMode, fetchLeaves]);
+  }, [roleOk, viewMode, fetchLeaves, effectiveBranchId]);
 
   // Auto-cancel queue entries whose appointment date has already passed
   // (the original date for PENDING, the assigned date for ASSIGNED) -- a
@@ -501,16 +567,18 @@ export default function RescheduleQueue() {
     }));
   }, [assignBranchId, assignDepartmentId, doctors]);
 
-  const assignBranchOptions = useMemo(
-    () =>
-      branches.map((b) => ({
-        label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-        value: b.branch_id,
-        highlight: b.branch_id === assignTarget?.branch_id,
-        badge: b.branch_id === assignTarget?.branch_id ? "Appointment's branch" : undefined,
-      })),
-    [branches, assignTarget],
-  );
+  const assignBranchOptions = useMemo(() => {
+    const scopedBranches =
+      isBranchAdmin && userBranchId
+        ? branches.filter((b) => b.branch_id === userBranchId)
+        : branches;
+    return scopedBranches.map((b) => ({
+      label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+      value: b.branch_id,
+      highlight: b.branch_id === assignTarget?.branch_id,
+      badge: b.branch_id === assignTarget?.branch_id ? "Appointment's branch" : undefined,
+    }));
+  }, [branches, assignTarget, isBranchAdmin, userBranchId]);
 
   const branchFilterOptions = useMemo(
     () =>
@@ -522,18 +590,50 @@ export default function RescheduleQueue() {
   );
 
   const filtered = useMemo(() => {
+    let result = entries;
+
+    if (effectiveBranchId) {
+      result = result.filter((e) => e.branch_id === effectiveBranchId);
+    }
+
     const q = search.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((e) => {
-      const name = [e.patient_bio_data?.patient_first_name, e.patient_bio_data?.patient_last_name]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      const mobile = e.patient_bio_data?.patient_primary_mobile?.toLowerCase() || "";
-      const pid = e.patient_id.toLowerCase();
-      return name.includes(q) || mobile.includes(q) || pid.includes(q);
-    });
-  }, [entries, search]);
+    if (q) {
+      result = result.filter((e) => {
+        const name = [e.patient_bio_data?.patient_first_name, e.patient_bio_data?.patient_last_name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        const mobile = e.patient_bio_data?.patient_primary_mobile?.toLowerCase() || "";
+        const pid = e.patient_id.toLowerCase();
+        return name.includes(q) || mobile.includes(q) || pid.includes(q);
+      });
+    }
+
+    result = filterDataByValues(
+      result.map((e) => ({
+        ...e,
+        patientName: [e.patient_bio_data?.patient_first_name, e.patient_bio_data?.patient_last_name]
+          .filter(Boolean)
+          .join(" "),
+      })),
+      queueAppliedValues,
+      queueFilterFields
+    ) as unknown as RescheduleQueueEntry[];
+
+    return result;
+  }, [entries, search, effectiveBranchId, queueAppliedValues, queueFilterFields]);
+
+  const filteredLeaves = useMemo(() => {
+    let result = leaveEntries;
+    if (effectiveBranchId) {
+      result = result.filter((e) => e.branch_id === effectiveBranchId);
+    }
+    return filterDataByValues(
+      result,
+      leaveAppliedValues,
+      leaveFilterFields
+    ) as unknown as DoctorLeaveRecord[];
+  }, [leaveEntries, effectiveBranchId, leaveAppliedValues, leaveFilterFields]);
 
   const queuePatientAgeData = useMemo(() => {
     return filtered.map((e) => ({
@@ -626,7 +726,8 @@ export default function RescheduleQueue() {
 
   const openAssign = (entry: RescheduleQueueEntry) => {
     setAssignDoctorId("");
-    setAssignBranchId(entry.branch_id);
+    // Branch Admin can only reassign within their own branch.
+    setAssignBranchId(isBranchAdmin ? userBranchId || entry.branch_id : entry.branch_id);
     const defaultDepartmentId =
       entry.department_id ||
       doctors.find((d) => d.employee_id === entry.employee_id)?.department_id ||
@@ -1248,32 +1349,23 @@ export default function RescheduleQueue() {
             <div className="flex items-center gap-2 ml-auto flex-wrap">
               {viewMode === "transfer" ? (
                 <>
-                  <div className="w-40">
-                    <FormDropdown
-                      name="queue_status"
-                      className="h-[32px] !py-1 text-xs rounded-lg"
-                      options={STATUS_FILTERS}
-                      value={statusFilter}
-                      onValueChange={(v) => {
-                        setStatusFilter(v);
-                        setPage(1);
-                      }}
-                      placeholder="All status"
-                    />
-                  </div>
-                  <div className="w-52">
-                    <FormDropdown
-                      name="queue_branch"
-                      className="h-[32px] !py-1 text-xs rounded-lg"
-                      options={branchFilterOptions}
-                      value={branchFilter}
-                      onValueChange={(v) => {
-                        setBranchFilter(v);
-                        setPage(1);
-                      }}
-                      placeholder="All branches"
-                    />
-                  </div>
+                  <ToolbarFilter
+                    title="Filter Queue"
+                    fields={queueFilterFields}
+                    values={queueFilterValues}
+                    appliedValues={queueAppliedValues}
+                    onChange={handleQueueFilterChange}
+                    onApply={() => {
+                      handleQueueApply();
+                      setPage(1);
+                    }}
+                    onClear={() => {
+                      handleQueueClear();
+                      setPage(1);
+                    }}
+                    open={isQueueFilterOpen}
+                    onOpenChange={setIsQueueFilterOpen}
+                  />
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6B7280]" />
                     <input
@@ -1286,19 +1378,23 @@ export default function RescheduleQueue() {
                   </div>
                 </>
               ) : (
-                <div className="w-40">
-                  <FormDropdown
-                    name="leave_status"
-                    className="h-[32px] !py-1 text-xs rounded-lg"
-                    options={LEAVE_STATUS_FILTERS}
-                    value={leaveStatusFilter}
-                    onValueChange={(v) => {
-                      setLeaveStatusFilter(v as LeaveStatus | "");
-                      setLeavePage(1);
-                    }}
-                    placeholder="All status"
-                  />
-                </div>
+                <ToolbarFilter
+                  title="Filter Leaves"
+                  fields={leaveFilterFields}
+                  values={leaveFilterValues}
+                  appliedValues={leaveAppliedValues}
+                  onChange={handleLeaveFilterChange}
+                  onApply={() => {
+                    handleLeaveApply();
+                    setLeavePage(1);
+                  }}
+                  onClear={() => {
+                    handleLeaveClear();
+                    setLeavePage(1);
+                  }}
+                  open={isLeaveFilterOpen}
+                  onOpenChange={setIsLeaveFilterOpen}
+                />
               )}
             </div>
           </div>
@@ -1348,7 +1444,7 @@ export default function RescheduleQueue() {
           ) : (
             <HmsTable
               columns={leaveColumns}
-              data={leaveEntries}
+              data={filteredLeaves}
               sortField={sortField}
               sortDirection={sortDirection}
               onSort={() => {}}
@@ -1500,13 +1596,18 @@ export default function RescheduleQueue() {
                         setAssignDepartmentId("");
                         setAssignDoctorId("");
                       }}
+                      disabled={isBranchAdmin}
                       placeholder="Select branch"
                     />
-                    {assignTarget && assignBranchId === assignTarget.branch_id && (
+                    {isBranchAdmin ? (
+                      <p className="text-[11px] text-blue-600 mt-1">
+                        Locked to your assigned branch — reassignment stays in-branch.
+                      </p>
+                    ) : assignTarget && assignBranchId === assignTarget.branch_id ? (
                       <p className="text-[11px] text-blue-600 mt-1">
                         Defaults to the appointment's branch — changeable.
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1.5 block">

@@ -99,6 +99,7 @@ export default function Departments() {
           <ToolbarFilter
             fields={departmentFilterFields}
             values={filterValues}
+            appliedValues={appliedValues}
             onChange={handleFilterChange}
             onApply={handleApplyFilter}
             onClear={handleClearFilter}

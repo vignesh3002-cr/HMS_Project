@@ -1,4 +1,11 @@
 import type { FilterField, SelectOption } from "./types";
+import { getUser } from "@/utils/token";
+
+export function isMultiBranchUser(): boolean {
+  const user = getUser();
+  const role = String(user?.role_type || user?.role || "").trim().toUpperCase();
+  return role === "HEAD_ADMIN" || role === "SUPER_ADMIN";
+}
 
 export function isFilterActive(values: Record<string, any>): boolean {
   return Object.values(values).some((val) => val !== undefined && val !== null && val !== "");

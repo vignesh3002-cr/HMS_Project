@@ -14,7 +14,8 @@ export type StatusTone =
   | "emerald"
   | "gray"
   | "teal"
-  | "rose";
+  | "rose"
+  | "deactivated";
 
 type StatusBadgeProps = {
   children?: ReactNode;
@@ -35,18 +36,22 @@ const toneClasses: Record<StatusTone, { container: string; dot: string }> = {
   gray:     { container: "bg-gray-100 text-gray-600", dot: "bg-gray-400" },
   teal:     { container: "bg-teal-50 text-teal-600", dot: "bg-teal-500" },
   rose:     { container: "bg-rose-50 text-rose-600", dot: "bg-rose-500" },
+  deactivated: { container: "bg-[#f68539]/10 text-[#f68539] border border-[#f68539]/20", dot: "bg-[#f68539]" },
 };
 
 const statusToneMap: Record<string, StatusTone> = {
   active: "green",
   leave: "orange",
   inactive: "slate",
+  deactivated: "deactivated",
   scheduled: "blue",
   booked: "blue",
   confirmed: "green",
   cancelled: "red",
+  discontinued: "red",
   rescheduled: "teal",
   "in consultation": "purple",
+  "in progress": "orange",
   completed: "emerald",
   "no show": "gray",
   "reschedule required": "amber",

@@ -26,7 +26,6 @@ const STALE_TIME_CATALOGS = 15 * 60 * 1000; // 15 minutes - oncology catalogs ar
 
 export function useProtocolCatalogs(cancerTypeIds: string[]) {
   const [subtypeIds, setSubtypeIds] = useState<string[]>([]);
-  const [filterByCancerAndSubtype, setFilterByCancerAndSubtype] = useState(true);
 
   // Local overrides for medicines and intents (e.g. when a custom drug is created in drawer)
   const [localAllMeds, setLocalAllMeds] = useState<MedicineOption[] | null>(null);
@@ -144,19 +143,7 @@ export function useProtocolCatalogs(cancerTypeIds: string[]) {
     }
   }, [subtypes, cancerTypeIds]);
 
-  // 6. All Hospital Medicines (Cached, only fetched when filter is disabled)
-  const { data: queryAllHospitalMeds = [], isLoading: loadingAllMeds } = useQuery<MedicineOption[]>({
-    queryKey: ["oncology-all-hospital-meds"],
-    queryFn: async () => {
-      const res = await chemotherapyApi.listMedicines();
-      const data = (res.data as any)?.data ?? res.data;
-      return Array.isArray(data) ? data : [];
-    },
-    enabled: !filterByCancerAndSubtype,
-    staleTime: STALE_TIME_CATALOGS,
-  });
-
-  // 7. Role-Based Medicines (Cached)
+  // 6. Role-Based Medicines (Cached)
   const { data: queryPremeds = [], isLoading: loadingPremedMeds } = useQuery<MedicineOption[]>({
     queryKey: ["oncology-meds-by-role", "PREMEDICATION"],
     queryFn: async () => {
@@ -198,16 +185,15 @@ export function useProtocolCatalogs(cancerTypeIds: string[]) {
   });
 
   // Merge queries with local overrides
-  const allHospitalMeds = localAllMeds ?? queryAllHospitalMeds;
-  const premedMeds = !filterByCancerAndSubtype && allHospitalMeds.length > 0 ? allHospitalMeds : (localPremedMeds ?? queryPremeds);
-  const chemoMeds = !filterByCancerAndSubtype && allHospitalMeds.length > 0 ? allHospitalMeds : (localChemoMeds ?? queryChemoMeds);
-  const supportiveMeds = !filterByCancerAndSubtype && allHospitalMeds.length > 0 ? allHospitalMeds : (localSupportiveMeds ?? querySupportiveMeds);
-  const dischargeMeds = !filterByCancerAndSubtype && allHospitalMeds.length > 0 ? allHospitalMeds : (localDischargeMeds ?? queryDischargeMeds);
+  const premedMeds = localPremedMeds ?? queryPremeds;
+  const chemoMeds = localChemoMeds ?? queryChemoMeds;
+  const supportiveMeds = localSupportiveMeds ?? querySupportiveMeds;
+  const dischargeMeds = localDischargeMeds ?? queryDischargeMeds;
   const dilutionMeds = localDilutionMeds ?? queryDilutionMeds;
 
   // Setters wrap local overrides for 100% backward compatibility with CreateProtocol
   const setAllHospitalMeds = (updater: React.SetStateAction<MedicineOption[]>) => {
-    setLocalAllMeds((prev) => (typeof updater === "function" ? updater(prev ?? queryAllHospitalMeds) : updater));
+    setLocalAllMeds((prev) => (typeof updater === "function" ? updater(prev ?? []) : updater));
   };
   const setPremedMeds = (updater: React.SetStateAction<MedicineOption[]>) => {
     setLocalPremedMeds((prev) => (typeof updater === "function" ? updater(prev ?? queryPremeds) : updater));
@@ -235,11 +221,6 @@ export function useProtocolCatalogs(cancerTypeIds: string[]) {
     subtypeIds,
     setSubtypeIds,
     loadingSubtypes,
-    filterByCancerAndSubtype,
-    setFilterByCancerAndSubtype,
-    allHospitalMeds,
-    setAllHospitalMeds,
-    loadingAllMeds,
     premedMeds,
     setPremedMeds,
     chemoMeds,
@@ -260,5 +241,7 @@ export function useProtocolCatalogs(cancerTypeIds: string[]) {
     treatmentIntentOptions,
     setTreatmentIntentOptions,
     loadingTreatmentIntents,
+    allHospitalMeds: localAllMeds ?? [],
+    setAllHospitalMeds,
   };
 }

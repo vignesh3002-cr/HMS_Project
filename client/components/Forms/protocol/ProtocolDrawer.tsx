@@ -21,11 +21,9 @@ import {
 } from "@/utils/chemoCalculations";
 import { ProtocolSelect } from "./ProtocolSelect";
 import {
-  CLEAN_DISCHARGE_UNITS,
-  CLEAN_DOSE_UNITS,
+  CLEAN_CLINICAL_UNITS,
   CLEAN_VOLUME_UNITS,
   DOSE_CALC_OPTIONS,
-  PROTOCOL_DURATION_DAYS,
   PROTOCOL_FREQUENCY_OPTIONS,
   PROTOCOL_INSTRUCTION_OPTIONS,
   Req,
@@ -125,6 +123,14 @@ export function ProtocolDrawer({
 }: ProtocolDrawerProps) {
   // Staging buffer: local copy of active row. Edits stay here until "Done / Save" is clicked.
   const [draftRow, setDraftRow] = useState<any>(null);
+  const [postDrugCategory, setPostDrugCategory] = useState<"non-chemo" | "chemo">("non-chemo");
+  const [availableClinicalUnits, setAvailableClinicalUnits] = useState<string[]>(CLEAN_CLINICAL_UNITS);
+
+  const handleAddUnit = (newUnit: string) => {
+    const trimmed = (newUnit || "").trim();
+    if (!trimmed) return;
+    setAvailableClinicalUnits((prev) => Array.from(new Set([...prev, trimmed])));
+  };
 
   useEffect(() => {
     if (!activeDrawer) {
@@ -137,7 +143,19 @@ export function ProtocolDrawer({
     else if (section === "chemo") original = chemoPlans[index];
     else if (section === "supportive") original = supportive[index];
     else if (section === "dilution") original = dilution[index];
-    else if (section === "post") original = post[index];
+    else if (section === "post") {
+      original = post[index];
+      // Auto-detect category of existing medicine if possible
+      if (original?.medication) {
+        if (chemoMeds.some((m) => m.medicine_id === original.medication)) {
+          setPostDrugCategory("chemo");
+        } else {
+          setPostDrugCategory("non-chemo");
+        }
+      } else {
+        setPostDrugCategory("non-chemo");
+      }
+    }
 
     setDraftRow(original ? { ...original } : null);
   }, [activeDrawer?.section, activeDrawer?.index]);
@@ -258,13 +276,21 @@ export function ProtocolDrawer({
                         setDraftRow((prev: any) => ({
                           ...prev,
                           medicineName: text,
-                          medication: prev?.medication || text,
+                          medication: text ? (prev?.medication || text) : "",
                         }));
                       }}
                       options={getDropdownOptions(premedMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
+                        if (!v) {
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            medication: "",
+                            medicineName: "",
+                          }));
+                          return;
+                        }
                         const med = premedMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
@@ -312,9 +338,11 @@ export function ProtocolDrawer({
                         disabled={disabled}
                       />
                       <ProtocolSelect
-                        options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...availableClinicalUnits, row.unit].filter(Boolean)))}
                         value={row.unit}
+                        allowCreate
                         onValueChange={(v) => {
+                          handleAddUnit(v);
                           setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
                         placeholder="Unit"
@@ -407,13 +435,21 @@ export function ProtocolDrawer({
                         setDraftRow((prev: any) => ({
                           ...prev,
                           medicineName: text,
-                          medication: prev?.medication || text,
+                          medication: text ? (prev?.medication || text) : "",
                         }));
                       }}
                       options={getDropdownOptions(chemoMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
+                        if (!v) {
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            medication: "",
+                            medicineName: "",
+                          }));
+                          return;
+                        }
                         const medObj = chemoMeds.find((m) => m.medicine_id === v);
                         const gid = medObj?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (medObj?.dosage_form ? [medObj.dosage_form] : []);
@@ -633,13 +669,21 @@ export function ProtocolDrawer({
                         setDraftRow((prev: any) => ({
                           ...prev,
                           medicineName: text,
-                          medication: prev?.medication || text,
+                          medication: text ? (prev?.medication || text) : "",
                         }));
                       }}
                       options={getDropdownOptions(supportiveMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
+                        if (!v) {
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            medication: "",
+                            medicineName: "",
+                          }));
+                          return;
+                        }
                         const med = supportiveMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
@@ -687,9 +731,11 @@ export function ProtocolDrawer({
                         disabled={disabled}
                       />
                       <ProtocolSelect
-                        options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...availableClinicalUnits, row.unit].filter(Boolean)))}
                         value={row.unit ?? ""}
+                        allowCreate
                         onValueChange={(v) => {
+                          handleAddUnit(v);
                           setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
                         placeholder="Unit"
@@ -763,13 +809,21 @@ export function ProtocolDrawer({
                         setDraftRow((prev: any) => ({
                           ...prev,
                           medicineName: text,
-                          medication: prev?.medication || text,
+                          medication: text ? (prev?.medication || text) : "",
                         }));
                       }}
                       options={allAvailableDilutionMeds}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
+                        if (!v) {
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            medication: "",
+                            medicineName: "",
+                          }));
+                          return;
+                        }
                         const med = dilutionMeds.find((m) => m.medicine_id === v) || chemoMeds.find((m) => m.medicine_id === v) || premedMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
@@ -828,9 +882,11 @@ export function ProtocolDrawer({
                           disabled={disabled}
                         />
                         <ProtocolSelect
-                          options={Array.from(new Set([...CLEAN_DOSE_UNITS, row.unit].filter(Boolean)))}
+                          options={Array.from(new Set([...availableClinicalUnits, row.unit].filter(Boolean)))}
                           value={row.unit}
+                          allowCreate
                           onValueChange={(v) => {
+                            handleAddUnit(v);
                             const oldUnit = row.unit;
                             const numDose = parseFloat(row.dose);
                             let nextDose = row.dose;
@@ -933,12 +989,57 @@ export function ProtocolDrawer({
             {activeDrawer.section === "post" && draftRow && (() => {
               const row = draftRow;
               const isDurationFilledWithNumber = /^\d+(\.\d+)?$/.test(String(row.duration ?? "").trim());
+
+              // Non-chemo combines discharge, supportive, and premedication drugs
+              const nonChemoMeds = (() => {
+                const combined = [...(dischargeMeds || []), ...(supportiveMeds || []), ...(premedMeds || [])];
+                const seen = new Set<string>();
+                return combined.filter((m) => {
+                  const id = m.medicine_id || m.medicine_name;
+                  if (seen.has(id)) return false;
+                  seen.add(id);
+                  return true;
+                });
+              })();
+
+              // Determine active medicine list based on selected category tab
+              const currentPostMeds = postDrugCategory === "chemo" ? chemoMeds : nonChemoMeds;
+
               return (
                 <>
+                  {/* Category Filter Toggle Tabs (Strictly 2 buttons) */}
+                  <div>
+                    <label className={drawerLabelCls}>Filter Medication Category</label>
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-lg border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setPostDrugCategory("non-chemo")}
+                        className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition ${
+                          postDrugCategory === "non-chemo"
+                            ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80"
+                            : "text-slate-500 hover:text-slate-800"
+                        }`}
+                      >
+                        Non-Chemo Drugs
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPostDrugCategory("chemo")}
+                        className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition ${
+                          postDrugCategory === "chemo"
+                            ? "bg-white text-indigo-700 shadow-2xs border border-slate-200/80"
+                            : "text-slate-500 hover:text-slate-800"
+                        }`}
+                      >
+                        Chemo Drugs
+                      </button>
+                    </div>
+                  </div>
+
                   <div>
                     <label className={drawerLabelCls}>Drug Formulation</label>
                     <ProtocolSelect
-                      options={getFormDropdownOptions(row.medication, row.form, dischargeMeds.length > 0 ? dischargeMeds : premedMeds, genericCatalog)}
+                      options={getFormDropdownOptions(row.medication, row.form, currentPostMeds, genericCatalog)}
                       value={row.form}
                       allowCreate
                       onValueChange={(v) => {
@@ -952,7 +1053,9 @@ export function ProtocolDrawer({
                   </div>
 
                   <div>
-                    <label className={drawerLabelCls}>Medication / Generic Name (On Discharge) <Req /></label>
+                    <label className={drawerLabelCls}>
+                      Medication / Generic Name (On Discharge) <Req />
+                    </label>
                     <ProtocolSelect
                       editableChip
                       displayValue={row.medicineName || getPostMedName(row.medication)}
@@ -960,15 +1063,22 @@ export function ProtocolDrawer({
                         setDraftRow((prev: any) => ({
                           ...prev,
                           medicineName: text,
-                          medication: prev?.medication || text,
+                          medication: text ? (prev?.medication || text) : "",
                         }));
                       }}
-                      options={getDropdownOptions(dischargeMeds.length > 0 ? dischargeMeds : premedMeds, row.medication, row.medicineName)}
+                      options={getDropdownOptions(currentPostMeds, row.medication, row.medicineName)}
                       value={row.medication}
                       allowCreate
                       onValueChange={(v) => {
-                        const medList = dischargeMeds.length > 0 ? dischargeMeds : premedMeds;
-                        const med = medList.find((m) => m.medicine_id === v) || chemoMeds.find((m) => m.medicine_id === v);
+                        if (!v) {
+                          setDraftRow((prev: any) => ({
+                            ...prev,
+                            medication: "",
+                            medicineName: "",
+                          }));
+                          return;
+                        }
+                        const med = currentPostMeds.find((m) => m.medicine_id === v);
                         const gid = med?.generic_id;
                         const availableForms = (gid && genericCatalog[gid]?.forms) || (med?.dosage_form ? [med.dosage_form] : []);
                         setDraftRow((prev: any) => {
@@ -989,10 +1099,10 @@ export function ProtocolDrawer({
                       placeholder={
                         loadingDischargeMeds
                           ? "Loading discharge drugs..."
-                          : "Select or type discharge generic drug"
+                          : `Select or type ${postDrugCategory === "chemo" ? "chemo" : "general"} drug`
                       }
-                      emptyMessage="No discharge medicines found"
-                      loading={loadingDischargeMeds}
+                      emptyMessage="No medicines found"
+                      loading={loadingDischargeMeds || loadingChemoMeds || loadingSupportiveMeds}
                       disabled={disabled}
                       className="h-9"
                     />
@@ -1015,9 +1125,11 @@ export function ProtocolDrawer({
                         disabled={disabled}
                       />
                       <ProtocolSelect
-                        options={Array.from(new Set([...CLEAN_DISCHARGE_UNITS, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...availableClinicalUnits, row.unit].filter(Boolean)))}
                         value={row.unit}
+                        allowCreate
                         onValueChange={(v) => {
+                          handleAddUnit(v);
                           setDraftRow((prev: any) => ({ ...prev, unit: v }));
                         }}
                         placeholder="Unit"
@@ -1047,17 +1159,18 @@ export function ProtocolDrawer({
                     <div>
                       <label className={drawerLabelCls}>Duration</label>
                       <div className="grid grid-cols-2 gap-1.5">
-                        <ProtocolSelect
-                          options={PROTOCOL_DURATION_DAYS}
-                          value={row.duration}
-                          allowCreate
-                          onValueChange={(v) => {
-                            setDraftRow((prev: any) => ({ ...prev, duration: v }));
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={row.duration ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^\d]/g, "");
+                            setDraftRow((prev: any) => ({ ...prev, duration: val }));
                           }}
-                          placeholder="Duration"
-                          emptyMessage="No duration options"
+                          placeholder="e.g. 7"
+                          className={drawerInputCls}
                           disabled={disabled}
-                          className="h-9"
                         />
                         <ProtocolSelect
                           options={getDurationUnitOptions(row.duration, row.durationDays)}

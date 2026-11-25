@@ -23,7 +23,8 @@ import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date
 import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { useFilterPanel } from "@/components/Filter";
+import { useFilterPanel, useInpatientFilters } from "@/components/Filter";
+import { filterDataByValues } from "@/components/Filter/utils";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import {
   ipdApi,
@@ -234,39 +235,17 @@ const InpatientAdmissions: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
-  // Status lists every admission status (not just ones on the current page)
-  // so it stays complete no matter what's currently loaded.
-  const ipdFilterFields = useMemo(() => [
-    {
-      id: "status",
-      label: "Status",
-      type: "multiselect" as const,
-      options: [
-        { label: "Planned", value: "PLANNED" },
-        { label: "Admitted", value: "ADMITTED" },
-        { label: "Discharged", value: "DISCHARGED" },
-        { label: "Cancelled", value: "CANCELLED" },
-        { label: "No-Show", value: "NO_SHOW" },
-      ],
-    },
-    {
-      id: "wardId",
-      label: "Ward",
-      type: "select" as const,
-      options: [
-        { label: "All Wards", value: "" },
-        ...wards.map((w) => ({ label: w.ward_name, value: w.ward_id })),
-      ],
-    },
-  ], [wards]);
-
   const ipdAppliedStatus: string[] = useMemo(
     () => (Array.isArray(ipdAppliedFilterValues.status) ? ipdAppliedFilterValues.status : []),
     [ipdAppliedFilterValues.status],
   );
 
   const ipdAppliedWardId: string = useMemo(
-    () => (typeof ipdAppliedFilterValues.wardId === "string" ? ipdAppliedFilterValues.wardId : ""),
+    () => {
+      const w = ipdAppliedFilterValues.wardId;
+      if (Array.isArray(w)) return w[0] ?? "";
+      return typeof w === "string" ? w : "";
+    },
     [ipdAppliedFilterValues.wardId],
   );
 
@@ -348,6 +327,45 @@ const InpatientAdmissions: React.FC = () => {
   const admissions = admissionsData?.admissions ?? [];
   const ipdTotal = admissionsData?.total ?? 0;
   const ipdTotalPages = admissionsData?.totalPages ?? 1;
+
+  const { inpatientFilterFields } = useInpatientFilters({
+    admissions,
+    wards,
+    filterValues: ipdFilterValues,
+  });
+
+  const filteredAdmissions = useMemo(() => {
+    return filterDataByValues(
+      admissions.map((a) => {
+        const p = a.patient_bio_data;
+        const patientName = p
+          ? [p.patient_first_name, p.patient_middle_name, p.patient_last_name].filter(Boolean).join(" ")
+          : "";
+        const doc = a.employees;
+        const primaryDoctorName = doc
+          ? [doc.first_name, doc.middle_name, doc.last_name].filter(Boolean).join(" ")
+          : "";
+        const dutyDoc = a.assigned_doctor;
+        const dutyDoctorName = dutyDoc
+          ? [dutyDoc.first_name, dutyDoc.middle_name, dutyDoc.last_name].filter(Boolean).join(" ")
+          : "";
+        const nurse = a.assigned_nurse;
+        const dutyNurseName = nurse
+          ? [nurse.first_name, nurse.middle_name, nurse.last_name].filter(Boolean).join(" ")
+          : "";
+        return {
+          ...a,
+          patientName,
+          primaryDoctorName,
+          dutyDoctorName,
+          dutyNurseName,
+          branchName: a.branch?.branch_name ?? "",
+        };
+      }),
+      ipdAppliedFilterValues,
+      inpatientFilterFields,
+    ) as unknown as AdmissionRecord[];
+  }, [admissions, ipdAppliedFilterValues, inpatientFilterFields]);
 
   // Critical-patient indicators for the IPD patient column, mirroring how the
   // OPD table marks critical patients (admissions state must exist first).
@@ -816,7 +834,7 @@ const InpatientAdmissions: React.FC = () => {
     },
     {
       key: "doctor",
-      label: "DOCTOR",
+      label: "PRIMARY DOCTOR",
       className: "!whitespace-normal",
       render: (row) => {
         const d = row.employees;
@@ -863,7 +881,7 @@ const InpatientAdmissions: React.FC = () => {
     },
     {
       key: "care_team",
-      label: "CARE TEAM",
+      label: "DUTY DOCTOR & NURSE",
       sortable: false,
       className: "!whitespace-normal",
       render: (row) => {
@@ -879,7 +897,7 @@ const InpatientAdmissions: React.FC = () => {
         ) =>
           person ? (
             <div className="flex items-baseline gap-1.5 leading-tight">
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="hms-name-text capitalize">
                 {prefix}
                 {[person.first_name, person.middle_name, person.last_name].filter(Boolean).join(" ")}
@@ -892,19 +910,19 @@ const InpatientAdmissions: React.FC = () => {
               className="flex items-baseline gap-1.5 leading-tight text-left group"
               title={`Assign ${label.toLowerCase()}`}
             >
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="text-[11px] font-semibold text-blue-600 group-hover:underline">+ Assign</span>
             </button>
           ) : (
             <div className="flex items-baseline gap-1.5 leading-tight">
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="text-[11px] text-slate-400">Unassigned</span>
             </div>
           );
         return (
           <div className="flex flex-col gap-1">
-            {slot("Duty", row.assigned_doctor, "Dr. ")}
-            {slot("Nurse", row.assigned_nurse)}
+            {slot("Duty Dr.", row.assigned_doctor, "Dr. ")}
+            {slot("Duty Nurse", row.assigned_nurse)}
           </div>
         );
       },
@@ -1216,8 +1234,9 @@ const InpatientAdmissions: React.FC = () => {
                 {/* Filters */}
                 <ToolbarFilter
                   title="Filters"
-                  fields={ipdFilterFields}
+                  fields={inpatientFilterFields}
                   values={ipdFilterValues}
+                  appliedValues={ipdAppliedFilterValues}
                   onChange={handleIpdFilterChange}
                   onApply={() => {
                     handleApplyIpdFilter();
@@ -1245,7 +1264,7 @@ const InpatientAdmissions: React.FC = () => {
               <HmsTable
                 scrollable={false}
                 columns={ipdColumns}
-                data={admissions}
+                data={filteredAdmissions}
                 sortField={ipdSortField}
                 sortDirection={ipdSortDirection}
                 onSort={handleIpdSort}

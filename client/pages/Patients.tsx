@@ -6,6 +6,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import {
   List,
   LayoutGrid,
@@ -83,9 +84,25 @@ function formatMobile(mobile: string | null, nationality: string | null): string
   return trimmed;
 }
 
+// A patient may carry 1..n diagnoses: the backend returns them as
+// `diagnoses` (all chemotherapy plans + staging records, de-duplicated —
+// see backend patientDiagnoses.ts). The legacy single `diagnosis_name` is
+// only a fallback for older cached responses. Empty list -> "Not recorded".
+const NOT_RECORDED = "Not recorded";
+
+function getDiagnoses(p: PatientRecord): string[] {
+  const list = (p.diagnoses ?? [])
+    .map((d) => (d ?? "").trim())
+    .filter((d) => d.length > 0);
+  if (list.length > 0) return list;
+  const legacy = p.diagnosis_name?.trim();
+  return legacy ? [legacy] : [];
+}
+
 // Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status
-// plus the derived diagnosis — all real patient_bio_data columns otherwise.
+// plus the derived diagnoses — all real patient_bio_data columns otherwise.
 function mapToGridPatient(p: PatientRecord) {
+  const diagnoses = getDiagnoses(p);
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
@@ -93,7 +110,10 @@ function mapToGridPatient(p: PatientRecord) {
     gender: formatGender(p.patient_gender),
     mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
     bloodGroup: p.patient_blood_group ?? "—",
-    diagnose: p.diagnosis_name?.trim() || "Not recorded",
+    // Joined string drives search / sort / PDF export; diagnoseList feeds
+    // the rendered badges (first badge + "+N" chip, tooltip lists them all).
+    diagnose: diagnoses.length > 0 ? diagnoses.join(", ") : NOT_RECORDED,
+    diagnoseList: diagnoses,
     photo: p.patient_photo_url ?? "",
     status: getPatientStatus(p),
   };
@@ -142,9 +162,9 @@ function isTodayOrFuture(record: AppointmentRecord, todayStartMs: number): boole
 
 // Builds patient_id -> the doctor from their nearest upcoming (today or
 // later) appointment that isn't cancelled/no-show/completed, from the same
-// /appointments data Appointments.tsx already uses — GET /patients has no
-// doctor/diagnosis join today, so this is assembled entirely on the
-// frontend from the existing appointments endpoint.
+// /appointments data Appointments.tsx already uses — GET /patients carries no
+// doctor info (diagnoses ARE aggregated server-side), so this is assembled
+// entirely on the frontend from the existing appointments endpoint.
 function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<string, AssignedDoctor> {
   const todayStartMs = startOfTodayUtcMs();
   const nearestByPatient: Record<string, { sortKey: number; record: AppointmentRecord }> = {};
@@ -177,22 +197,24 @@ function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<strin
 
 // List view additionally shows diagnose + assigned doctor. Assigned doctor
 // comes from the patient's own appointment history (see
-// buildAssignedDoctorMap above); diagnose is the API's derived
-// `diagnosis_name` — the cancer type of the patient's open (ACTIVE/PLANNED)
-// treatment plan only, with a clear "Not recorded" placeholder for completed
-// treatment or patients with no plan.
+// buildAssignedDoctorMap above); diagnoses come from the API's `diagnoses`
+// list — every chemotherapy plan (open AND completed) plus the patient's
+// staging records, de-duplicated — with a clear "Not recorded" placeholder
+// for patients that have no diagnosis anywhere.
 function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, AssignedDoctor>) {
   const assigned = assignedDoctors[p.patient_id];
   const { bg: deptBg, text: deptColor } = getDepartmentColors(assigned?.department);
+  const diagnoses = getDiagnoses(p);
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
     age: calculateAge(p.patient_dob),
     gender: formatGender(p.patient_gender),
     mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
-    diagnose: p.diagnosis_name?.trim() || "Not recorded",
-    diagnoseBg: "#F3F4F6",
-    diagnoseColor: "#6B7280",
+    // Joined string drives search / sort / PDF export; diagnoseList feeds
+    // the Diagnose cell (first badge + "+N" chip, hover tooltip lists all).
+    diagnose: diagnoses.length > 0 ? diagnoses.join(", ") : NOT_RECORDED,
+    diagnoseList: diagnoses,
     patientAvatarColor: assigned ? deptColor : "#00488D",
     patientAvatarBg: assigned ? deptBg : "#D6E3FF",
     doctor: assigned?.name ?? "Unassigned",
@@ -214,6 +236,53 @@ const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }
     {text}
   </div>
 );
+
+// 2. Diagnoses — first diagnosis as a badge; when there are more, a "+N"
+//    chip whose hover tooltip lists every diagnosis. "Not recorded" when
+//    the patient has none.
+const BADGE_BASE = "inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase whitespace-nowrap";
+
+const DiagnoseBadges = ({ list }: { list: string[] }) => {
+  if (list.length === 0) {
+    return (
+      <span className={BADGE_BASE} style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
+        {NOT_RECORDED}
+      </span>
+    );
+  }
+  if (list.length === 1) return (
+    <span className={BADGE_BASE} style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
+      {list[0]}
+    </span>
+  );
+  // ONE tooltip over the whole group: hovering anywhere on the badge row
+  // (first diagnosis or the +N chip) lists every diagnosis.
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1.5 flex-wrap cursor-default">
+          <span className={BADGE_BASE} style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
+            {list[0]}
+          </span>
+          <span
+            className="px-2 py-1 rounded-full text-[10px] font-bold"
+            style={{ backgroundColor: "#D6E3FF", color: "#00488D" }}
+            aria-label={`${list.length} diagnoses`}
+          >
+            +{list.length - 1}
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[280px]">
+        <ul className="space-y-0.5 text-left">
+          {list.map((d, i) => (
+            <li key={`${i}-${d}`}>{d}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
 
 // ============================================================
 // GRID-VIEW SUB-COMPONENTS
@@ -315,7 +384,6 @@ function CardMenu({ onView, onEdit }: { onView: () => void; onEdit: () => void }
 export default function PatientsManagement() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isCriticalOnly = searchParams.get("critical") === "true";
   const { toast } = useToast();
   const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
@@ -430,6 +498,10 @@ export default function PatientsManagement() {
     setViewMode(mode);
     setCurrentPage(1);
     setInfiniteScroll(false);
+    if (searchParams.has("critical")) {
+      searchParams.delete("critical");
+      setSearchParams(searchParams, { replace: true });
+    }
     handleClearFilter();
   };
 
@@ -455,7 +527,33 @@ export default function PatientsManagement() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
+    setAppliedFilter,
+    removeAppliedFilter,
   } = useFilterPanel(patientFilterFields);
+
+  useEffect(() => {
+    if (searchParams.get("critical") === "true") {
+      setAppliedFilter("priority", ["critical"]);
+    }
+  }, [searchParams, setAppliedFilter]);
+
+  const handleClear = useCallback(() => {
+    if (searchParams.has("critical")) {
+      searchParams.delete("critical");
+      setSearchParams(searchParams, { replace: true });
+    }
+    handleClearFilter();
+  }, [searchParams, setSearchParams, handleClearFilter]);
+
+  const handleApply = useCallback(() => {
+    if (!filterValues.priority || !filterValues.priority.includes("critical")) {
+      if (searchParams.has("critical")) {
+        searchParams.delete("critical");
+        setSearchParams(searchParams, { replace: true });
+      }
+    }
+    handleApplyFilter();
+  }, [filterValues.priority, searchParams, setSearchParams, handleApplyFilter]);
 
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(
@@ -483,14 +581,16 @@ export default function PatientsManagement() {
       );
     }
 
-    result = filterDataByValues(result, appliedValues, patientFilterFields);
+    const { priority, ...dbFilterValues } = appliedValues;
+    result = filterDataByValues(result, dbFilterValues, patientFilterFields);
 
-    if (isCriticalOnly) {
+    const isCriticalActive = searchParams.get("critical") === "true" || appliedValues.priority?.includes("critical");
+    if (isCriticalActive) {
       result = result.filter((item) => getCriticalInfo(String(item.id)).isCritical);
     }
 
     return result;
-  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients, assignedDoctors, patientFilterFields, isCriticalOnly, getCriticalInfo]);
+  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients, assignedDoctors, patientFilterFields, searchParams, getCriticalInfo]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -730,9 +830,10 @@ export default function PatientsManagement() {
                   title="Filters"
                   fields={patientFilterFields}
                   values={filterValues}
+                  appliedValues={appliedValues}
                   onChange={handleFilterChange}
-                  onApply={handleApplyFilter}
-                  onClear={handleClearFilter}
+                  onApply={handleApply}
+                  onClear={handleClear}
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
@@ -745,27 +846,6 @@ export default function PatientsManagement() {
                 />
               </div>
             </div>
-
-            {isCriticalOnly && (
-              <div className="mb-4 flex items-center justify-between rounded-lg border border-red-200 bg-red-50/80 px-4 py-2.5 text-sm text-red-900 transition-all">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="font-semibold">Filtered by Critical Patients</span>
-                  <span className="text-red-700 text-xs">
-                    (Showing {displayData.length} patient{displayData.length === 1 ? "" : "s"} with abnormal vitals or critical flags)
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    searchParams.delete("critical");
-                    setSearchParams(searchParams);
-                  }}
-                  className="inline-flex items-center gap-1 rounded bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-200 hover:text-red-900 transition-colors"
-                >
-                  Clear Filter
-                </button>
-              </div>
-            )}
 
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (sortable table with diagnose/doctor columns)   */}
@@ -793,9 +873,7 @@ export default function PatientsManagement() {
                   { key: "age/gender", label: "Age/Gender", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.age} / {String(r.gender)}</span> },
                   { key: "mobile", label: "Mobile", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{String(r.mobile)}</span> },
                   { key: "diagnose", label: "Diagnose", render: (r: any) => (
-                    <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase" style={{ backgroundColor: String(r.diagnoseBg ?? "#F3F4F6"), color: String(r.diagnoseColor ?? "#6B7280") }}>
-                      {String(r.diagnose ?? "")}
-                    </span>
+                    <DiagnoseBadges list={Array.isArray(r.diagnoseList) ? r.diagnoseList as string[] : []} />
                   )},
                   { key: "doctor", label: "Assigned Doctor", render: (r: any) => (
                     <div className="flex items-center gap-2">
@@ -875,8 +953,20 @@ export default function PatientsManagement() {
                           </p>
                           <p className="hms-content-text text-[#191C1E]">{patient.mobile}</p>
                           <p className="hms-content-text text-[#191C1E] font-semibold">{patient.bloodGroup}</p>
-                          <p className="hms-content-text text-[#191C1E] truncate" title={patient.diagnose}>
-                            <span className="text-[#6B7280]">Diagnosis:</span> {patient.diagnose}
+                          <p className="hms-content-text text-[#191C1E] flex flex-wrap items-center gap-1.5" title={patient.diagnose}>
+                            <span className="text-[#6B7280]">Diagnosis:</span>{" "}
+                            {(Array.isArray(patient.diagnoseList) && patient.diagnoseList.length > 0
+                              ? patient.diagnoseList as string[]
+                              : (patient.diagnose ? [String(patient.diagnose)] : [])
+                            ).map((d, i) => (
+                              <span
+                                key={`${i}-${d}`}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+                                style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}
+                              >
+                                {d}
+                              </span>
+                            ))}
                           </p>
                         </div>
 

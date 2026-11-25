@@ -66,6 +66,25 @@ export function useFilterPanel(fields?: FilterField[]) {
     setAppliedValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
+  const removeAppliedFilter = useCallback((name: string, valueToRemove?: any) => {
+    const update = (prev: Record<string, any>) => {
+      const next = { ...prev };
+      if (valueToRemove !== undefined && Array.isArray(next[name])) {
+        const filtered = next[name].filter((v: any) => v !== valueToRemove);
+        if (filtered.length > 0) {
+          next[name] = filtered;
+        } else {
+          delete next[name];
+        }
+      } else {
+        delete next[name];
+      }
+      return next;
+    };
+    setDraftValues(update);
+    setAppliedValues(update);
+  }, []);
+
   return {
     values: draftValues,
     appliedValues,
@@ -75,5 +94,6 @@ export function useFilterPanel(fields?: FilterField[]) {
     handleApply,
     handleClear,
     setAppliedFilter,
+    removeAppliedFilter,
   };
 }

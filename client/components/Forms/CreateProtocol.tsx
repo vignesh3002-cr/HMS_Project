@@ -107,6 +107,7 @@ export default function CreateProtocol() {
   const [standardCycles, setStandardCycles] = useState<number>(6);
   const [cycleIntervalDays, setCycleIntervalDays] = useState<number>(21);
   const [notes, setNotes] = useState("");
+  const [reviewDate, setReviewDate] = useState<string>("");
   const [days, setDays] = useState<ProtocolDay[]>([{ dayNumber: 1 }]);
   const [activeDay, setActiveDay] = useState(1);
 
@@ -126,11 +127,8 @@ export default function CreateProtocol() {
     subtypeIds,
     setSubtypeIds,
     loadingSubtypes,
-    filterByCancerAndSubtype,
-    setFilterByCancerAndSubtype,
     allHospitalMeds,
     setAllHospitalMeds,
-    loadingAllMeds,
     premedMeds,
     setPremedMeds,
     chemoMeds,
@@ -420,6 +418,11 @@ export default function CreateProtocol() {
         setStandardCycles(parsed.standardCycles);
         setCycleIntervalDays(parsed.cycleIntervalDays);
         setNotes(parsed.notes);
+        if (parsed.reviewDate) {
+          setReviewDate(parsed.reviewDate);
+        } else {
+          setReviewDate("");
+        }
         setDays(parsed.days);
         loadedItemIdsRef.current = parsed.loadedItemIds;
         if (parsed.itemsData) {
@@ -572,6 +575,7 @@ export default function CreateProtocol() {
           same_as_day_one: d.sameAsDay === 1,
         })),
         notes: notes || null,
+        review_date: reviewDate ? new Date(reviewDate).toISOString() : null,
         items,
         dilutions,
         discharge_instructions: dischargeInstructions,
@@ -603,7 +607,23 @@ export default function CreateProtocol() {
       }
       if ((res.data as any)?.success === false) throw new Error((res.data as any)?.message);
       toast({ title: isEditMode ? "Protocol updated" : "Protocol created", description: `${regimenName} has been ${isEditMode ? "updated" : "saved"} successfully.` });
-      navigate("/protocol");
+      navigate("/protocol", {
+        state: {
+          savedProtocol: {
+            protocol_id: protocolId || (res.data as any)?.data?.protocol_id || regimenCode || ("CP" + Date.now()),
+            regimen_name: regimenName.trim(),
+            cancer_type_id: cancerTypeIds[0] || null,
+            cancer_types: { cancer_type: selectedCancerTypeName },
+            treatment_intent: treatmentIntent.trim() || null,
+            no_of_days: days.length,
+            standard_cycles: standardCycles || null,
+            active_status: 1,
+            review_date: reviewDate ? new Date(reviewDate).toISOString() : null,
+            updated_at: new Date().toISOString(),
+            updated_by: "You",
+          },
+        },
+      });
     } catch (error: any) {
       const msg = error.response?.data?.message || error.message || "Failed to save protocol.";
       toast({ title: isEditMode ? "Failed to update protocol" : "Failed to create protocol", description: msg, variant: "destructive" });
@@ -1006,36 +1026,68 @@ export default function CreateProtocol() {
                         disabled={disabled}
                       />
                     </div>
-
-                    <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-2 pt-3 mt-1 border-t border-[#edf1f5] text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-[#5b6b7c]">Medicine Scope:</span>
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${
-                          filterByCancerAndSubtype
-                            ? "bg-[#eaf0f7] text-[#12335c] border border-[#d2dfef]"
-                            : "bg-[#fef3c7] text-[#92400e] border border-[#fde68a]"
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${filterByCancerAndSubtype ? "bg-[#12335c]" : "bg-[#d97706]"}`} />
-                          {filterByCancerAndSubtype
-                            ? "Filtered by Clinical Role (Premeds / Primary Chemo / Supportive)"
-                            : `Showing ALL hospital medicines (${allHospitalMeds.length || "catalog"})`}
-                        </span>
+                    {!isViewMode && (
+                      <div className="lg:col-span-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
+                        <label className={labelCls}>
+                          Next Scheduled Review Date <span className="text-xs text-[#727782] font-normal">(Optional)</span>
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <input
+                            type="date"
+                            value={reviewDate}
+                            onChange={(e) => setReviewDate(e.target.value)}
+                            className={inputCls + " max-w-[220px] bg-white"}
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const target = new Date();
+                                target.setMonth(target.getMonth() + 3);
+                                setReviewDate(target.toISOString().split("T")[0]);
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-semibold bg-[#EAEFF5] text-[#12335c] rounded-md hover:bg-[#dbe4ef] transition-colors"
+                            >
+                              +3 Months
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const target = new Date();
+                                target.setMonth(target.getMonth() + 6);
+                                setReviewDate(target.toISOString().split("T")[0]);
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-semibold bg-[#EAEFF5] text-[#12335c] rounded-md hover:bg-[#dbe4ef] transition-colors"
+                            >
+                              +6 Months
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const target = new Date();
+                                target.setFullYear(target.getFullYear() + 1);
+                                setReviewDate(target.toISOString().split("T")[0]);
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-semibold bg-[#EAEFF5] text-[#12335c] rounded-md hover:bg-[#dbe4ef] transition-colors"
+                            >
+                              +1 Year
+                            </button>
+                            {reviewDate && (
+                              <button
+                                type="button"
+                                onClick={() => setReviewDate("")}
+                                className="px-2 py-1.5 text-xs text-red-600 hover:text-red-700 font-medium"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-[#727782] mt-1.5">
+                          Set an optional governance review date. If skipped, no review reminder is scheduled.
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => !disabled && setFilterByCancerAndSubtype(!filterByCancerAndSubtype)}
-                        disabled={disabled || loadingAllMeds}
-                        className="text-xs font-medium text-[#12335c] hover:underline"
-                      >
-                        {loadingAllMeds ? (
-                          <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading all medicines...</span>
-                        ) : filterByCancerAndSubtype ? (
-                          "Need an uncatalogued drug? Show all hospital medicines"
-                        ) : (
-                          "← Switch back to Role-filtered medicines"
-                        )}
-                      </button>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1079,6 +1131,12 @@ export default function CreateProtocol() {
                     <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">PROTOCOL DAYS</div>
                     <div className="text-sm font-bold text-[#1b2530]">{days.length} day{days.length !== 1 ? "s" : ""}</div>
                   </div>
+                  {reviewDate && (
+                    <div className="py-4 border-b border-[#e3e8ee]">
+                      <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">SCHEDULED REVIEW</div>
+                      <div className="text-sm font-bold text-[#1b2530]">{reviewDate}</div>
+                    </div>
+                  )}
                   <div className="py-4">
                     <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TOTAL DRUGS</div>
                     <div className="text-sm font-bold text-[#1b2530]">

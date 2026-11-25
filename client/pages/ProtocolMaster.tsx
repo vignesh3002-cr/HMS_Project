@@ -11,13 +11,15 @@ import {
   FileText,
   CheckCircle2,
   Eye,
-  PenLine,
   Archive,
+  RotateCcw,
   Trash2,
   Clock,
   CalendarDays,
+  X,
+  Filter,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, differenceInDays, addYears } from "date-fns";
 import { formatInBranchTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
@@ -26,8 +28,14 @@ import ExportReport from "@/components/ui/ExportReport";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { downloadExportPdf } from "@/lib/exportPdf";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { useFilterPanel, useProtocolFilters } from "@/components/Filter";
+import { filterDataByValues } from "@/components/Filter/utils";
+import ProtocolPerformance from "@/components/hms/protocolPerformance";
+import { KpiSection } from "@/components/hms/dashboard/KpiSection";
+import type { KpiItem } from "@/components/hms/dashboard/kpi.types";
 import {
   chemotherapyApi,
   type RegimenProtocol,
@@ -47,6 +55,7 @@ interface ProtocolRow {
   intent: string;
   review_date?: string | null;
   used_this_month?: number | null;
+  patient_count?: number | null;
 }
 
 
@@ -71,18 +80,29 @@ function toRow(p: RegimenProtocol): ProtocolRow {
     status = "Active";
   }
 
+  const updatedByRaw = (p as any).updated_by || (p as any).created_by;
+  const updatedByDisplay = updatedByRaw && updatedByRaw !== "—" ? updatedByRaw : "—";
+
+  const updatedDate = p.updated_at ?? p.created_at ?? new Date().toISOString();
+  // Clinical Governance: only protocols with an explicit review date set in DB
+  const rawReviewDate = (p as any).review_date ?? (p as any).next_review_date ?? null;
+  const calculatedReviewDate = rawReviewDate && !isNaN(new Date(rawReviewDate).getTime())
+    ? new Date(rawReviewDate).toISOString()
+    : null;
+
   return {
     protocol_id: p.protocol_id,
     name: p.regimen_name,
     cycle_days: p.no_of_days,
     status,
-    updated_by: "—",
-    updated_at: p.updated_at ?? p.created_at ?? new Date().toISOString(),
+    updated_by: updatedByDisplay,
+    updated_at: updatedDate,
     cancer_type: cancerTypeDisplay,
     version: p.protocol_version ?? "v1",
     intent: p.treatment_intent ?? "—",
-    review_date: (p as any).review_date ?? (p as any).next_review_date ?? null,
+    review_date: calculatedReviewDate,
     used_this_month: typeof (p as any).used_this_month === "number" ? (p as any).used_this_month : null,
+    patient_count: typeof (p as any).patient_count === "number" ? (p as any).patient_count : ((p as any).used_this_month ?? 0),
   };
 }
 
@@ -95,12 +115,18 @@ const STATUS_OPTIONS: Array<"All" | ProtocolStatus> = [
 ];
 
 function ProtocolActionMenu({
+  row,
   onView,
   onEdit,
+  onArchive,
+  onRestore,
   onDelete,
 }: {
+  row: ProtocolRow;
   onView: () => void;
   onEdit: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -112,8 +138,6 @@ function ProtocolActionMenu({
   const canView = can("chemo.protocol.read") || can("chemo.protocol.manage");
   const canEdit = can("chemo.protocol.manage");
   const canDelete = can("chemo.protocol.manage");
-
-  if (!canView && !canEdit && !canDelete) return null;
 
   const placeMenu = () => {
     const btn = btnRef.current;
@@ -148,9 +172,13 @@ function ProtocolActionMenu({
     };
   }, [open]);
 
+  if (!canView && !canEdit && !canDelete) return null;
+
   const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
   if (canView) items.push({ label: "View Protocol", onClick: onView });
   if (canEdit) items.push({ label: "Edit Protocol", onClick: onEdit });
+  if (canEdit && row.status !== "Archive") items.push({ label: "Archive Protocol", onClick: onArchive });
+  if (canEdit && row.status === "Archive") items.push({ label: "Restore Protocol", onClick: onRestore });
   if (canDelete) items.push({ label: "Delete Protocol", onClick: onDelete, danger: true });
 
   return (
@@ -198,6 +226,7 @@ function ProtocolActionMenu({
 export default function ProtocolMaster() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { can } = usePermission();
 
   const queryClient = useQueryClient();
@@ -209,7 +238,7 @@ export default function ProtocolMaster() {
   } = useQuery<ProtocolRow[]>({
     queryKey: ["protocol-master-list"],
     queryFn: async () => {
-      const res = await chemotherapyApi.listRegimenProtocols();
+      const res = await chemotherapyApi.listRegimenProtocols({ include_inactive: true });
       const list = res.data?.data ?? [];
       return list.map(toRow);
     },
@@ -222,8 +251,35 @@ export default function ProtocolMaster() {
     setRowOverride((prev) => (typeof updater === "function" ? updater(prev ?? protocolRows) : updater));
   };
 
+  // Dynamic in-memory update when returning from create/edit protocol without network egress
+  useEffect(() => {
+    const saved = (location.state as any)?.savedProtocol;
+    if (saved) {
+      const newRow = toRow(saved);
+      setRows((prev) => {
+        const exists = prev.some((p) => p.protocol_id === newRow.protocol_id);
+        if (exists) {
+          return prev.map((p) => (p.protocol_id === newRow.protocol_id ? { ...p, ...newRow } : p));
+        }
+        return [newRow, ...prev];
+      });
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"All" | ProtocolStatus>("All");
+  const { protocolFilterFields } = useProtocolFilters({ protocolRows: rows });
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+    setAppliedFilter,
+    removeAppliedFilter,
+  } = useFilterPanel(protocolFilterFields);
 
   const [sortField, setSortField] = useState("updated_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -244,7 +300,6 @@ export default function ProtocolMaster() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
 
   const stats = useMemo(() => {
     const active = rows.filter((r) => r.status === "Active").length;
@@ -285,21 +340,26 @@ export default function ProtocolMaster() {
   }, [rows]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     let list = rows;
+    // Status filter: by default hide Archive unless "Archive" is explicitly selected in the status filter.
+    if (!appliedValues.status || appliedValues.status.length === 0) {
+      list = list.filter((r) => r.status !== "Archive");
+    }
+
+    const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
         (r) =>
           r.protocol_id.toLowerCase().includes(q) ||
           r.name.toLowerCase().includes(q) ||
-          r.cancer_type.toLowerCase().includes(q)
+          r.cancer_type.toLowerCase().includes(q) ||
+          r.intent.toLowerCase().includes(q) ||
+          r.updated_by.toLowerCase().includes(q)
       );
     }
-    if (statusFilter !== "All") {
-      list = list.filter((r) => r.status === statusFilter);
-    }
+    list = filterDataByValues(list, appliedValues, protocolFilterFields);
     return list;
-  }, [rows, search, statusFilter]);
+  }, [rows, search, appliedValues, protocolFilterFields]);
 
   const sortedData = useMemo(() => {
     const list = [...filtered];
@@ -364,17 +424,63 @@ export default function ProtocolMaster() {
     [sortedData, selectedIds]
   );
 
-  const handleBulkArchive = () => {
-    const count = selectedIds.size;
-    setRows((prev) =>
-      prev.map((r) => (selectedIds.has(r.protocol_id) ? { ...r, status: "Archive" as ProtocolStatus } : r))
-    );
-    setSelectedIds(new Set());
-    setBulkOpen(false);
-    toast({
-      title: "Protocols archived",
-      description: `${count} protocol${count === 1 ? "" : "s"} moved to archive.`,
-    });
+  const handleBulkArchive = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const idsSet = new Set(ids);
+    setRows((prev) => prev.map((p) => (idsSet.has(p.protocol_id) ? { ...p, status: "Archive" } : p)));
+    try {
+      await Promise.allSettled(ids.map((id) => chemotherapyApi.archiveRegimenProtocol(id)));
+      queryClient.invalidateQueries({ queryKey: ["protocol-master-list"] });
+      setSelectedIds(new Set());
+      setBulkOpen(false);
+      toast({
+        title: "Protocols archived",
+        description: `${ids.length} protocol${ids.length === 1 ? "" : "s"} moved to archive.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Archiving failed",
+        description: e.response?.data?.message ?? e.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleArchiveSingle = async (row: ProtocolRow) => {
+    setRows((prev) => prev.map((p) => (p.protocol_id === row.protocol_id ? { ...p, status: "Archive" } : p)));
+    try {
+      await chemotherapyApi.archiveRegimenProtocol(row.protocol_id);
+      queryClient.invalidateQueries({ queryKey: ["protocol-master-list"] });
+      toast({
+        title: "Protocol archived",
+        description: `${row.name} has been moved to archive.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Archive failed",
+        description: e.response?.data?.message ?? e.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestoreSingle = async (row: ProtocolRow) => {
+    setRows((prev) => prev.map((p) => (p.protocol_id === row.protocol_id ? { ...p, status: "Active" } : p)));
+    try {
+      await chemotherapyApi.restoreRegimenProtocol(row.protocol_id);
+      queryClient.invalidateQueries({ queryKey: ["protocol-master-list"] });
+      toast({
+        title: "Protocol restored",
+        description: `${row.name} is now active.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Restore failed",
+        description: e.response?.data?.message ?? e.message,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleBulkExport = () => {
@@ -470,75 +576,129 @@ export default function ProtocolMaster() {
     }
   };
 
-  const recentlyUpdated = useMemo(
-    () => [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 5),
-    [rows]
-  );
+  // Helper compute functions strictly for widgets
+  const getRecent = (list: ProtocolRow[]) =>
+    [...list].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 5);
 
-  const mostUsed = useMemo(
-    () => [...rows].filter((r) => r.status === "Active").slice(0, 5),
-    [rows]
-  );
+  const getReviews = (list: ProtocolRow[]) => {
+    const now = new Date();
+    return list
+      .filter((r) => {
+        if (!r.review_date) return false;
+        const d = new Date(r.review_date);
+        return !isNaN(d.getTime());
+      })
+      .map((r) => {
+        const d = new Date(r.review_date!);
+        const diffDays = differenceInDays(d, now);
+        let daysText = "Today";
+        if (diffDays > 0) {
+          daysText = `in ${diffDays} day${diffDays === 1 ? "" : "s"}`;
+        } else if (diffDays < 0) {
+          daysText = `${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"} overdue`;
+        }
+        return {
+          id: r.protocol_id,
+          name: r.name,
+          date: format(d, "dd MMM yyyy"),
+          days: daysText,
+          isOverdue: diffDays < 0,
+        };
+      })
+      .sort((a, b) => (a.isOverdue === b.isOverdue ? 0 : a.isOverdue ? -1 : 1))
+      .slice(0, 5);
+  };
 
-  const usagePercent = [92, 87, 79, 71, 64];
+  // Reactive useState strictly for the widgets (lazy initialized from rows)
+  const [recentlyUpdated, setRecentlyUpdated] = useState<ProtocolRow[]>(() => getRecent(rows));
+  const [upcomingReviews, setUpcomingReviews] = useState<
+    Array<{ id: string; name: string; date: string; days: string; isOverdue: boolean }>
+  >(() => getReviews(rows));
 
-  const upcomingReviews = [
-    { name: "FOLFOX-6 Regimen", days: "in 2 days", date: "22 Aug 2026" },
-    { name: "ABVD Protocol", days: "in 5 days", date: "25 Aug 2026" },
-    { name: "R-CHOP Regimen", days: "in 9 days", date: "29 Aug 2026" },
-    { name: "TCP Chemotherapy", days: "in 14 days", date: "03 Sep 2026" },
-  ];
+  // Auto-update the widgets whenever protocol data is available or changes
+  useEffect(() => {
+    setRecentlyUpdated(getRecent(rows));
+    setUpcomingReviews(getReviews(rows));
+  }, [rows]);
 
   const activePercent = stats.total > 0 ? (stats.active / stats.total) * 100 : 0;
   const activePercentFormatted =
     activePercent % 1 === 0 ? `${activePercent}%` : `${parseFloat(activePercent.toFixed(2))}%`;
 
-  const statCards = [
-    {
-      label: "Total Protocols",
-      value: stats.total,
-      supportingText: "All protocols",
-      supportingClass: "text-[#6B7280]",
-      icon: FileText,
-      color: "#004785",
-    },
-    {
-      label: "Active",
-      value: stats.active,
-      supportingText: `${activePercentFormatted} of total`,
-      supportingClass: "text-[#059669]",
-      icon: CheckCircle2,
-      color: "#059669",
-    },
-    {
-      label: "Used This Month",
-      value: usedThisMonth.count,
-      supportingText: usedThisMonth.hasUsageData ? "This calendar month" : "No usage data tracked",
-      supportingClass: "text-[#6B7280]",
-      icon: TrendingUp,
-      color: "#004785",
-    },
-    {
-      label: "Due for Review",
-      value: dueForReview.count,
-      supportingText: dueForReview.hasReviewData
-        ? dueForReview.overdueCount > 0
-          ? `${dueForReview.overdueCount} overdue`
-          : "Up to date"
-        : "No review dates set",
-      supportingClass: dueForReview.overdueCount > 0 ? "text-[#DC2626]" : "text-[#6B7280]",
-      icon: Clock,
-      color: "#F59E0B",
-    },
-    {
-      label: "Draft",
-      value: stats.draft,
-      supportingText: "In progress",
-      supportingClass: "text-[#6B7280]",
-      icon: PenLine,
-      color: "#6366F1",
-    },
-  ];
+  /* KPI quick-filters: clicking a KPI card scopes the protocol list below to
+     the bucket the KPI represents (same click-to-filter behaviour as the
+     Dashboard KPI row / OrderMaster chemo orders quick-filter). */
+  const handleKpiClick = (kpiId: string) => {
+    switch (kpiId) {
+      case "total-protocols":
+        setAppliedFilter("status", undefined);
+        break;
+      case "active":
+        setAppliedFilter("status", ["Active"]);
+        break;
+      case "archive":
+        setAppliedFilter("status", ["Archive"]);
+        break;
+    }
+  };
+
+  const kpiItems: KpiItem[] = useMemo(
+    () => [
+      {
+        id: "total-protocols",
+        label: "Total Protocols",
+        subLabel: "All protocols",
+        value: stats.total,
+        valueColor: "#004785",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <FileText className="w-[17px] h-[17px]" color="#004785" />,
+        onClick: () => handleKpiClick("total-protocols"),
+      },
+      {
+        id: "active",
+        label: "Active",
+        subLabel: `${activePercentFormatted} of total`,
+        value: stats.active,
+        valueColor: "#059669",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <CheckCircle2 className="w-[17px] h-[17px]" color="#059669" />,
+        onClick: () => handleKpiClick("active"),
+      },
+      {
+        id: "used-this-month",
+        label: "Used This Month",
+        subLabel: usedThisMonth.hasUsageData ? "This calendar month" : "No usage data tracked",
+        value: usedThisMonth.count,
+        valueColor: "#004785",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <TrendingUp className="w-[17px] h-[17px]" color="#004785" />,
+      },
+      {
+        id: "due-for-review",
+        label: "Due for Review",
+        subLabel: dueForReview.hasReviewData
+          ? dueForReview.overdueCount > 0
+            ? `${dueForReview.overdueCount} overdue`
+            : "Up to date"
+          : "No review dates set",
+        value: dueForReview.count,
+        valueColor: "#F59E0B",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Clock className="w-[17px] h-[17px]" color="#F59E0B" />,
+      },
+      {
+        id: "archive",
+        label: "Archive",
+        subLabel: "Archived protocols",
+        value: stats.archived,
+        valueColor: "#DC2626",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Archive className="w-[17px] h-[17px]" color="#DC2626" />,
+        onClick: () => handleKpiClick("archive"),
+      },
+    ],
+    [stats, activePercentFormatted, usedThisMonth, dueForReview, handleKpiClick]
+  );
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -566,20 +726,15 @@ export default function ProtocolMaster() {
           </div>
 
           {/* ==================== STAT CARDS ==================== */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-            {statCards.map((card) => (
-              <div key={card.label} className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#6B7280]">{card.label}</span>
-                  <card.icon className="w-4 h-4" style={{ color: card.color }} />
-                </div>
-                <div className="mt-2 text-3xl font-bold text-[#191C1E]">{card.value}</div>
-                <div className={`mt-1 text-xs font-semibold ${card.supportingClass}`}>
-                  {card.supportingText}
-                </div>
-              </div>
-            ))}
-          </div>
+          <KpiSection
+            items={kpiItems}
+            layout="grid"
+            showHeader={false}
+            showDatePicker={false}
+            showShower={false}
+            enableUsageTracking={false}
+            enablePreferences={false}
+          />
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
@@ -589,24 +744,27 @@ export default function ProtocolMaster() {
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Search protocols..."
+                  placeholder="Search protocols, cancers, intent..."
                   value={search}
                   onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-                  className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[180px] sm:w-[240px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[240px] sm:focus:w-[300px]"
+                  className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#191C1E] placeholder:text-[#6B7280] outline-none w-[180px] sm:w-[260px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[260px] sm:focus:w-[320px] focus:ring-1 focus:ring-[#00488D]"
                 />
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6B7280]" />
               </div>
 
               <div className="flex items-center gap-3 flex-wrap">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => { setStatusFilter(e.target.value as "All" | ProtocolStatus); setCurrentPage(1); }}
-                  className="px-3 py-1.5 bg-[#F2F4F6] text-xs text-[#424752] outline-none rounded-md border border-transparent focus:border-[#00488D]"
-                >
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>{opt === "All" ? "All Statuses" : opt}</option>
-                  ))}
-                </select>
+                <ToolbarFilter
+                  title="Filter Protocols"
+                  fields={protocolFilterFields}
+                  values={filterValues}
+                  appliedValues={appliedValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+
                 <RefreshButton onClick={fetchProtocols} isLoading={loading} />
               </div>
             </div>
@@ -652,17 +810,20 @@ export default function ProtocolMaster() {
                 Loading protocols...
               </div>
             ) : (
-              /* Flex column + [&>div]:flex-1 stretches HmsTable's root so the
-                 mt-auto pagination footer stays pinned to the bottom of the
-                 card (the wrapper keeps a 450px min-height even with few
-                 rows) — same behavior as Dashboard/Staff. */
-              <div className="flex-1 flex flex-col min-h-[450px] hide-scrollbar [&>div]:flex-1">
-                <HmsTable
-                  scrollable={true}
+              <HmsTable
+                scrollable={true}
                   columns={[
                   {
                     key: "select",
-                    label: "",
+                    label: (
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all"
+                        className="w-3.5 h-3.5 accent-[#004785] cursor-pointer"
+                      />
+                    ),
                     sortable: false,
                     className: "w-12 pl-5",
                     headerClassName: "w-12 pl-5",
@@ -671,6 +832,7 @@ export default function ProtocolMaster() {
                         type="checkbox"
                         checked={selectedIds.has(r.protocol_id)}
                         onChange={() => toggleSelect(r.protocol_id)}
+                        onClick={(e) => e.stopPropagation()}
                         className="w-3.5 h-3.5 accent-[#004785] cursor-pointer"
                       />
                     ),
@@ -679,7 +841,7 @@ export default function ProtocolMaster() {
                     key: "protocol_id",
                     label: "Protocol ID",
                     sortable: true,
-                    render: (r: any) => <span className="hms-id-text">{r.protocol_id}</span>,
+                    render: (r: any) => <span className="hms-id-text font-semibold">{r.protocol_id}</span>,
                   },
                   {
                     key: "name",
@@ -687,7 +849,7 @@ export default function ProtocolMaster() {
                     sortable: true,
                     render: (r: any) => (
                       <div>
-                        <div className="hms-name-text">{r.name}</div>
+                        <div className="hms-name-text text-[#004785] group-hover:underline">{r.name}</div>
                         <div className="hms-id-text">{r.cancer_type} · {r.intent}</div>
                       </div>
                     ),
@@ -710,12 +872,17 @@ export default function ProtocolMaster() {
                     key: "updated_at",
                     label: "Updated",
                     sortable: true,
-                    render: (r: any) => (
-                      <div>
-                        <div className="text-[#424752] text-sm font-medium">{r.updated_by}</div>
-                        <div className="hms-id-text">{formatInBranchTimezone(new Date(r.updated_at), "MMM d, yyyy")}</div>
-                      </div>
-                    ),
+                    render: (r: any) => {
+                      const validDate = r.updated_at && !isNaN(new Date(r.updated_at).getTime());
+                      return (
+                        <div>
+                          <div className="text-[#424752] text-sm font-medium">{r.updated_by}</div>
+                          <div className="hms-id-text">
+                            {validDate ? formatInBranchTimezone(new Date(r.updated_at), "MMM d, yyyy") : "—"}
+                          </div>
+                        </div>
+                      );
+                    },
                   },
                   {
                     key: "actions",
@@ -724,11 +891,16 @@ export default function ProtocolMaster() {
                     className: "w-12 !whitespace-normal",
                     headerClassName: "w-12",
                     render: (r: any) => (
-                      <ProtocolActionMenu
-                        onView={() => handleView(r as ProtocolRow)}
-                        onEdit={() => handleEdit(r as ProtocolRow)}
-                        onDelete={() => handleDelete(r as ProtocolRow)}
-                      />
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <ProtocolActionMenu
+                          row={r as ProtocolRow}
+                          onView={() => handleView(r as ProtocolRow)}
+                          onEdit={() => handleEdit(r as ProtocolRow)}
+                          onArchive={() => handleArchiveSingle(r as ProtocolRow)}
+                          onRestore={() => handleRestoreSingle(r as ProtocolRow)}
+                          onDelete={() => handleDelete(r as ProtocolRow)}
+                        />
+                      </div>
                     ),
                   },
                 ]}
@@ -744,40 +916,22 @@ export default function ProtocolMaster() {
                 visibleEnd={visibleEnd}
                 onPageChange={(p) => { setCurrentPage(p); setBulkOpen(false); }}
                 onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-                rowsPerPageOptions={[10, 20, 50]}
+                rowsPerPageOptions={[5, 10, 20, 50]}
                 emptyMessage="No protocols found matching the current filters."
                 rowKey={(r: any) => String(r.protocol_id)}
+                onRowClick={(row) => handleView(row as ProtocolRow)}
               />
-              </div>
             )}
           </div>
 
           {/* ==================== BOTTOM CARDS ==================== */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-            {/* MOST USED PROTOCOLS */}
-            <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[#191C1E]">Most Used Protocols</h3>
-                <TrendingUp className="w-4 h-4 text-[#004785]" />
-              </div>
-              <div className="mt-4 flex flex-col gap-4">
-                {mostUsed.map((r, i) => (
-                  <div key={r.protocol_id}>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-[#424752]">{r.name}</span>
-                      <span className="font-bold text-[#004785]">{usagePercent[i]}%</span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 w-full bg-[#F2F4F6] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#004785] rounded-full"
-                        style={{ width: `${usagePercent[i]}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* PROTOCOL PERFORMANCE (Most Used Protocols with custom date range, bar/pie view & system share) */}
+            <ProtocolPerformance
+              compact
+              onView={(p) => navigate(`/protocol/view/${p.protocol_id}`)}
+            />
 
             {/* RECENTLY UPDATED */}
             <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-5">
@@ -786,18 +940,37 @@ export default function ProtocolMaster() {
                 <Clock className="w-4 h-4 text-[#004785]" />
               </div>
               <div className="mt-4 flex flex-col gap-3">
-                {recentlyUpdated.map((r) => (
-                  <div key={r.protocol_id} className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[#191C1E] truncate">{r.name}</div>
-                      <div className="hms-id-text">{r.protocol_id} · {r.updated_by}</div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StatusBadge status={r.status} />
-                      <span className="text-[10px] font-semibold text-[#6B7280]">{formatInBranchTimezone(new Date(r.updated_at), "MMM d")}</span>
-                    </div>
+                {recentlyUpdated.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-[#6B7280]">
+                    No protocols found.
                   </div>
-                ))}
+                ) : (
+                  recentlyUpdated.map((r) => {
+                    const validDate = r.updated_at && !isNaN(new Date(r.updated_at).getTime());
+                    return (
+                      <div
+                        key={r.protocol_id}
+                        onClick={() => handleView(r)}
+                        className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0 cursor-pointer group"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[#191C1E] group-hover:text-[#004785] truncate">
+                            {r.name}
+                          </div>
+                          <div className="hms-id-text truncate">
+                            {r.protocol_id}
+                            {r.updated_by && r.updated_by !== "—" ? ` · by ${r.updated_by}` : ""}
+                          </div>
+                        </div>
+                        <div className="flex items-center shrink-0">
+                          <span className="text-[10px] font-semibold text-[#6B7280]">
+                            {validDate ? formatInBranchTimezone(new Date(r.updated_at), "MMM d") : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -808,17 +981,35 @@ export default function ProtocolMaster() {
                 <CalendarDays className="w-4 h-4 text-[#004785]" />
               </div>
               <div className="mt-4 flex flex-col gap-3">
-                {upcomingReviews.map((r) => (
-                  <div key={r.name} className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[#191C1E] truncate">{r.name}</div>
-                      <div className="hms-id-text">{r.date}</div>
-                    </div>
-                    <span className="text-[10px] font-bold text-[#B45309] bg-[#FEF3C7] rounded-full px-2.5 py-1 whitespace-nowrap">
-                      {r.days}
-                    </span>
+                {upcomingReviews.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-[#6B7280]">
+                    No upcoming reviews scheduled.
                   </div>
-                ))}
+                ) : (
+                  upcomingReviews.map((r) => (
+                    <div
+                      key={r.id}
+                      onClick={() => navigate(`/protocol/view/${r.id}`)}
+                      className="flex items-center justify-between gap-3 py-1.5 border-b border-[#F2F4F6] last:border-0 cursor-pointer group"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[#191C1E] group-hover:text-[#004785] truncate">
+                          {r.name}
+                        </div>
+                        <div className="hms-id-text">{r.date}</div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold rounded-full px-2.5 py-1 whitespace-nowrap ${
+                          r.isOverdue
+                            ? "text-[#DC2626] bg-[#FEE2E2]"
+                            : "text-[#B45309] bg-[#FEF3C7]"
+                        }`}
+                      >
+                        {r.days}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
