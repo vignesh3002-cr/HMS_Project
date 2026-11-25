@@ -173,3 +173,77 @@ export const governmentIdTypes = {
     { code: "PASSPORT", name: "Passport", validation: /^[A-Z0-9]{6,9}$/ },
   ],
 } as const;
+
+/**
+ * Parse any time representation (ISO date string, HH:mm:ss, HH:mm, or 12h) to total minutes from midnight
+ */
+export function parseTimeToMinutes(time?: string | null): number | null {
+  if (!time) return null;
+  const str = String(time).trim();
+  if (str.includes("T")) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d.getUTCHours() * 60 + d.getUTCMinutes();
+  }
+  const isPM = /pm/i.test(str);
+  const isAM = /am/i.test(str);
+  const cleaned = str.replace(/[^\d:]/g, "");
+  const parts = cleaned.split(":").map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+  let hours = parts[0];
+  const minutes = parts[1];
+  if (isPM && hours < 12) hours += 12;
+  if (isAM && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
+/**
+ * Format any time representation (ISO date string, "1970-01-01T09:00:00.000Z", "09:00", etc.) to 12-hour format e.g. "09:00 AM"
+ */
+export function formatTimeSlot(time?: string | null): string {
+  const totalMin = parseTimeToMinutes(time);
+  if (totalMin == null) return time ? String(time) : "";
+  const h24 = Math.floor(totalMin / 60) % 24;
+  const m = totalMin % 60;
+  const ampm = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+  return `${String(h12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+/**
+ * Format appointment date safely without UTC timezone shift (e.g. "Tuesday, 24 Nov 2026")
+ */
+export function formatAppointmentDisplayDate(
+  dateStr?: string | null,
+  compact: boolean = false
+): string {
+  if (!dateStr) return "";
+  try {
+    const raw = String(dateStr).split("T")[0];
+    const parts = raw.split("-").map(Number);
+    if (
+      parts.length === 3 &&
+      !isNaN(parts[0]) &&
+      !isNaN(parts[1]) &&
+      !isNaN(parts[2])
+    ) {
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      return d.toLocaleDateString("en-US", {
+        weekday: compact ? "short" : "long",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    }
+    const d = new Date(dateStr);
+    return isNaN(d.getTime())
+      ? dateStr
+      : d.toLocaleDateString("en-US", {
+          weekday: compact ? "short" : "long",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+  } catch {
+    return String(dateStr);
+  }
+}

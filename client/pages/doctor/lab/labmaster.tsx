@@ -129,7 +129,7 @@ export const CATEGORY_OPTIONS = [
 export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
   {
     id: "LT00787",
-    testCode: "INH-013",
+    testCode: "IH-013",
     testName: "Complete Blood Count",
     category: "Haematology",
     sampleType: "EDTA Whole Blood",
@@ -167,7 +167,7 @@ export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
   },
   {
     id: "LT00783",
-    testCode: "INH-009",
+    testCode: "IH-009",
     testName: "Liver Function test",
     category: "Biochemistry",
     sampleType: "Serum",
@@ -197,38 +197,8 @@ export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
     ],
   },
   {
-    id: "LT00794",
-    testCode: "NEW-001",
-    testName: "Renal Function Test (RFT)",
-    category: "Biochemistry",
-    sampleType: "Serum",
-    tubeCapColor: "Plain Red (No Additive)",
-    tubeCapHex: "#dc2626",
-    requiredVolume: "3.0 mL",
-    tatHours: 3,
-    expiryHours: 4,
-    price: 600,
-    status: "ACTIVE",
-    isOutsourced: false,
-    outsourceLab: "In-house lab",
-    testType: "In-house",
-    description: "Evaluates renal function, creatinine, BUN, uric acid, and serum electrolyte balance.",
-    parameters: [
-      { id: "LTP00110", name: "Urea", unit: "mg/dL", valueType: "numeric", refRangeLow: 15, refRangeHigh: 40, refRangeText: "15 - 40", criticalHigh: 100, gender: "Both", sortOrder: 1 },
-      { id: "LTP00111", name: "Blood Urea Nitrogen (BUN)", unit: "mg/dL", valueType: "numeric", refRangeLow: 7, refRangeHigh: 20, refRangeText: "7 - 20", gender: "Both", sortOrder: 2 },
-      { id: "LTP00112", name: "Creatinine", unit: "mg/dL", valueType: "numeric", refRangeLow: 0.6, refRangeHigh: 1.3, refRangeText: "M 0.7–1.3; F 0.6–1.1 mg/dL", criticalHigh: 4.0, gender: "Both", sortOrder: 3 },
-      { id: "LTP00113", name: "Uric acid", unit: "mg/dL", valueType: "numeric", refRangeLow: 2.6, refRangeHigh: 7.2, refRangeText: "M 3.5–7.2; F 2.6–6 mg/dL", gender: "Both", sortOrder: 4 },
-      { id: "LTP00114", name: "Sodium", unit: "mmol/L", valueType: "numeric", refRangeLow: 135, refRangeHigh: 145, refRangeText: "135 - 145", criticalLow: 120, criticalHigh: 160, gender: "Both", sortOrder: 5 },
-      { id: "LTP00115", name: "Potassium", unit: "mmol/L", valueType: "numeric", refRangeLow: 3.5, refRangeHigh: 5.0, refRangeText: "3.5 - 5", criticalLow: 2.8, criticalHigh: 6.2, gender: "Both", sortOrder: 6 },
-      { id: "LTP00116", name: "Chloride", unit: "mmol/L", valueType: "numeric", refRangeLow: 98, refRangeHigh: 107, refRangeText: "98 - 107", gender: "Both", sortOrder: 7 },
-      { id: "LTP00117", name: "Calcium", unit: "mg/dL", valueType: "numeric", refRangeLow: 8.5, refRangeHigh: 10.5, refRangeText: "8.5 - 10.5", criticalLow: 6.5, criticalHigh: 13.0, gender: "Both", sortOrder: 8 },
-      { id: "LTP00118", name: "Phosphorus", unit: "mg/dL", valueType: "numeric", refRangeLow: 2.5, refRangeHigh: 4.5, refRangeText: "2.5 - 4.5", gender: "Both", sortOrder: 9 },
-      { id: "LTP00119", name: "eGFR", unit: "mL/min/1.73 m²", valueType: "numeric", refRangeLow: 90, refRangeHigh: 150, refRangeText: ">= 90", gender: "Both", sortOrder: 10 },
-    ],
-  },
-  {
     id: "LT00782",
-    testCode: "INH-008",
+    testCode: "IH-008",
     testName: "Lipid profile",
     category: "Biochemistry",
     sampleType: "Serum",
@@ -255,8 +225,8 @@ export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
     ],
   },
   {
-    id: "LT00745",
-    testCode: "DDC-1519",
+    id: "LT-DDC-0745",
+    testCode: "DDC-0745",
     testName: "Urine Routine Analysis",
     category: "Urine, Stool & Body Fluids",
     sampleType: "Random Urine",
@@ -293,36 +263,8 @@ export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
     ],
   },
   {
-    id: "LT00795",
-    testCode: "NEW-002",
-    testName: "Coagulation Profile (PT / APTT / INR)",
-    category: "Coagulation",
-    sampleType: "Citrated Plasma",
-    tubeCapColor: "Light Blue (Sodium Citrate)",
-    tubeCapHex: "#0284c7",
-    requiredVolume: "2.7 mL",
-    tatHours: 2,
-    expiryHours: 2,
-    price: 850,
-    status: "ACTIVE",
-    isOutsourced: false,
-    outsourceLab: "In-house lab",
-    testType: "In-house",
-    description: "Hemostatic evaluation including Prothrombin Time, INR, APTT, and Fibrinogen.",
-    parameters: [
-      { id: "LTP00120", name: "Prothrombin Time (PT) Patient", unit: "seconds", valueType: "numeric", refRangeLow: 11, refRangeHigh: 15, refRangeText: "11 - 15", criticalHigh: 30, gender: "Both", sortOrder: 1 },
-      { id: "LTP00121", name: "PT Control", unit: "seconds", valueType: "numeric", refRangeLow: 11, refRangeHigh: 13, refRangeText: "11 - 13", gender: "Both", sortOrder: 2 },
-      { id: "LTP00122", name: "International Normalized Ratio (INR)", unit: "ratio", valueType: "numeric", refRangeLow: 0.8, refRangeHigh: 1.2, refRangeText: "0.8 - 1.2", criticalHigh: 4.5, gender: "Both", sortOrder: 3 },
-      { id: "LTP00123", name: "APTT Patient", unit: "seconds", valueType: "numeric", refRangeLow: 25, refRangeHigh: 38, refRangeText: "25 - 38", criticalHigh: 70, gender: "Both", sortOrder: 4 },
-      { id: "LTP00124", name: "APTT Control", unit: "seconds", valueType: "numeric", refRangeLow: 26, refRangeHigh: 32, refRangeText: "26 - 32", gender: "Both", sortOrder: 5 },
-      { id: "LTP00125", name: "APTT Ratio", unit: "ratio", valueType: "numeric", refRangeLow: 0.8, refRangeHigh: 1.2, refRangeText: "0.8 - 1.2", gender: "Both", sortOrder: 6 },
-      { id: "LTP00126", name: "Fibrinogen", unit: "mg/dL", valueType: "numeric", refRangeLow: 200, refRangeHigh: 400, refRangeText: "200 - 400", criticalLow: 100, gender: "Both", sortOrder: 7 },
-      { id: "LTP00127", name: "Thrombin Time (TT)", unit: "seconds", valueType: "numeric", refRangeLow: 14, refRangeHigh: 19, refRangeText: "14 - 19", gender: "Both", sortOrder: 8 },
-    ],
-  },
-  {
-    id: "LT00669",
-    testCode: "DDC-1443",
+    id: "LT-DDC-0669",
+    testCode: "DDC-0669",
     testName: "Thyroid Function Test - TFT (tT3,tT4,TSH)",
     category: "Hormones & Endocrinology",
     sampleType: "Serum",
@@ -347,7 +289,7 @@ export const PREPOPULATED_MASTER_TESTS: MasterTest[] = [
   },
   {
     id: "LT00778",
-    testCode: "INH-004",
+    testCode: "IH-004",
     testName: "Electrolytes",
     category: "Biochemistry",
     sampleType: "Serum",
@@ -457,12 +399,14 @@ export default function LabMaster() {
         const stored = localStorage.getItem("hms_lab_master_tests");
         if (stored) {
           const parsed: MasterTest[] = JSON.parse(stored);
-          const hasOldMockCbc = parsed.some(
+          const hasInvalidCodes = parsed.some(
             (t) =>
-              t.testCode === "HEM-CBC-01" ||
-              (t.testName.toLowerCase().includes("complete blood count") && t.parameters.length < 18)
+              t.testCode.startsWith("INH-") ||
+              t.testCode.startsWith("NEW-") ||
+              t.testCode === "TEST-4491" ||
+              t.testCode === "HEM-CBC-01"
           );
-          if (!hasOldMockCbc && parsed.length > 0) {
+          if (!hasInvalidCodes && parsed.length === 839) {
             return parsed.map((t) => ({
               ...t,
               testCode: (t.testCode || "").replace(/-COPY/gi, ""),
@@ -478,7 +422,7 @@ export default function LabMaster() {
   });
 
   const [expandedTestIds, setExpandedTestIds] = useState<Set<string>>(
-    new Set(["LT00787", "INH-013"])
+    new Set(["LT00787", "IH-013"])
   );
 
   // Filters & Search
@@ -561,7 +505,7 @@ export default function LabMaster() {
             setTests(mappedList);
             // Default expand Complete Blood Count (18 params)
             const cbc = mappedList.find(
-              (t) => t.testCode === "INH-013" || t.testName.toLowerCase().includes("complete blood count")
+              (t) => t.testCode === "IH-013" || t.testCode === "INH-013" || t.testName.toLowerCase().includes("complete blood count")
             );
             if (cbc) {
               setExpandedTestIds(new Set([cbc.id]));

@@ -175,7 +175,7 @@ const INITIAL_SAMPLES: SampleItem[] = [
     ageGender: "34 Y / Male",
     requisitionNo: "REQ123789",
     orderedTest: "Complete Blood Count (CBC)",
-    testCode: "CBC001",
+    testCode: "IH-013",
     testName: "Complete Blood Count (CBC)",
     sampleType: "Whole Blood",
     collectionTime: "20 May 2024, 10:30 AM",
@@ -255,7 +255,7 @@ const INITIAL_SAMPLES: SampleItem[] = [
     ageGender: "31 Y / Female",
     requisitionNo: "REQ123792",
     orderedTest: "Complete Blood Count (CBC)",
-    testCode: "CBC001",
+    testCode: "IH-013",
     testName: "Complete Blood Count (CBC)",
     sampleType: "Whole Blood (EDTA)",
     collectionTime: "05 Apr 2026, 10:30 AM",
@@ -2691,7 +2691,7 @@ export default function SampleVerification() {
                         <span className="text-sm font-semibold text-slate-800">
                           {selectedSample.testCode
                             ? `${selectedSample.orderedTest || selectedSample.testName} / ${selectedSample.testCode}`
-                            : "CBC / CBC001"}
+                            : "CBC / IH-013"}
                         </span>
                         <div className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-300 flex items-center justify-center shadow-xs">
                           <svg

@@ -1,4 +1,5 @@
 import { getUser } from "@/utils/token";
+import { Navigate } from "react-router-dom";
 
 import DoctorLayout from "@/components/layout/DoctorLayout";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -10,6 +11,10 @@ import LabDashboard from "./doctor/lab/labdashboard";
 export default function DashboardRedirect() {
   const user = getUser();
   const roleType = String(user?.role_type ?? "").trim().toUpperCase();
+
+  if (roleType === "PATIENT") {
+    return <Navigate to="/patient/dashboard" replace />;
+  }
 
   if (roleType === "DOCTOR") {
     return (

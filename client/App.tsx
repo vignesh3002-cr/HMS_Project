@@ -115,6 +115,18 @@ import LabProfile from "./pages/doctor/lab/labprofile";
 import LabMaster from "./pages/doctor/lab/labmaster";
 
 // ============================================================
+// PATIENT PORTAL
+// ============================================================
+
+import { PatientPortalLayout } from "@/components/patient-portal/PatientPortalLayout";
+import PatientDashboard from "./pages/patient/PatientDashboard";
+import PatientAppointments from "./pages/patient/PatientAppointments";
+import PatientLabReports from "./pages/patient/PatientLabReports";
+import PatientPrescriptions from "./pages/patient/PatientPrescriptions";
+import PatientHealthHistory from "./pages/patient/PatientHealthHistory";
+import PatientChemotherapy from "./pages/patient/PatientChemotherapy";
+
+// ============================================================
 // HOOKS / AUTH
 // ============================================================
 
@@ -544,7 +556,12 @@ const RememberMeCheck = () => {
   if (!getToken() || !user) return null; // token without a usable session -> Login handles cleanup
 
   const roleType = String(user.role_type ?? "").trim().toUpperCase();
-  const targetDashboard = roleType === "LAB_TECHNICIAN" ? "/lab/dashboard" : "/dashboard";
+  const targetDashboard =
+    roleType === "PATIENT"
+      ? "/patient/dashboard"
+      : roleType === "LAB_TECHNICIAN"
+      ? "/lab/dashboard"
+      : "/dashboard";
 
   // Logged-in user landed on the login route: NEVER paint the Login form.
   // It used to render fully for one frame before the redirect effect fired,
@@ -709,6 +726,61 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <LabMaster />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
+
+            {/* ==================================================
+                PATIENT PORTAL
+            ================================================== */}
+
+            <Route element={<PatientPortalLayout />}>
+              <Route
+                path="/patient/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <PatientDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/appointments"
+                element={
+                  <ProtectedRoute>
+                    <PatientAppointments />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/chemotherapy"
+                element={
+                  <ProtectedRoute>
+                    <PatientChemotherapy />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/reports"
+                element={
+                  <ProtectedRoute>
+                    <PatientLabReports />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/prescriptions"
+                element={
+                  <ProtectedRoute>
+                    <PatientPrescriptions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/history"
+                element={
+                  <ProtectedRoute>
+                    <PatientHealthHistory />
                   </ProtectedRoute>
                 }
               />
