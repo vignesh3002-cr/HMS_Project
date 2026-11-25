@@ -200,6 +200,22 @@ export default function Login() {
       }
 
       // ==================================================
+      // PATIENT
+      // ==================================================
+      if (roleType === "PATIENT") {
+        console.log(
+          "PATIENT detected -> redirecting to /patient/dashboard"
+        );
+
+        navigate("/patient/dashboard", {
+          replace: true,
+          state: { fromLogin: true },
+        });
+
+        return;
+      }
+
+      // ==================================================
       // ADMIN
       // ==================================================
       if (
@@ -269,7 +285,7 @@ export default function Login() {
             </div>
 
             <p className="text-sm font-medium leading-5 text-clinical-body">
-              Please sign in to your clinical environment.
+              Please sign in to your clinical or patient account.
             </p>
           </div>
 
@@ -280,7 +296,7 @@ export default function Login() {
             {/* Username */}
             <div className="flex flex-col gap-3">
               <label className="text-[14px] font-bold tracking-[0.9px] uppercase text-clinical-label leading-[13.5px]">
-                Username
+                Username / Patient ID / Mobile
               </label>
 
               <div className="flex items-center rounded-[4px] bg-clinical-input-bg">
@@ -306,7 +322,7 @@ export default function Login() {
                     onChange={(e) =>
                       setUsername(e.target.value)
                     }
-                    placeholder="Username"
+                    placeholder="Username, Patient ID, or Phone"
                     className="flex-1 bg-transparent text-xs font-medium outline-none border-none min-w-0 text-clinical-label placeholder:text-clinical-label/50"
                   />
                 </div>

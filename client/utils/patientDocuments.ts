@@ -34,6 +34,7 @@ export interface PatientDocumentItem {
 
 /** Mirrors the backend's DOCUMENT_TYPE_VALUES (patientDocument.constants.ts). */
 export const DOCUMENT_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "PRESCRIPTION", label: "Prescription" },
   { value: "BIOPSY_REPORT", label: "Biopsy Report" },
   { value: "DISCHARGE_DOCUMENT", label: "Discharge Document" },
   { value: "LAB_REPORT", label: "Lab Report" },
@@ -641,3 +642,59 @@ export function downloadAllDocuments(docs: PatientDocumentItem[]): void {
     }, idx * 300);
   });
 }
+
+/**
+ * Automatically saves / persists a prescription as a real PDF document file in
+ * `patient_document` (both backend DB and IndexedDB cache), exactly like
+ * documents uploaded in Doctor Notes & Documents.
+ */
+export async function syncPrescriptionToPatientDocument(
+  patientId: string,
+  prescription: any
+): Promise<PatientDocumentItem | null> {
+  if (!patientId || !prescription || !prescription.prescription_id) return null;
+  const rxId = prescription.prescription_id;
+  const expectedFileName = `Prescription_${rxId}.pdf`;
+
+  // 1. Check existing documents
+  const existingDocs = await loadPatientDocuments(patientId);
+  const found = existingDocs.find(
+    (d) =>
+      d.name === expectedFileName ||
+      d.originalName === expectedFileName ||
+      d.name.includes(rxId) ||
+      d.originalName?.includes(rxId)
+  );
+  if (found) {
+    return found;
+  }
+
+  // 2. Generate PDF and upload to patient-document API
+  try {
+    const { mapPatientPrescriptionToPdfData } = await import(
+      "../components/patient-portal/PrescriptionPdfPreviewModal"
+    );
+    const { generatePrescriptionPdf } = await import("./prescriptionPdf");
+    const pdfData = mapPatientPrescriptionToPdfData(prescription);
+    const { blob } = await generatePrescriptionPdf(pdfData);
+
+    const file = new File([blob], expectedFileName, {
+      type: "application/pdf",
+    });
+
+    const saved = await savePatientDocument(
+      patientId,
+      file,
+      `Prescription_${rxId}`,
+      {
+        encounterNo: prescription.encounter_no || prescription.patient_history?.mrn_no || undefined,
+        documentType: "PRESCRIPTION",
+      }
+    );
+    return saved;
+  } catch (err) {
+    console.warn("Could not sync prescription to patient_document:", err);
+    return null;
+  }
+}
+

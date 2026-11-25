@@ -22,6 +22,7 @@
     "pdfjs-dist": "^6.3.289",
     "react-international-phone": "^4.8.0",
     "react-phone-number-input": "^3.4.17",
+    "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {

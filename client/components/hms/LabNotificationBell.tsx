@@ -46,7 +46,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
   } = useLabNotifications();
 
   const [isOpen, setIsOpen] = useState(false);
-  const [filter, setFilter] = useState<"ALL" | "STAT" | "ORDER" | "SAMPLE" | "REPORT">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "URGENT" | "STAT" | "ORDER" | "SAMPLE" | "REPORT">("ALL");
   const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -76,7 +76,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
 
   const filteredNotifications = useMemo(() => {
     return notifications.filter((item) => {
-      if (filter === "STAT") return item.priority === "STAT" || item.priority === "URGENT";
+      if (filter === "URGENT" || filter === "STAT") return item.priority === "STAT" || item.priority === "URGENT";
       if (filter === "ORDER") return item.category === "ORDER";
       if (filter === "SAMPLE") return item.category === "SAMPLE";
       if (filter === "REPORT") return item.category === "REPORT";
@@ -93,7 +93,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
   };
 
   const getCategoryIcon = (category: string, priority: string) => {
-    if (priority === "STAT") {
+    if (priority === "STAT" || priority === "URGENT" || category === "STAT" || category === "URGENT") {
       return <Flame className="w-4 h-4 text-rose-600 animate-pulse" />;
     }
     switch (category) {
@@ -182,7 +182,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
               {(
                 [
                   ["ALL", `All (${notifications.length})`],
-                  ["STAT", `STAT (${notifications.filter((n) => n.priority === "STAT" || n.priority === "URGENT").length})`],
+                  ["URGENT", `Urgent (${notifications.filter((n) => n.priority === "STAT" || n.priority === "URGENT").length})`],
                   ["ORDER", "Orders"],
                   ["SAMPLE", "Samples"],
                   ["REPORT", "Reports"],
@@ -194,7 +194,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
                   onClick={() => setFilter(key)}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap cursor-pointer ${
                     filter === key
-                      ? key === "STAT"
+                      ? key === "URGENT" || key === "STAT"
                         ? "bg-rose-600 text-white"
                         : "bg-[#0b4a8b] text-white shadow-xs"
                       : "text-slate-600 hover:bg-slate-200/60"
@@ -218,22 +218,21 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
               </div>
             ) : (
               filteredNotifications.map((item) => {
-                const isStat = item.priority === "STAT";
-                const isUrgent = item.priority === "URGENT";
+                const isUrgent = item.priority === "STAT" || item.priority === "URGENT";
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => handleAction(item)}
                     className={`p-3.5 hover:bg-slate-50/90 transition-colors cursor-pointer group flex items-start gap-3 relative ${
-                      !item.read ? (isStat ? "bg-rose-50/40" : "bg-blue-50/25") : ""
+                      !item.read ? (isUrgent ? "bg-rose-50/40" : "bg-blue-50/25") : ""
                     }`}
                   >
                     {/* Unread dot */}
                     {!item.read && (
                       <span
                         className={`absolute left-1.5 top-5 w-1.5 h-1.5 rounded-full ${
-                          isStat ? "bg-rose-600" : "bg-[#0b4a8b]"
+                          isUrgent ? "bg-rose-600" : "bg-[#0b4a8b]"
                         }`}
                       />
                     )}
@@ -241,10 +240,8 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
                     {/* Icon Container */}
                     <div
                       className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 border ${
-                        isStat
+                        isUrgent
                           ? "bg-rose-100/80 border-rose-200"
-                          : isUrgent
-                          ? "bg-amber-100/80 border-amber-200"
                           : item.category === "SAMPLE"
                           ? "bg-blue-100/80 border-blue-200"
                           : item.category === "REPORT"
@@ -264,15 +261,10 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
                               !item.read ? "text-slate-900" : "text-slate-700"
                             }`}
                           >
-                            {item.title}
+                            {item.title.replace(/^STAT:\s*/i, "URGENT: ").replace(/^STAT\s+Test:/i, "Urgent Test:")}
                           </h4>
-                          {isStat && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-rose-100 text-rose-700 border border-rose-200">
-                              STAT
-                            </span>
-                          )}
                           {isUrgent && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-rose-100 text-rose-700 border border-rose-200">
                               URGENT
                             </span>
                           )}
@@ -283,7 +275,7 @@ export function LabNotificationBell({ className = "", size = "md" }: LabNotifica
                       </div>
 
                       <p className="text-[11px] text-slate-600 mt-1 leading-snug line-clamp-2">
-                        {item.message}
+                        {item.message?.replace(/\bSTAT\b/g, "Urgent")}
                       </p>
 
                       {/* Action & Bench info footer */}

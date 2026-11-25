@@ -132,6 +132,7 @@ export interface LabOrderItemRecord {
     sample_type?: string | null;
     reference_range?: string | null;
     tat_hours?: number | string | null;
+    expiry_time_hours?: number | string | null;
     lab_test_parameter?: LabTestParameterRecord[];
   } | null;
   sample_collection?: {
@@ -141,6 +142,7 @@ export interface LabOrderItemRecord {
     barcode?: string | null;
     container_type?: string | null;
     collection_datetime?: string | null;
+    expiry_datetime?: string | null;
     collection_status?: string | null;
     remarks?: string | null;
     collected_by?: string | null;

@@ -592,6 +592,11 @@ export function NotificationProvider({ children, employeeId }: NotificationProvi
       setIsLoading(false);
       return;
     }
+    const currentUser = getUser();
+    if (currentUser?.role_type === "PATIENT") {
+      setIsLoading(false);
+      return;
+    }
     setError(null);
     const registerFailureCycle = (err?: any) => {
       consecutiveFailuresRef.current += 1;

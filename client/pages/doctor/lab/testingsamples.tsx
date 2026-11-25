@@ -33,6 +33,14 @@ import {
   compareBySampleStability,
   SampleStabilityInfo,
 } from "@/utils/sampleStability";
+import { SampleTimerBadge } from "@/components/hms/SampleTimerBadge";
+import { SampleExpiryAlertBanner } from "@/components/hms/SampleExpiryAlertBanner";
+import {
+  isPackageTest,
+  decomposePackageTest,
+  generateSubTestBarcode,
+  getContainerBadgeClass,
+} from "./packageDecomposition";
 
 export interface TestingSampleItem {
   id: string;
@@ -59,11 +67,18 @@ export interface TestingSampleItem {
   collectionTime?: string;
   collectionTimeIso?: string;
   stabilityHours?: number;
+  expiryTimeIso?: string;
+  expiryHours?: number;
   priority?: string;
   unit?: string;
   expectedRange?: string;
   parametersCount?: number;
   parametersPreview?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  parentOrderItemId?: string;
+  containerType?: string;
+  containerColor?: "purple" | "amber" | "slate" | "blue" | "emerald" | "rose";
 }
 
 const normalizeToIsoDate = (value?: string | null): string | null => {
@@ -344,6 +359,40 @@ export function sortParametersClinically(params: TestParameter[]): TestParameter
   return params;
 }
 
+export function isTestMasterMatch(master?: LabTestMasterRecord | null, targetTestName?: string): boolean {
+  if (!master || !targetTestName) return false;
+  const tName = targetTestName.toLowerCase().trim();
+  const cleanTName = tName.replace(/\s*\([^)]*\)/g, "").trim();
+  const mName = (master.test_name || "").toLowerCase().trim();
+  const cleanMName = mName.replace(/\s*\([^)]*\)/g, "").trim();
+  const mCode = (master.test_code || "").toLowerCase().trim();
+
+  // 1. Exact match on full name or code
+  if (mName === tName || cleanMName === cleanTName) return true;
+  if (mCode === tName || mCode === cleanTName) return true;
+
+  // 2. If master is a composite package or target is a composite package, only allow exact matches!
+  const isPackage = mName.includes("package") || tName.includes("package") || mCode.startsWith("pkg") || mCode.startsWith("ih-");
+  if (isPackage) {
+    return mName === tName || cleanMName === cleanTName || mCode === tName;
+  }
+
+  // 3. Match after stripping clinical prefixes (serum, blood, urine, total, plasma, random)
+  const stripPrefixes = (s: string) => s.replace(/^(serum|blood|urine|total|plasma|random)\s+/i, "").trim();
+  const strippedT = stripPrefixes(cleanTName);
+  const strippedM = stripPrefixes(cleanMName);
+  if (strippedT && strippedM && strippedT === strippedM) return true;
+
+  // 4. Prefix match for variants, e.g. "Creatinine" vs "Creatinine (Serum)"
+  if (cleanMName.length >= 4 && cleanTName.length >= 4) {
+    if (cleanTName.startsWith(cleanMName) || cleanMName.startsWith(cleanTName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export interface ClinicalPanelPreset {
   keywords: string[];
   primaryMasterId?: string;
@@ -356,210 +405,196 @@ export const CLINICAL_PANEL_PRESETS: ClinicalPanelPreset[] = [
   {
     keywords: ["cbc", "complete blood count", "hemogram", "complete hemogram", "full blood count", "fbc"],
     primaryMasterId: "LT00787",
-    primaryTestCode: "INH-013",
+    primaryTestCode: "IH-013",
     canonicalName: "Complete Blood Count",
     match: (n) => /^(cbc|complete blood count|hemogram|complete hemogram|full blood count|fbc)$/i.test(n),
   },
   {
     keywords: ["differential wbc count", "differential count", "wbc differential", "differential wbc", "dc count", "diff count"],
-    primaryMasterId: "LT00294",
-    primaryTestCode: "DDC-1068",
+    primaryMasterId: "LT-DDC-0294",
+    primaryTestCode: "DDC-0294",
     canonicalName: "Differential WBC Count (DC)",
     match: (n) => /^(differential wbc count|differential count|wbc differential|differential wbc|dc count|diff count)$/i.test(n),
   },
   {
     keywords: ["wbc", "total wbc count", "total wbc count (tc)", "wbc count", "white blood cell count", "white blood cells", "total count", "tc"],
-    primaryMasterId: "LT00683",
-    primaryTestCode: "DDC-1457",
+    primaryMasterId: "LT-DDC-0683",
+    primaryTestCode: "DDC-0683",
     canonicalName: "Total WBC Count (TC)",
     match: (n) => /^(wbc|total wbc count|total wbc count \(tc\)|wbc count|white blood cell count|white blood cells|total count|tc)$/i.test(n),
   },
   {
     keywords: ["hb,tc,dc", "hb tc dc", "hb, tc, dc"],
-    primaryMasterId: "LT00378",
-    primaryTestCode: "DDC-1152",
+    primaryMasterId: "LT-DDC-0378",
+    primaryTestCode: "DDC-0378",
     canonicalName: "HB,TC,DC",
     match: (n) => /^(hb,tc,dc|hb tc dc|hb, tc, dc)$/i.test(n),
   },
   {
     keywords: ["lft", "liver function test", "liver panel", "hepatic panel", "liver function tests"],
     primaryMasterId: "LT00783",
-    primaryTestCode: "INH-009",
+    primaryTestCode: "IH-009",
     canonicalName: "Liver Function test",
     match: (n) => /^(lft|liver function test|liver panel|hepatic panel|liver function tests)$/i.test(n),
   },
   {
-    keywords: ["rft", "kft", "renal function test", "kidney function test", "renal panel", "kidney panel"],
-    primaryMasterId: "LT00794",
-    primaryTestCode: "NEW-001",
-    canonicalName: "Renal Function Test (RFT)",
-    match: (n) => /^(rft|kft|renal function test|kidney function test|renal panel|kidney panel)$/i.test(n),
+    keywords: ["urea", "blood urea", "bun", "blood urea nitrogen", "serum urea"],
+    primaryMasterId: "LT-DDC-0700",
+    primaryTestCode: "DDC-0700",
+    canonicalName: "Urea",
+    match: (cleanN, n) => !cleanN.includes("creatinine") && !cleanN.includes("urine") && !cleanN.includes("clearance") && /^(urea|blood urea|bun|blood urea nitrogen|serum urea)$/i.test(cleanN),
   },
   {
     keywords: ["lipid profile", "lipid panel", "lipids", "cholesterol panel"],
     primaryMasterId: "LT00782",
-    primaryTestCode: "INH-008",
+    primaryTestCode: "IH-008",
     canonicalName: "Lipid profile",
     match: (n) => !n.includes("phospholipid") && /^(lipid profile|lipid panel|lipids|cholesterol panel)$/i.test(n),
   },
   {
     keywords: ["thyroid", "tft", "thyroid function test", "thyroid profile", "thyroid panel"],
-    primaryMasterId: "LT00669",
-    primaryTestCode: "DDC-1443",
+    primaryMasterId: "LT-DDC-0669",
+    primaryTestCode: "DDC-0669",
     canonicalName: "Thyroid Function Test - TFT (tT3,tT4,TSH)",
     match: (n) => /^(thyroid|tft|thyroid function test|thyroid profile|thyroid panel)$/i.test(n),
   },
   {
     keywords: ["urine routine", "urine routine analysis", "routine urine", "urinalysis", "urine analysis", "urine complete", "urine complete analysis", "urine r/m"],
-    primaryMasterId: "LT00745",
-    primaryTestCode: "DDC-1519",
+    primaryMasterId: "LT-DDC-0745",
+    primaryTestCode: "DDC-0745",
     canonicalName: "Urine Routine Analysis",
     match: (n) => /^(urine routine|urine routine analysis|routine urine|urinalysis|urine analysis|urine complete|urine complete analysis|urine r\/m)$/i.test(n),
   },
   {
     keywords: ["electrolytes complete", "complete electrolytes", "electrolyte complete"],
-    primaryMasterId: "LT00307",
-    primaryTestCode: "DDC-1081",
+    primaryMasterId: "LT-DDC-0307",
+    primaryTestCode: "DDC-0307",
     canonicalName: "Electrolytes Complete",
     match: (n) => /^(electrolytes complete|complete electrolytes|electrolyte complete)$/i.test(n),
   },
   {
     keywords: ["electrolytes", "serum electrolytes", "electrolyte panel", "lytes"],
     primaryMasterId: "LT00778",
-    primaryTestCode: "INH-004",
+    primaryTestCode: "IH-004",
     canonicalName: "Electrolytes",
     match: (n) => !n.includes("urine") && !n.includes("complete") && !n.includes("(n&k)") && !n.includes("(na&k)") && /^(electrolytes|serum electrolytes|electrolyte panel|lytes)$/i.test(n),
   },
   {
-    keywords: ["coagulation profile", "coagulation", "coag profile", "pt inr", "pt aptt", "pt / aptt / inr", "coagulation profile (pt / aptt / inr)"],
-    primaryMasterId: "LT00795",
-    primaryTestCode: "NEW-002",
-    canonicalName: "Coagulation Profile (PT / APTT / INR)",
-    match: (n) => /^(coagulation profile|coagulation|coag profile|pt inr|pt aptt|pt \/ aptt \/ inr|coagulation profile \(pt \/ aptt \/ inr\))$/i.test(n),
-  },
-  {
     keywords: ["hbv screen", "hepatitis b screen", "hepatitis b marker study", "hepatitis b profile", "hepatitis b panel", "hbv screen (hbsag, anti-hbc, anti-hbs)"],
-    primaryMasterId: "LT00796",
-    primaryTestCode: "NEW-003",
-    canonicalName: "HBV Screen (HBsAg, Anti-HBc, Anti-HBs)",
+    primaryMasterId: "LT-DDC-0392",
+    primaryTestCode: "DDC-0392",
+    canonicalName: "Hepatitis B Marker Study",
     match: (n) => !n.includes("pcr") && !n.includes("spot") && !n.includes("rapid") && !n.includes("clia") && !n.includes("elisa") && /^(hbv screen|hepatitis b screen|hepatitis b marker study|hepatitis b profile|hepatitis b panel|hbv screen \(hbsag, anti-hbc, anti-hbs\))$/i.test(n),
   },
   {
-    keywords: ["hcv & hiv", "hiv & hcv", "hiv and hcv", "hcv and hiv", "hcv & hiv screen"],
-    primaryMasterId: "LT00797",
-    primaryTestCode: "NEW-004",
-    canonicalName: "HCV & HIV Screen",
-    match: (n) => !n.includes("pcr") && /^(hcv & hiv|hiv & hcv|hiv and hcv|hcv and hiv|hcv & hiv screen)$/i.test(n),
-  },
-  {
     keywords: ["uric acid", "serum uric acid"],
-    primaryMasterId: "LT00702",
-    primaryTestCode: "DDC-1476",
+    primaryMasterId: "LT-DDC-0702",
+    primaryTestCode: "DDC-0702",
     canonicalName: "Uric Acid",
     match: (n) => !n.includes("urine") && /^(uric acid|serum uric acid)$/i.test(n),
   },
   {
     keywords: ["creatinine", "serum creatinine"],
-    primaryMasterId: "LT00268",
-    primaryTestCode: "DDC-1042",
+    primaryMasterId: "LT-DDC-0268",
+    primaryTestCode: "DDC-0268",
     canonicalName: "Creatinine",
     match: (n) => !n.includes("urine") && /^(creatinine|serum creatinine)$/i.test(n),
   },
   {
     keywords: ["calcium", "serum calcium", "total calcium"],
     primaryMasterId: "LT00777",
-    primaryTestCode: "INH-003",
+    primaryTestCode: "IH-003",
     canonicalName: "Calcium",
     match: (n) => !n.includes("urine") && /^(calcium|serum calcium|total calcium)$/i.test(n),
   },
   {
     keywords: ["esr", "erythrocyte sedimentation rate"],
-    primaryMasterId: "LT00314",
-    primaryTestCode: "DDC-1088",
+    primaryMasterId: "LT-DDC-0314",
+    primaryTestCode: "DDC-0314",
     canonicalName: "ESR",
     match: (n) => /^(esr|erythrocyte sedimentation rate)$/i.test(n),
   },
   {
     keywords: ["ferritin", "serum ferritin"],
-    primaryMasterId: "LT00329",
-    primaryTestCode: "DDC-1103",
+    primaryMasterId: "LT-DDC-0329",
+    primaryTestCode: "DDC-0329",
     canonicalName: "Ferritin",
     match: (n) => /^(ferritin|serum ferritin)$/i.test(n),
   },
   {
     keywords: ["gamma gt", "ggt", "gamma gt (ggt)"],
-    primaryMasterId: "LT00364",
-    primaryTestCode: "DDC-1138",
+    primaryMasterId: "LT-DDC-0364",
+    primaryTestCode: "DDC-0364",
     canonicalName: "Gamma GT (GGT)",
     match: (n) => /^(gamma gt|ggt|gamma gt \(ggt\))$/i.test(n),
   },
   {
-    keywords: ["glucose random", "random blood sugar", "rbs", "random glucose"],
+    keywords: ["glucose random", "random blood sugar", "rbs", "random glucose", "blood sugar random", "blood sugar (random)"],
     primaryMasterId: "LT00790",
-    primaryTestCode: "INH-016",
+    primaryTestCode: "IH-016",
     canonicalName: "Glucose Random",
-    match: (n) => /^(glucose random|random blood sugar|rbs|random glucose)$/i.test(n),
+    match: (cleanN, n) => /^(glucose random|random blood sugar|rbs|random glucose|blood sugar random|blood sugar \(random\))$/i.test(cleanN) || /^(glucose random|random blood sugar|rbs|random glucose|blood sugar random|blood sugar \(random\))$/i.test(n || ""),
   },
   {
-    keywords: ["glucose fasting", "fasting blood sugar", "fbs", "fasting glucose"],
+    keywords: ["glucose fasting", "fasting blood sugar", "fbs", "fasting glucose", "blood sugar fasting"],
     primaryMasterId: "LT00788",
-    primaryTestCode: "INH-014",
+    primaryTestCode: "IH-014",
     canonicalName: "Glucose Fasting",
-    match: (n) => /^(glucose fasting|fasting blood sugar|fbs|fasting glucose)$/i.test(n),
+    match: (cleanN, n) => /^(glucose fasting|fasting blood sugar|fbs|fasting glucose|blood sugar fasting)$/i.test(cleanN) || /^(glucose fasting|fasting blood sugar|fbs|fasting glucose|blood sugar fasting)$/i.test(n || ""),
   },
   {
-    keywords: ["glucose post prandial", "post prandial blood sugar", "ppbs", "pp glucose"],
+    keywords: ["glucose post prandial", "post prandial blood sugar", "ppbs", "pp glucose", "blood sugar post prandial", "blood sugar pp"],
     primaryMasterId: "LT00789",
-    primaryTestCode: "INH-015",
+    primaryTestCode: "IH-015",
     canonicalName: "Glucose Post Prandial",
-    match: (n) => /^(glucose post prandial|post prandial blood sugar|ppbs|pp glucose)$/i.test(n),
+    match: (cleanN, n) => /^(glucose post prandial|post prandial blood sugar|ppbs|pp glucose|blood sugar post prandial|blood sugar pp)$/i.test(cleanN) || /^(glucose post prandial|post prandial blood sugar|ppbs|pp glucose|blood sugar post prandial|blood sugar pp)$/i.test(n || ""),
   },
   {
     keywords: ["hba1c", "hba1c (hplc)", "glycated hemoglobin"],
-    primaryMasterId: "LT00380",
-    primaryTestCode: "DDC-1154",
+    primaryMasterId: "LT-DDC-0380",
+    primaryTestCode: "DDC-0380",
     canonicalName: "HBA1c (HPLC)",
     match: (n) => /^(hba1c|hba1c \(hplc\)|glycated hemoglobin)$/i.test(n),
   },
   {
     keywords: ["platelet count", "platelets", "platelet"],
-    primaryMasterId: "LT00570",
-    primaryTestCode: "DDC-1344",
+    primaryMasterId: "LT-DDC-0570",
+    primaryTestCode: "DDC-0570",
     canonicalName: "PLATELET COUNT",
     match: (n) => /^(platelet count|platelets|platelet)$/i.test(n),
   },
   {
     keywords: ["nt probnp", "probnp", "bnp", "nt-probnp"],
-    primaryMasterId: "LT00551",
-    primaryTestCode: "DDC-1325",
+    primaryMasterId: "LT-DDC-0551",
+    primaryTestCode: "DDC-0551",
     canonicalName: "NT proBNP",
     match: (n) => /^(nt probnp|probnp|bnp|nt-probnp)$/i.test(n),
   },
   {
     keywords: ["bilirubin", "total bilirubin", "serum bilirubin"],
-    primaryMasterId: "LT00179",
-    primaryTestCode: "DDC-0953",
+    primaryMasterId: "LT-DDC-0179",
+    primaryTestCode: "DDC-0179",
     canonicalName: "Bilirubin",
     match: (n) => !n.includes("cord") && !n.includes("direct") && !n.includes("indirect") && /^(bilirubin|total bilirubin|serum bilirubin)$/i.test(n),
   },
   {
     keywords: ["17 - oh progesterone", "17-oh progesterone", "17 oh progesterone"],
-    primaryMasterId: "LT00001",
-    primaryTestCode: "DDC-0775",
+    primaryMasterId: "LT-DDC-0001",
+    primaryTestCode: "DDC-0001",
     canonicalName: "17 - Oh Progesterone",
     match: (n) => /^(17 - oh progesterone|17-oh progesterone|17 oh progesterone)$/i.test(n),
   },
   {
     keywords: ["24 hrs urine 17 ketosteroids", "17 ketosteroids", "24 hrs urine ketosteroids"],
-    primaryMasterId: "LT00002",
-    primaryTestCode: "DDC-0776",
+    primaryMasterId: "LT-DDC-0002",
+    primaryTestCode: "DDC-0002",
     canonicalName: "24 Hrs Urine 17 Ketosteroids",
     match: (n) => /^(24 hrs urine 17 ketosteroids|17 ketosteroids|24 hrs urine ketosteroids)$/i.test(n),
   },
   {
     keywords: ["urine pregnancy test", "pregnancy test", "upt"],
-    primaryMasterId: "LT00724",
-    primaryTestCode: "DDC-1498",
+    primaryMasterId: "LT-DDC-0724",
+    primaryTestCode: "DDC-0724",
     canonicalName: "Urine Pregnancy Test",
     match: (n) => /^(urine pregnancy test|pregnancy test|upt)$/i.test(n),
   },
@@ -577,7 +612,9 @@ export function resolveAllTestParameters(options: {
 
   // 1. Determine if this test is a combo test that should be split into individual sub-panels
   const lowerTest = testName.toLowerCase().trim();
-  const directMaster = matchedTestMaster || item?.lab_test_master || allMasters.find((m) => m.test_name?.toLowerCase() === lowerTest);
+  const isItemMatch = isTestMasterMatch(item?.lab_test_master, testName);
+  const isMatchedMasterMatch = isTestMasterMatch(matchedTestMaster, testName);
+  const directMaster = (isMatchedMasterMatch ? matchedTestMaster : null) || (isItemMatch ? item?.lab_test_master : null) || allMasters.find((m) => m.test_name?.toLowerCase() === lowerTest);
   let shouldSplit = true;
 
   if (directMaster) {
@@ -616,7 +653,7 @@ export function resolveAllTestParameters(options: {
       const combined: TestParameter[] = [];
       tokens.forEach((subName) => {
         const subParams = resolveSingleTestParameters({
-          item,
+          item: isTestMasterMatch(item?.lab_test_master, subName) ? item : null,
           patientGender,
           testName: subName,
           allMasters,
@@ -640,12 +677,12 @@ export function resolveAllTestParameters(options: {
   }
 
   const single = resolveSingleTestParameters({
-    item,
+    item: isItemMatch ? item : null,
     patientGender,
     testName,
     allMasters,
     allDbParameters,
-    matchedTestMaster,
+    matchedTestMaster: isMatchedMasterMatch ? matchedTestMaster : null,
   });
   return sortParametersClinically(single);
 }
@@ -681,23 +718,30 @@ function resolveSingleTestParameters(options: {
           Array.isArray(m.lab_test_parameter) &&
           m.lab_test_parameter.length > 0
       ) ||
+      allMasters.find(
+        (m) => m.test_name?.toLowerCase() === preset.canonicalName.toLowerCase()
+      ) ||
       null;
   }
 
   // 2. If no preset or master not found via preset, search allMasters for rich DB master
   if (!bestMaster) {
+    const isItemMatch = isTestMasterMatch(item?.lab_test_master, testName);
+    const isMatchedMasterMatch = isTestMasterMatch(matchedTestMaster, testName);
+
     bestMaster =
-      (item?.lab_test_master && (item.lab_test_master.lab_test_parameter?.length || 0) > 0 ? item.lab_test_master : null) ||
-      (matchedTestMaster && (matchedTestMaster.lab_test_parameter?.length || 0) > 0 ? matchedTestMaster : null) ||
-      (item?.lab_test_id ? allMasters.find((m) => m.lab_test_id === item.lab_test_id && (m.lab_test_parameter?.length || 0) > 0) : null) ||
+      (isItemMatch && (item?.lab_test_master?.lab_test_parameter?.length || 0) > 0 ? item?.lab_test_master : null) ||
+      (isMatchedMasterMatch && (matchedTestMaster?.lab_test_parameter?.length || 0) > 0 ? matchedTestMaster : null) ||
+      (isItemMatch && item?.lab_test_id ? allMasters.find((m) => m.lab_test_id === item.lab_test_id && (m.lab_test_parameter?.length || 0) > 0) : null) ||
       allMasters.find((m) => m.test_name?.toLowerCase() === n && (m.lab_test_parameter?.length || 0) > 0) ||
       allMasters.find((m) => m.test_name?.toLowerCase() === cleanN && (m.lab_test_parameter?.length || 0) > 0) ||
+      allMasters.find((m) => m.test_code?.toLowerCase() === n && (m.lab_test_parameter?.length || 0) > 0) ||
       // Next preference: records with non-null unit or reference_range from database
       allMasters.find((m) => m.test_name?.toLowerCase() === cleanN && (m.unit || m.reference_range)) ||
       allMasters.find((m) => m.test_name?.toLowerCase() === n && (m.unit || m.reference_range)) ||
-      (item?.lab_test_id ? allMasters.find((m) => m.lab_test_id === item.lab_test_id) : null) ||
-      item?.lab_test_master ||
-      matchedTestMaster ||
+      (isItemMatch && item?.lab_test_id ? allMasters.find((m) => m.lab_test_id === item.lab_test_id) : null) ||
+      (isItemMatch ? item?.lab_test_master : null) ||
+      (isMatchedMasterMatch ? matchedTestMaster : null) ||
       allMasters.find((m) => m.test_name?.toLowerCase() === n) ||
       allMasters.find((m) => m.test_name?.toLowerCase() === cleanN) ||
       null;
@@ -728,7 +772,8 @@ function resolveSingleTestParameters(options: {
   // 3. Try to get parameters from bestMaster.lab_test_parameter or allDbParameters
   let dbParams: any[] = bestMaster?.lab_test_parameter || [];
   if ((!dbParams || dbParams.length === 0) && allDbParameters.length > 0) {
-    const testIdToMatch = bestMaster?.lab_test_id || item?.lab_test_id;
+    const isItemMatch = isTestMasterMatch(item?.lab_test_master, testName);
+    const testIdToMatch = bestMaster?.lab_test_id || (isItemMatch ? item?.lab_test_id : null);
     if (testIdToMatch) {
       dbParams = allDbParameters.filter((p) => p.lab_test_id === testIdToMatch);
     }
@@ -840,7 +885,9 @@ function resolveSingleTestParameters(options: {
   }
 
   // 5. Single test parameter using bestMaster's unit/reference_range fetched directly from database
-  const master = bestMaster || item?.lab_test_master || matchedTestMaster;
+  const isItemMatch = isTestMasterMatch(item?.lab_test_master, testName);
+  const isMatchedMasterMatch = isTestMasterMatch(matchedTestMaster, testName);
+  const master = bestMaster || (isItemMatch ? item?.lab_test_master : null) || (isMatchedMasterMatch ? matchedTestMaster : null);
   if (master && (master.unit || master.reference_range || master.test_name)) {
     const ltm = master;
     const formattedRefRange = formatGenderReferenceRange(ltm.reference_range, patientGender, ltm.unit);
@@ -989,7 +1036,7 @@ export default function TestingSamples() {
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<"ALL" | "DUE_SOON" | "EXPIRED">("ALL");
-  const currentTime = useCurrentTimeTicker(30000);
+  const currentTime = useCurrentTimeTicker(1000);
 
   // Results Workflow State
   const [viewMode, setViewMode] = useState<
@@ -1113,7 +1160,7 @@ export default function TestingSamples() {
           return isVerifiedStatus || isLocallyVerified || isLocallyTesting;
         });
 
-        const mappedBackendSamples: TestingSampleItem[] = verifiedBackendItems.map((item, idx) => {
+        const mappedBackendSamples: TestingSampleItem[] = verifiedBackendItems.flatMap((item, idx) => {
           const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
           const orderBioData =
             (parentOrder?.patient_history as any)?.patient_bio_data ||
@@ -1195,13 +1242,12 @@ export default function TestingSamples() {
             item.sample_collection?.[0]?.created_at ||
             item.created_at;
           const colDate = colDateTime ? new Date(colDateTime) : createdDate;
-          const stabilityHours = resolveStabilityHours(
+          const tatHours = resolveStabilityHours(
             testName,
             sampleType,
             item.lab_test_master?.tat_hours,
             item.priority
           );
-          const tatHours = stabilityHours;
           const estDate = new Date(createdDate.getTime() + tatHours * 3600 * 1000);
           const estimatedCompletion = !isNaN(estDate.getTime())
             ? estDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() })
@@ -1250,6 +1296,17 @@ export default function TestingSamples() {
             };
           }
 
+          const dbSc = item.sample_collection?.[0];
+          const dbExpiryDatetime = dbSc?.expiry_datetime;
+          const masterExpiryHours = Number(matchedTestMaster?.expiry_time_hours) || Number(item.lab_test_master?.expiry_time_hours) || undefined;
+          const stabilityHours = resolveStabilityHours(
+            testName,
+            sampleType,
+            item.lab_test_master?.tat_hours,
+            item.priority,
+            masterExpiryHours
+          );
+
           const dbResolvedParams = resolveAllTestParameters({
             item,
             patientGender: resolvedGender,
@@ -1258,6 +1315,187 @@ export default function TestingSamples() {
             allDbParameters: dbParameters,
             matchedTestMaster,
           });
+
+          const rawTargetDate = item.target_date || (parentOrder as any)?.target_date;
+          const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
+          const targetDateIso = rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined;
+
+          const rawTestCode = item.lab_test_master?.test_code || item.lab_test_id?.replace(/^LABTEST/, "T") || "TEST";
+          const includesDetails = item.lab_test_master?.includes_details;
+
+          // =========================================================================
+          // OPTION 2B: Decompose Package into Independent Rows in Testing Samples
+          // =========================================================================
+          if (isPackageTest(testName, rawTestCode, includesDetails)) {
+            const subDefs = decomposePackageTest(testName, rawTestCode, includesDetails);
+            const subSampleItems: TestingSampleItem[] = subDefs.flatMap((st, sIdx) => {
+              const subId = `${item.lab_order_item_id}__${st.key}`;
+              const subSc = (item.sample_collection && item.sample_collection[sIdx]) || dbSc;
+              const subBarcode =
+                (item.sample_collection && item.sample_collection[sIdx]?.barcode) ||
+                (typeof window !== "undefined"
+                  ? localStorage.getItem(`generated_barcode_item_${subId}`) ||
+                    localStorage.getItem(`generated_barcode_item_${item.lab_order_item_id}__${st.key}`) ||
+                    localStorage.getItem(`generated_barcode_item_${item.lab_order_item_id}_${st.code.toLowerCase()}`) ||
+                    undefined
+                  : undefined) ||
+                generateSubTestBarcode(resolvedBarcode, st.code, sIdx);
+
+              const storedSubStatus = typeof window !== "undefined"
+                ? (localStorage.getItem(`testing_sample_status_${subId}`) as any)
+                : null;
+              const subStatus = storedSubStatus || status;
+
+              // STRICT SUB-TEST PARAMETER RESOLUTION:
+              // 1. First, extract parameters from the parent package that strictly match this sub-test
+              let subParams = dbResolvedParams.filter((p) => st.filterParameter(p.parameter));
+
+              // 2. If no parameters found in parent, resolve specifically for this standalone sub-test WITHOUT the parent item
+              if (subParams.length === 0) {
+                const singleParams = resolveSingleTestParameters({
+                  item: null, // STRICT: Never pass parent package item so parent params don't leak into sub-test!
+                  patientGender: resolvedGender,
+                  testName: st.name,
+                  allMasters: testMasters,
+                  allDbParameters: dbParameters,
+                });
+                subParams = singleParams.filter((p) => st.filterParameter(p.parameter));
+              }
+
+              // STRICT FILTER: Absolutely guarantee ONLY parameters matching this sub-test are retained!
+              subParams = subParams.filter((p) => st.filterParameter(p.parameter));
+
+              // If this sub-test has NO related parameters in this package, skip it (do not create a phantom/empty row)
+              if (subParams.length === 0) {
+                return [];
+              }
+
+              // Hydrate with DB lab_result records
+              if (item.lab_result && Array.isArray(item.lab_result) && item.lab_result.length > 0) {
+                subParams = subParams.map((dbp) => {
+                  const matched = item.lab_result?.find((lr) =>
+                    (lr.lab_test_parameter_id && lr.lab_test_parameter_id === dbp.lab_test_parameter_id) ||
+                    (lr.parameter_name && lr.parameter_name.toLowerCase().trim() === dbp.parameter.toLowerCase().trim())
+                  );
+                  if (matched && matched.result_value != null && matched.result_value !== "") {
+                    const evalFlag = evaluateAbnormalFlag(matched.result_value, {
+                      inputType: dbp.inputType,
+                      refRangeLow: dbp.refRangeLow,
+                      refRangeHigh: dbp.refRangeHigh,
+                      referenceRange: dbp.referenceRange,
+                      unit: dbp.unit,
+                    });
+                    return {
+                      ...dbp,
+                      result: matched.result_value,
+                      status: (matched.result_status === "Completed" ? "Completed" : "In Progress") as any,
+                      abnormalFlag: (matched.abnormal_flag || evalFlag) as any,
+                    };
+                  }
+                  return dbp;
+                });
+              }
+
+              // Hydrate with local storage observations specifically for this subId
+              const storedSubParams = typeof window !== "undefined"
+                ? localStorage.getItem(`testing_sample_params_${subId}`) ||
+                  localStorage.getItem(`testing_sample_params_${item.lab_order_item_id}__${st.key}`)
+                : null;
+              if (storedSubParams) {
+                try {
+                  const parsed = JSON.parse(storedSubParams);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    subParams = subParams.map((dbp) => {
+                      const matched = parsed.find((p: any) =>
+                        (p.lab_test_parameter_id && p.lab_test_parameter_id === dbp.lab_test_parameter_id) ||
+                        p.parameter.toLowerCase() === dbp.parameter.toLowerCase() ||
+                        p.id === dbp.id
+                      );
+                      if (matched && matched.result) {
+                        return {
+                          ...dbp,
+                          result: matched.result,
+                          status: "Completed",
+                          abnormalFlag: matched.abnormalFlag || dbp.abnormalFlag,
+                        };
+                      }
+                      return dbp;
+                    });
+                  }
+                } catch {}
+              }
+
+              // Final strict filter pass
+              subParams = subParams.filter((p) => st.filterParameter(p.parameter));
+
+              const subSingleUnit = subParams[0]?.unit || "";
+              const subSingleRange = subParams[0]?.referenceRange || "";
+              const isSubMulti = subParams.length > 1;
+              const subParamsCount = subParams.length;
+              const subParamsPreview = isSubMulti
+                ? subParams.map(p => `${p.parameter}: ${p.referenceRange || "—"} ${p.unit}`).slice(0, 5).join(" | ") + (subParams.length > 5 ? "..." : "")
+                : `${subSingleRange} ${subSingleUnit}`.trim();
+
+              const storedSubResult = typeof window !== "undefined"
+                ? localStorage.getItem(`testing_sample_result_${subId}`)
+                : null;
+              const subResult =
+                storedSubResult ||
+                (subStatus === "COMPLETED" ? "All test parameters verified & completed." : undefined);
+
+              const storedSubComments = typeof window !== "undefined"
+                ? localStorage.getItem(`testing_sample_comments_${subId}`)
+                : null;
+
+              const hasSubCriticalParam = subParams.some((p) => p.abnormalFlag === "CRITICAL");
+              const subCriticalAlert = hasSubCriticalParam
+                ? `Critical: ${subParams.filter((p) => p.abnormalFlag === "CRITICAL").map((p) => `${p.parameter} (${p.result} ${p.unit || ""})`.trim()).join(", ")}`
+                : undefined;
+
+              return [
+                {
+                  id: subId,
+                  parentOrderItemId: item.lab_order_item_id,
+                  packageName: testName,
+                  isSubTest: true,
+                  sampleId: `SMP-${item.lab_order_item_id.replace(/^LOI/, "").slice(-4)}-${st.code}`,
+                  barcode: subBarcode,
+                  patientId: pId,
+                  patientName: pName,
+                  testName: st.name,
+                  analyzerBench: st.analyzerBench,
+                  startTime,
+                  collectionTime: startTime,
+                  collectionTimeIso: !isNaN(colDate.getTime()) ? colDate.toISOString() : undefined,
+                  stabilityHours: st.stabilityHours,
+                  expiryTimeIso: subSc?.expiry_datetime ? new Date(subSc.expiry_datetime).toISOString() : undefined,
+                  expiryHours: st.stabilityHours,
+                  priority: item.priority || "Normal",
+                  estimatedCompletion,
+                  status: subStatus,
+                  sampleType: `${st.sampleType} • ${st.containerType}`,
+                  containerType: st.containerType,
+                  containerColor: st.containerColor,
+                  receivedDate,
+                  receivedBy: item.sample_collection?.[0]?.collected_by || currentUsername,
+                  comments: storedSubComments || item.remarks || "",
+                  testResult: subResult,
+                  parameters: subParams,
+                  criticalAlert: subCriticalAlert,
+                  targetDate: targetDateFormatted,
+                  targetDateIso,
+                  rawOrderItem: item,
+                  patientGender: resolvedGender,
+                  unit: subSingleUnit,
+                  expectedRange: isSubMulti ? undefined : subSingleRange,
+                  parametersCount: subParamsCount,
+                  parametersPreview: subParamsPreview,
+                },
+              ];
+            });
+
+            return subSampleItems;
+          }
 
           let params: TestParameter[] = dbResolvedParams;
 
@@ -1341,11 +1579,7 @@ export default function TestingSamples() {
             ? `Critical: ${params.filter((p) => p.abnormalFlag === "CRITICAL").map((p) => `${p.parameter} (${p.result} ${p.unit || ""})`.trim()).join(", ")}`
             : undefined;
 
-            const rawTargetDate = item.target_date || (parentOrder as any)?.target_date;
-            const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
-            const targetDateIso = rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined;
-
-            return {
+            return [{
               id: item.lab_order_item_id,
               sampleId,
               barcode: resolvedBarcode,
@@ -1357,6 +1591,8 @@ export default function TestingSamples() {
               collectionTime: startTime,
               collectionTimeIso: !isNaN(colDate.getTime()) ? colDate.toISOString() : undefined,
               stabilityHours,
+              expiryTimeIso: dbExpiryDatetime ? new Date(dbExpiryDatetime).toISOString() : undefined,
+              expiryHours: masterExpiryHours,
               priority: item.priority || "Normal",
               estimatedCompletion,
               status,
@@ -1375,7 +1611,7 @@ export default function TestingSamples() {
               expectedRange: isMulti ? undefined : singleRange,
               parametersCount,
               parametersPreview,
-            };
+            }];
           });
 
         // Also merge any verified samples from local cache (from Sample Verification)
@@ -1396,7 +1632,7 @@ export default function TestingSamples() {
               testMasterByCode.get(testName.toLowerCase()) ||
               (testName.includes("(") ? testMasterByName.get(testName.replace(/\s*\([^)]*\)/g, "").trim().toLowerCase()) : null);
 
-            const resolvedParams = resolveAllTestParameters({
+            let resolvedParams = resolveAllTestParameters({
               item: null,
               patientGender: cached.patientGender || "All",
               testName,
@@ -1404,6 +1640,19 @@ export default function TestingSamples() {
               allDbParameters: dbParameters,
               matchedTestMaster: matchedTm,
             });
+
+            // If this cached sample is a sub-test, strictly filter its parameters
+            if (cached.isSubTest || cached.packageName) {
+              const subDefs = decomposePackageTest(cached.packageName || testName);
+              const st = subDefs.find((d) =>
+                d.name.toLowerCase() === testName.toLowerCase() ||
+                (d.code && (cached.containerType || "").includes(d.code)) ||
+                (cached.id && cached.id.includes(d.key))
+              );
+              if (st) {
+                resolvedParams = resolvedParams.filter((p) => st.filterParameter(p.parameter));
+              }
+            }
             const singleUnit = matchedTm?.unit || resolvedParams[0]?.unit || "";
             const rawSingleRange = matchedTm?.reference_range || resolvedParams[0]?.referenceRange || "";
             const singleRange = formatGenderReferenceRange(rawSingleRange, cached.patientGender, singleUnit);
@@ -1415,6 +1664,10 @@ export default function TestingSamples() {
 
             cachedSamples.push({
               id: cached.id,
+              parentOrderItemId: cached.parentOrderItemId,
+              packageName: cached.packageName,
+              isSubTest: cached.isSubTest,
+              containerType: cached.containerType,
               sampleId: cached.sampleId || cached.id,
               barcode: cached.barcode || "",
               patientId: cached.patientId || "",
@@ -1507,25 +1760,66 @@ export default function TestingSamples() {
   const handleOpenEnterResults = (sample: TestingSampleItem) => {
     setSelectedSample(sample);
 
-    // Resolve all clinical parameters related to this test from database masters
-    const resolved = resolveAllTestParameters({
-      item: sample.rawOrderItem,
-      patientGender: sample.patientGender,
-      testName: sample.testName,
-      allMasters: testMastersList,
-      allDbParameters: testParametersList,
-    });
+    // 1. Identify sub-test definition ONLY if this sample is an actual sub-test of a composite package
+    const isSubTestSample = Boolean(sample.isSubTest || sample.packageName);
+    const subDefs = isSubTestSample
+      ? decomposePackageTest(
+          sample.packageName || sample.rawOrderItem?.lab_test_master?.test_name || sample.testName
+        )
+      : [];
+    const st = isSubTestSample
+      ? subDefs.find((d) =>
+          d.name.toLowerCase() === sample.testName.toLowerCase() ||
+          (sample as any).code?.toLowerCase() === d.code.toLowerCase() ||
+          sample.id.endsWith(`__${d.key}`) ||
+          sample.id.includes(`__${d.key}`)
+        )
+      : undefined;
 
-    // Check for any stored results in localStorage or in sample.parameters
+    // 2. Determine base parameters definition strictly isolated to this test
+    let baseParams: TestParameter[] = [];
+    if (Array.isArray(sample.parameters) && sample.parameters.length > 0) {
+      baseParams = [...sample.parameters];
+    } else {
+      const resolved = resolveAllTestParameters({
+        item: sample.isSubTest ? null : (isTestMasterMatch(sample.rawOrderItem?.lab_test_master, sample.testName) ? sample.rawOrderItem : null),
+        patientGender: sample.patientGender,
+        testName: sample.testName,
+        allMasters: testMastersList,
+        allDbParameters: testParametersList,
+      });
+      baseParams = resolved;
+    }
+
+    // Strictly enforce sub-test parameter isolation so parent package params never leak
+    if (st) {
+      baseParams = baseParams.filter((p) => st.filterParameter(p.parameter));
+
+      // If somehow baseParams became empty, fallback to extracting strictly matching parameters
+      // from parent package item or fresh resolve
+      if (baseParams.length === 0) {
+        const fallbackResolved = resolveAllTestParameters({
+          item: sample.rawOrderItem,
+          patientGender: sample.patientGender,
+          testName: sample.testName,
+          allMasters: testMastersList,
+          allDbParameters: testParametersList,
+        });
+        baseParams = fallbackResolved.filter((p) => st.filterParameter(p.parameter));
+      }
+    }
+
+    // 3. Check for any stored results in localStorage or in sample.parameters
     const storedParamsRaw =
       typeof window !== "undefined"
-        ? localStorage.getItem(`testing_sample_params_${sample.id}`)
+        ? localStorage.getItem(`testing_sample_params_${sample.id}`) ||
+          (st ? localStorage.getItem(`testing_sample_params_${sample.parentOrderItemId || sample.id.split("__")[0]}__${st.key}`) : null)
         : null;
     let existingObs: any[] = [];
     if (storedParamsRaw) {
       try {
         const parsed = JSON.parse(storedParamsRaw);
-        if (Array.isArray(parsed)) existingObs = parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) existingObs = parsed;
       } catch {}
     }
     if (existingObs.length === 0 && Array.isArray(sample.parameters)) {
@@ -1541,34 +1835,39 @@ export default function TestingSamples() {
       }));
     }
 
-    // Merge existing observations into resolved parameter definitions
-    const merged: TestParameter[] = resolved.map((rp): TestParameter => {
+    // If this is a sub-test, clean existingObs to strip any leaked unrelated parameters
+    if (st && existingObs.length > 0) {
+      existingObs = existingObs.filter((ep: any) => ep.parameter && st.filterParameter(ep.parameter));
+    }
+
+    // 4. Merge existing observations STRICTLY into authoritative base parameter definitions
+    const merged: TestParameter[] = baseParams.map((bp): TestParameter => {
       const match = existingObs.find(
         (ep: any) =>
-          (ep.lab_test_parameter_id && ep.lab_test_parameter_id === rp.lab_test_parameter_id) ||
-          (ep.id && ep.id === rp.id) ||
-          (ep.parameter && ep.parameter.toLowerCase() === rp.parameter.toLowerCase())
+          (ep.lab_test_parameter_id && bp.lab_test_parameter_id && ep.lab_test_parameter_id === bp.lab_test_parameter_id) ||
+          (ep.id && bp.id && ep.id === bp.id) ||
+          (ep.parameter && ep.parameter.toLowerCase().trim() === bp.parameter.toLowerCase().trim())
       );
       if (match && match.result && String(match.result).trim() !== "") {
         const resVal = String(match.result).trim();
         const flag =
           match.abnormalFlag ||
           evaluateAbnormalFlag(resVal, {
-            inputType: rp.inputType,
-            refRangeLow: rp.refRangeLow,
-            refRangeHigh: rp.refRangeHigh,
-            referenceRange: rp.referenceRange,
-            unit: rp.unit,
+            inputType: bp.inputType,
+            refRangeLow: bp.refRangeLow,
+            refRangeHigh: bp.refRangeHigh,
+            referenceRange: bp.referenceRange,
+            unit: bp.unit,
           });
         return {
-          ...rp,
+          ...bp,
           result: resVal,
           status: "Completed",
           abnormalFlag: flag,
-          resultComment: match.resultComment || rp.resultComment,
+          resultComment: match.resultComment || bp.resultComment,
         };
       }
-      return rp;
+      return bp;
     });
 
     setTestParameters(merged);
@@ -1617,10 +1916,31 @@ export default function TestingSamples() {
       if (completionComments.trim()) {
         localStorage.setItem(`testing_sample_comments_${selectedSample.id}`, completionComments.trim());
       }
-      const paramsToSave =
+      const parentId = selectedSample.parentOrderItemId || (selectedSample.id.includes("__") ? selectedSample.id.split("__")[0] : null);
+      if (parentId && parentId !== selectedSample.id) {
+        localStorage.setItem(`testing_sample_status_${parentId}`, "COMPLETED");
+      }
+      let paramsToSave =
         selectedSample.parameters && selectedSample.parameters.length > 0
           ? selectedSample.parameters
-          : resolveTestParameters(selectedSample.rawOrderItem, selectedSample.patientGender, selectedSample.testName);
+          : resolveTestParameters(
+              selectedSample.isSubTest ? null : (isTestMasterMatch(selectedSample.rawOrderItem?.lab_test_master, selectedSample.testName) ? selectedSample.rawOrderItem : null),
+              selectedSample.patientGender,
+              selectedSample.testName
+            );
+
+      if (selectedSample.isSubTest || selectedSample.packageName) {
+        const subDefs = decomposePackageTest(selectedSample.packageName || selectedSample.testName);
+        const st = subDefs.find((d) =>
+          d.name.toLowerCase() === selectedSample.testName.toLowerCase() ||
+          (selectedSample as any).code?.toLowerCase() === d.code.toLowerCase() ||
+          selectedSample.id.endsWith(`__${d.key}`) ||
+          selectedSample.id.includes(`__${d.key}`)
+        );
+        if (st) {
+          paramsToSave = paramsToSave.filter((p) => st.filterParameter(p.parameter));
+        }
+      }
       localStorage.setItem(`testing_sample_params_${selectedSample.id}`, JSON.stringify(paramsToSave));
 
       try {
@@ -1629,6 +1949,9 @@ export default function TestingSamples() {
           ...existingCompleted.filter((item: any) => item.id !== selectedSample.id),
           {
             id: selectedSample.id,
+            parentOrderItemId: selectedSample.parentOrderItemId,
+            packageName: selectedSample.packageName,
+            isSubTest: selectedSample.isSubTest,
             sampleId: selectedSample.sampleId,
             barcode: selectedSample.barcode,
             patientId: selectedSample.patientId,
@@ -1650,7 +1973,7 @@ export default function TestingSamples() {
         console.warn("Could not save to completed_testing_samples registry:", e);
       }
 
-      const realItemId = selectedSample.id.replace("item-", "").replace("smp-", "");
+      const realItemId = selectedSample.parentOrderItemId || selectedSample.id.split("__")[0].replace("item-", "").replace("smp-", "");
       if (!selectedSample.id.startsWith("ts-") && !selectedSample.id.startsWith("s") && !realItemId.startsWith("sample-")) {
         const batchParams = (paramsToSave || []).map((p) => ({
           lab_test_parameter_id:
@@ -1800,7 +2123,7 @@ export default function TestingSamples() {
         console.warn("Could not save to completed_testing_samples registry:", e);
       }
 
-      const realItemId = selectedSample.id.replace("item-", "").replace("smp-", "");
+      const realItemId = selectedSample.parentOrderItemId || selectedSample.id.split("__")[0].replace("item-", "").replace("smp-", "");
       if (!selectedSample.id.startsWith("ts-") && !selectedSample.id.startsWith("s") && !realItemId.startsWith("sample-")) {
         const batchParams = testParameters.map((p) => ({
           lab_test_parameter_id:
@@ -1873,7 +2196,7 @@ export default function TestingSamples() {
         localStorage.setItem(`testing_sample_comments_${selectedSample.id}`, resultComments.trim());
       }
 
-      const realItemId = selectedSample.id.replace("item-", "").replace("smp-", "");
+      const realItemId = selectedSample.parentOrderItemId || selectedSample.id.split("__")[0].replace("item-", "").replace("smp-", "");
       if (!selectedSample.id.startsWith("ts-") && !selectedSample.id.startsWith("s") && !realItemId.startsWith("sample-")) {
         const batchParams = testParameters.map((p) => ({
           lab_test_parameter_id:
@@ -1959,7 +2282,8 @@ export default function TestingSamples() {
         s.stabilityHours || 2,
         s.status,
         currentTime,
-        isCol
+        isCol,
+        s.expiryTimeIso
       );
       map.set(s.id, info);
     });
@@ -2229,9 +2553,47 @@ export default function TestingSamples() {
                 </div>
               )}
 
-
-
-
+              {/* Specimen Stability & Expiry Alerts */}
+              {sampleStabilityMap.get(selectedSample.id)?.isExpiringSoon && (
+                <div className="mb-4 p-4 rounded-xl bg-amber-50 border-l-4 border-l-amber-500 border border-amber-200 flex items-center justify-between text-amber-950 gap-3 shadow-xs animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-amber-500 text-white shrink-0 animate-bounce">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold flex items-center gap-2">
+                        <span>URGENT ANALYZER ACTION REQUIRED: SPECIMEN EXPIRING SOON!</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-amber-500 text-white">
+                          CRITICAL PRIORITY
+                        </span>
+                      </p>
+                      <p className="text-xs text-amber-800 mt-0.5">
+                        Only <span className="font-mono font-bold">{sampleStabilityMap.get(selectedSample.id)?.digitalCountdown}</span> remaining before stability degrades. Please complete analyzer test and record observations immediately.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {sampleStabilityMap.get(selectedSample.id)?.isExpired && (
+                <div className="mb-4 p-4 rounded-xl bg-rose-50 border-l-4 border-l-rose-600 border border-rose-200 flex items-center justify-between text-rose-950 gap-3 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-rose-600 text-white shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold flex items-center gap-2">
+                        <span>SPECIMEN EXPIRED: PRE-ANALYTICAL STABILITY WINDOW EXCEEDED!</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-rose-600 text-white">
+                          ACTION REQUIRED
+                        </span>
+                      </p>
+                      <p className="text-xs text-rose-800 mt-0.5">
+                        Sample stability duration has elapsed. Observations recorded now should be reviewed by pathologist for degradation artifacts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Requisition & Sample Details Card */}
               <div className="bg-white border border-slate-200/90 rounded-xl p-5 mb-6 shadow-2xs">
@@ -2268,7 +2630,13 @@ export default function TestingSamples() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="bg-slate-50/80 p-2 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                        Specimen Stability &amp; Expiry
+                      </span>
+                      <SampleTimerBadge info={sampleStabilityMap.get(selectedSample.id)} size="lg" showProgressBar={true} showExactTimes={true} />
+                    </div>
                     <div className="text-right">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                         Barcode / Sample ID
@@ -2836,7 +3204,7 @@ export default function TestingSamples() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
-                    placeholder="Search Patient, Barcode, Analyzer..."
+                    placeholder="Search Patient, Barcode, Test..."
                     type="text"
                   />
                   {searchQuery && (
@@ -2976,9 +3344,15 @@ export default function TestingSamples() {
             </header>
             {/* END: HeaderSection */}
 
-
-
-
+            {/* High Priority Sample Expiry Alerts */}
+            <div className="px-8 mb-4">
+              <SampleExpiryAlertBanner
+                expiringCount={expiringSoonCount}
+                expiredCount={expiredStabilityCount}
+                onFilterUrgent={() => setStatusFilter("RUNNING")}
+                onFilterExpired={() => setStatusFilter("RUNNING")}
+              />
+            </div>
 
             {/* BEGIN: TableContent */}
             <div
@@ -3003,8 +3377,8 @@ export default function TestingSamples() {
                     <th className="py-5 px-6 font-bold min-w-[280px]" scope="col">
                       PARAMETERS, UNITS &amp; REF. RANGE (DB)
                     </th>
-                    <th className="py-5 px-6 font-bold" scope="col">
-                      ANALYZER BENCH
+                    <th className="py-5 px-6 font-bold text-center" scope="col">
+                      STABILITY &amp; EXPIRY
                     </th>
                     <th
                       className="py-5 px-8 font-bold text-center"
@@ -3086,13 +3460,23 @@ export default function TestingSamples() {
                               <span className="font-bold text-slate-900 block text-sm">
                                 {s.testName}
                               </span>
+                              {s.isSubTest && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Sub-Test
+                                </span>
+                              )}
                               {isOverdue && (
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
                                   OVERDUE
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                            {s.packageName && (
+                              <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                Package: <span className="text-slate-700 font-semibold">{s.packageName}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
                               {s.sampleType && <span className="font-medium">{s.sampleType}</span>}
                               {s.targetDate && (
                                 <span className={`font-semibold ${isOverdue ? "text-rose-700" : "text-slate-500"}`}>
@@ -3169,8 +3553,8 @@ export default function TestingSamples() {
                             )}
                           </td>
 
-                        <td className="py-5 px-6 text-slate-700 text-xs font-normal whitespace-nowrap">
-                          {s.analyzerBench}
+                        <td className="py-5 px-6 text-center whitespace-nowrap">
+                          <SampleTimerBadge info={sampleStabilityMap.get(s.id)} size="sm" />
                         </td>
                         <td className="py-5 px-8 text-center whitespace-nowrap">
                           {s.status === "COMPLETED" ? (

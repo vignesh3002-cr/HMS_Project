@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import LabNav from "./labnav";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
+import { labTestMasterApi, LabTestMasterRecord } from "@/api/labTestMaster.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -24,6 +25,14 @@ import {
   compareBySampleStability,
   SampleStabilityInfo,
 } from "@/utils/sampleStability";
+import { SampleTimerBadge } from "@/components/hms/SampleTimerBadge";
+import { SampleExpiryAlertBanner } from "@/components/hms/SampleExpiryAlertBanner";
+import {
+  isPackageTest,
+  decomposePackageTest,
+  generateSubTestBarcode,
+  getContainerBadgeClass,
+} from "./packageDecomposition";
 
 export interface TestItemDetail {
   id: string;
@@ -34,6 +43,13 @@ export interface TestItemDetail {
   barcode?: string;
   targetDate?: string;
   deadlineDate?: string;
+  parentOrderItemId?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  containerType?: string;
+  containerColor?: "purple" | "amber" | "slate" | "blue" | "emerald" | "rose";
+  isOutsourced?: boolean;
+  outsourceLab?: string;
 }
 
 export interface TestRecord {
@@ -65,6 +81,8 @@ export interface TestRecord {
   collectionTimeIso?: string;
   collectionTime?: string;
   stabilityHours?: number;
+  expiryTimeIso?: string;
+  expiryHours?: number;
   priority?: string;
 }
 
@@ -421,6 +439,13 @@ interface SampleBarcodeItem {
   count: number;
   targetDate?: string;
   deadlineDate?: string;
+  parentOrderItemId?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  containerType?: string;
+  containerColor?: "purple" | "amber" | "slate" | "blue" | "emerald" | "rose";
+  isOutsourced?: boolean;
+  outsourceLab?: string;
 }
 
 const INITIAL_SAMPLES: SampleBarcodeItem[] = [
@@ -457,9 +482,9 @@ const INITIAL_SAMPLES: SampleBarcodeItem[] = [
 ];
 
 const DEFAULT_TEST_ITEMS: TestItemDetail[] = [
-  { id: "cbc", testCode: "CBC", testName: "Complete Blood Count", sampleType: "Whole Blood", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024" },
-  { id: "lft", testCode: "LFT", testName: "Liver Function Test", sampleType: "Serum", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024" },
-  { id: "kft", testCode: "KFT", testName: "Kidney Function Test", sampleType: "Serum", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024" },
+  { id: "cbc", testCode: "CBC", testName: "Complete Blood Count", sampleType: "Whole Blood", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024", isOutsourced: false, outsourceLab: "In-house lab" },
+  { id: "lft", testCode: "LFT", testName: "Liver Function Test", sampleType: "Serum", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024", isOutsourced: false, outsourceLab: "In-house lab" },
+  { id: "kft", testCode: "KFT", testName: "Kidney Function Test", sampleType: "Serum", priority: "Normal", targetDate: "22-05-2024", deadlineDate: "22-05-2024", isOutsourced: true, outsourceLab: "DDC Partner Lab" },
 ];
 
 export default function LabDashboard() {
@@ -490,7 +515,7 @@ export default function LabDashboard() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PROCESSING" | "COMPLETED">("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<"ALL" | "DUE_SOON" | "EXPIRED">("ALL");
-  const currentTime = useCurrentTimeTicker(30000);
+  const currentTime = useCurrentTimeTicker(1000);
 
   /* ---------- KPI Track Scroll (Admin Dashboard style) ---------- */
   const trackRef = useRef<HTMLDivElement>(null);
@@ -551,15 +576,27 @@ export default function LabDashboard() {
       setIsLoading(true);
       setFetchError(null);
 
-      const [ordersRes, itemsRes, patientsRes] = await Promise.all([
+      const [ordersRes, itemsRes, patientsRes, testsMasterRes] = await Promise.all([
         labOrderApi.getAll().catch(() => ({ data: { data: [] } })),
         labOrderItemApi.getAll().catch(() => ({ data: { data: [] } })),
         patientApi.getAll({ limit: 100 }).catch(() => ({ data: { data: { patients: [] } } })),
+        labTestMasterApi.getAll().catch(() => ({ data: { data: [] } })),
       ]);
 
       const orders: LabOrderRecord[] = ordersRes?.data?.data || [];
       const items: LabOrderItemRecord[] = itemsRes?.data?.data || [];
       const patients: PatientRecord[] = patientsRes?.data?.data?.patients || [];
+      const mastersList: LabTestMasterRecord[] = testsMasterRes?.data?.data || [];
+
+      // Build master lookup maps by id, code, and name for instant, accurate classification
+      const masterMapById = new Map<string, LabTestMasterRecord>();
+      const masterMapByCode = new Map<string, LabTestMasterRecord>();
+      const masterMapByName = new Map<string, LabTestMasterRecord>();
+      mastersList.forEach((tm) => {
+        if (tm.lab_test_id) masterMapById.set(tm.lab_test_id, tm);
+        if (tm.test_code) masterMapByCode.set(tm.test_code.toUpperCase().trim(), tm);
+        if (tm.test_name) masterMapByName.set(tm.test_name.toLowerCase().trim(), tm);
+      });
 
       if (orders.length > 0) {
         // Build patient lookup map by patient_id
@@ -672,48 +709,104 @@ export default function LabDashboard() {
             order.order_status?.toUpperCase() === "COMPLETED" ||
             Boolean(hasDbCollectionEarly || storedColTimeEarly);
 
-          // Structured tests for alignment & barcode steps
-          const structuredItems: TestItemDetail[] =
-            orderItems.length > 0
-              ? orderItems.map((oi) => {
-                  const sampleBarcode =
-                    oi.sample_collection?.[0]?.barcode ||
-                    (oi.remarks?.startsWith("Barcode: ")
-                      ? oi.remarks.replace("Barcode: ", "")
-                      : undefined) ||
+          // Structured tests for alignment & barcode steps (Decompose packages into individual tests with distinct barcodes)
+          const structuredItems: TestItemDetail[] = [];
+          if (orderItems.length > 0) {
+            orderItems.forEach((oi) => {
+              const testName = oi.lab_test_master?.test_name || "Diagnostic Test";
+              const testCode = oi.lab_test_master?.test_code || oi.lab_test_id.replace(/^LABTEST/, "T") || "TEST";
+              const includesDetails = (oi.lab_test_master as any)?.includes_details;
+              const formattedTargetDate = formatTargetDate(oi.target_date);
+              const baseBarcode =
+                oi.sample_collection?.[0]?.barcode ||
+                (oi.remarks?.startsWith("Barcode: ")
+                  ? oi.remarks.replace("Barcode: ", "")
+                  : undefined) ||
+                (typeof window !== "undefined"
+                  ? localStorage.getItem(`generated_barcode_item_${oi.lab_order_item_id}`) || undefined
+                  : undefined);
+
+              // Accurately resolve whether this test is In-House or Outsourced
+              const rawMaster: any = oi.lab_test_master;
+              const matchedMaster: any =
+                (oi.lab_test_id ? masterMapById.get(oi.lab_test_id) : undefined) ||
+                (rawMaster?.test_code ? masterMapByCode.get(rawMaster.test_code.toUpperCase().trim()) : undefined) ||
+                (rawMaster?.test_name ? masterMapByName.get(rawMaster.test_name.toLowerCase().trim()) : undefined) ||
+                (oi.lab_test_id ? masterMapByCode.get(oi.lab_test_id.toUpperCase().trim()) : undefined) ||
+                rawMaster;
+
+              const isOutsourced = Boolean(matchedMaster?.is_outsourced);
+              const outsourceLab =
+                matchedMaster?.outsource_lab || (isOutsourced ? "Outsourced Partner" : "In-house lab");
+
+              if (isPackageTest(testName, testCode, includesDetails)) {
+                const subDefs = decomposePackageTest(testName, testCode, includesDetails);
+                subDefs.forEach((st, sIdx) => {
+                  const subMatchedMaster: any =
+                    masterMapByCode.get(st.code.toUpperCase().trim()) ||
+                    masterMapByName.get(st.name.toLowerCase().trim());
+                  const subIsOutsourced = subMatchedMaster
+                    ? Boolean(subMatchedMaster.is_outsourced)
+                    : isOutsourced;
+                  const subOutsourceLab = subMatchedMaster
+                    ? (subMatchedMaster.outsource_lab || (subIsOutsourced ? "Outsourced Partner" : "In-house lab"))
+                    : outsourceLab;
+
+                  const subBarcode =
+                    (oi.sample_collection && oi.sample_collection[sIdx]?.barcode) ||
                     (typeof window !== "undefined"
-                      ? localStorage.getItem(`generated_barcode_item_${oi.lab_order_item_id}`) || undefined
-                      : undefined);
+                      ? localStorage.getItem(`generated_barcode_item_${oi.lab_order_item_id}__${st.key}`) ||
+                        localStorage.getItem(`generated_barcode_item_${oi.lab_order_item_id}_${st.code.toLowerCase()}`) ||
+                        undefined
+                      : undefined) ||
+                    generateSubTestBarcode(baseBarcode || `BC${order.lab_order_id.replace(/\D/g, "").slice(-6) || "2405"}${String(sIdx + 1).padStart(2, "0")}`, st.code, sIdx);
 
-                  const formattedTargetDate = formatTargetDate(oi.target_date);
-
-                  return {
-                    id: oi.lab_order_item_id || oi.lab_test_id,
-                    testCode:
-                      oi.lab_test_master?.test_code ||
-                      oi.lab_test_id.replace(/^LABTEST/, "T") ||
-                      "TEST",
-                    testName:
-                      oi.lab_test_master?.test_name || "Diagnostic Test",
-                    sampleType:
-                      oi.lab_test_master?.sample_type || "Whole Blood",
+                  structuredItems.push({
+                    id: `${oi.lab_order_item_id}__${st.key}`,
+                    parentOrderItemId: oi.lab_order_item_id,
+                    packageName: testName,
+                    isSubTest: true,
+                    testCode: st.code,
+                    testName: st.name,
+                    sampleType: `${st.sampleType} • ${st.containerType}`,
+                    containerType: st.containerType,
+                    containerColor: st.containerColor,
                     priority: oi.priority || order.priority || "Normal",
-                    barcode: sampleBarcode,
+                    barcode: subBarcode,
                     targetDate: formattedTargetDate,
                     deadlineDate: formattedTargetDate,
-                  };
-                })
-              : [
-                  {
-                    id: "cbc",
-                    testCode: "CBC",
-                    testName: "Complete Blood Count",
-                    sampleType: "Whole Blood",
-                    priority: order.priority || "Normal",
-                    targetDate: "—",
-                    deadlineDate: "—",
-                  },
-                ];
+                    isOutsourced: subIsOutsourced,
+                    outsourceLab: subOutsourceLab,
+                  });
+                });
+              } else {
+                structuredItems.push({
+                  id: oi.lab_order_item_id || oi.lab_test_id,
+                  testCode,
+                  testName,
+                  sampleType: oi.lab_test_master?.sample_type || "Whole Blood",
+                  priority: oi.priority || order.priority || "Normal",
+                  barcode: baseBarcode,
+                  targetDate: formattedTargetDate,
+                  deadlineDate: formattedTargetDate,
+                  isOutsourced,
+                  outsourceLab,
+                });
+              }
+            });
+          } else {
+            structuredItems.push({
+              id: "cbc",
+              testCode: "CBC",
+              testName: "Complete Blood Count",
+              sampleType: "Whole Blood",
+              priority: order.priority || "Normal",
+              targetDate: "—",
+              deadlineDate: "—",
+              isOutsourced: false,
+              outsourceLab: "In-house lab",
+            });
+          }
 
           const itemTargetDates = Array.from(
             new Set(
@@ -763,11 +856,15 @@ export default function LabDashboard() {
           const colDate = colDateTime ? new Date(colDateTime) : null;
           const colPriority = orderItems.find((oi) => oi.priority)?.priority || order.priority || "Normal";
           const firstTest = orderItems[0];
+          const dbExpiryDatetime = orderItems.find((oi) => oi.sample_collection?.[0]?.expiry_datetime)
+            ?.sample_collection?.[0]?.expiry_datetime;
+          const masterExpiryHours = Number(firstTest?.lab_test_master?.expiry_time_hours) || undefined;
           const stabilityHours = resolveStabilityHours(
             testNames,
             firstTest?.lab_test_master?.sample_type,
             firstTest?.lab_test_master?.tat_hours,
-            colPriority
+            colPriority,
+            masterExpiryHours
           );
 
           const firstBarcode =
@@ -791,6 +888,8 @@ export default function LabDashboard() {
             orderTimestamp: dateObj.getTime(),
             collectionTimeIso: isCollected && colDate && !isNaN(colDate.getTime()) ? colDate.toISOString() : undefined,
             collectionTime: isCollected && colDate && !isNaN(colDate.getTime()) ? colDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() }) : undefined,
+            expiryTimeIso: dbExpiryDatetime ? new Date(dbExpiryDatetime).toISOString() : undefined,
+            expiryHours: masterExpiryHours,
             barcodeGenerated: isCollected,
             isCollected,
             stabilityHours,
@@ -942,6 +1041,10 @@ export default function LabDashboard() {
         localStorage.setItem(`collected_sample_time_${orderId}`, nowIso);
         sampleBarcodes.forEach((sb) => {
           localStorage.setItem(`generated_barcode_item_${sb.id}`, sb.barcode);
+          if (sb.parentOrderItemId) {
+            localStorage.setItem(`generated_barcode_item_${sb.parentOrderItemId}`, sb.barcode);
+            localStorage.setItem(`generated_barcode_item_${sb.parentOrderItemId}_${sb.testCode.toLowerCase()}`, sb.barcode);
+          }
           localStorage.setItem(`collected_sample_time_item_${sb.id}`, nowIso);
           localStorage.setItem(`registered_sample_time_item_${sb.id}`, nowIso);
         });
@@ -982,10 +1085,11 @@ export default function LabDashboard() {
           if (itemsToProcess.length > 0) {
             await labOrderItemApi.generateBarcode(
               itemsToProcess.map((sb) => ({
-                lab_order_item_id: sb.id,
+                lab_order_item_id: sb.parentOrderItemId || sb.id,
                 barcode: sb.barcode,
-                sample_type: sb.sampleType,
+                sample_type: sb.containerType || sb.sampleType,
                 collection_datetime: nowIso,
+                remarks: `${sb.testName} | Barcode: ${sb.barcode}`,
               }))
             );
           }
@@ -1025,13 +1129,22 @@ export default function LabDashboard() {
       setSampleBarcodes(
         patient.testItems.map((ti, idx) => ({
           id: ti.id,
+          parentOrderItemId: ti.parentOrderItemId,
+          packageName: ti.packageName,
+          isSubTest: ti.isSubTest,
           testCode: ti.testCode,
           testName: ti.testName,
           sampleType: ti.sampleType,
-          barcode: `BC${patient.requestId.replace(/\D/g, "").slice(-6) || "2405"}${String(idx + 1).padStart(4, "0")}`,
+          containerType: ti.containerType,
+          containerColor: ti.containerColor,
+          barcode:
+            ti.barcode ||
+            `BC${patient.requestId.replace(/\D/g, "").slice(-6) || "2405"}${String(idx + 1).padStart(4, "0")}`,
           count: 1,
           targetDate: ti.targetDate || ti.deadlineDate,
           deadlineDate: ti.deadlineDate,
+          isOutsourced: ti.isOutsourced,
+          outsourceLab: ti.outsourceLab,
         }))
       );
     } else {
@@ -1100,7 +1213,8 @@ export default function LabDashboard() {
         t.stabilityHours || 2,
         t.status,
         currentTime,
-        isCol
+        isCol,
+        t.expiryTimeIso
       );
       map.set(t.id, info);
     });
@@ -1413,6 +1527,12 @@ export default function LabDashboard() {
                                   {selectedPatient.requestTime}
                                 </p>
                               </div>
+                              <div className="col-span-3 pt-2">
+                                <p className="text-xs text-slate-500 font-semibold mb-1.5">
+                                  Specimen Stability &amp; Expiry
+                                </p>
+                                <SampleTimerBadge info={sampleStabilityMap.get(selectedPatient.id)} size="md" showExactTimes />
+                              </div>
                             </div>
                           </div>
 
@@ -1668,30 +1788,63 @@ export default function LabDashboard() {
                     {/* END: PatientSummaryCard */}
 
                     {/* BEGIN: ValidTestsSection */}
-                    <section className="space-y-3" data-purpose="valid-tests-group">
+                    <section className="space-y-4" data-purpose="valid-tests-group">
                       {/* Header & Description */}
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-emerald-600">
-                            <svg
-                              className="w-6 h-6 fill-none stroke-emerald-600 stroke-[2.2]"
-                              viewBox="0 0 24 24"
-                            >
-                              <circle cx="12" cy="12" r="9.5" />
-                              <polyline
-                                points="8 12.2 10.8 15 16 9.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </span>
-                          <h2 className="text-xl font-bold text-slate-900">
-                            Valid Tests to Proceed
-                          </h2>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-emerald-600">
+                              <svg
+                                className="w-6 h-6 fill-none stroke-emerald-600 stroke-[2.2]"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle cx="12" cy="12" r="9.5" />
+                                <polyline
+                                  points="8 12.2 10.8 15 16 9.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </span>
+                            <h2 className="text-xl font-bold text-slate-900">
+                              Valid Tests to Proceed
+                            </h2>
+                          </div>
+                          <p className="mt-1 text-sm text-slate-500">
+                            These tests meet all pre-analytical requirements and are ready for sampling.
+                          </p>
                         </div>
-                        <p className="mt-1 text-sm text-slate-500">
-                          These tests meet all pre-analytical requirements and are ready for sampling.
-                        </p>
+                        {/* Summary Badges: In-House & Outsourced Counts */}
+                        {(() => {
+                          const currentItems =
+                            selectedPatient?.testItems && selectedPatient.testItems.length > 0
+                              ? selectedPatient.testItems
+                              : DEFAULT_TEST_ITEMS;
+                          const inHouseCount = currentItems.filter((t) => !t.isOutsourced).length;
+                          const outsourcedCount = currentItems.filter((t) => t.isOutsourced).length;
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                In-House: {inHouseCount}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs border ${
+                                  outsourcedCount > 0
+                                    ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                    : "bg-slate-50 text-slate-500 border-slate-200"
+                                }`}
+                              >
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    outsourcedCount > 0 ? "bg-indigo-500" : "bg-slate-400"
+                                  }`}
+                                />
+                                Outsourced: {outsourcedCount}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Valid Tests Table */}
@@ -1717,6 +1870,9 @@ export default function LabDashboard() {
                               </th>
                               <th className="py-4 px-6" scope="col">
                                 Sample Type
+                              </th>
+                              <th className="py-4 px-6" scope="col">
+                                Facility / Type
                               </th>
                               <th className="py-4 px-6 w-32" scope="col">
                                 Priority
@@ -1750,17 +1906,64 @@ export default function LabDashboard() {
                                     />
                                   </td>
                                   <td className="py-4 px-6 font-medium text-slate-800">
-                                    <div className="flex items-center gap-2">
-                                      <span>{testItem.testName}</span>
-                                      {isItemOverdue && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
-                                          OVERDUE
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-semibold text-slate-900">{testItem.testName}</span>
+                                        <span className="text-xs text-slate-400 font-mono font-medium">({testItem.testCode})</span>
+                                        {isItemOverdue && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
+                                            OVERDUE
+                                          </span>
+                                        )}
+                                      </div>
+                                      {testItem.isSubTest && testItem.packageName && (
+                                        <span className="text-[11px] text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded w-fit font-medium">
+                                          Sub-Test • {testItem.packageName}
                                         </span>
                                       )}
                                     </div>
                                   </td>
-                                  <td className="py-4 px-6 text-slate-700">{testItem.sampleType}</td>
-                                  <td className="py-4 px-6 text-slate-700">{testItem.priority}</td>
+                                  <td className="py-4 px-6 text-slate-700">
+                                    <div>
+                                      <div className="font-medium text-slate-800">{testItem.sampleType}</div>
+                                      {testItem.containerType && (
+                                        <span className={`inline-block mt-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getContainerBadgeClass(testItem.containerColor || "purple")}`}>
+                                          {testItem.containerType}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-4 px-6 whitespace-nowrap">
+                                    {testItem.isOutsourced ? (
+                                      <div className="flex flex-col gap-1 items-start">
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                                          Outsourced
+                                        </span>
+                                        {testItem.outsourceLab && testItem.outsourceLab !== "In-house lab" && (
+                                          <span className="text-[11px] font-semibold text-slate-500 pl-1">
+                                            {testItem.outsourceLab}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                        In-House
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-4 px-6 text-slate-700">
+                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                      testItem.priority?.toUpperCase() === "STAT"
+                                        ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                        : testItem.priority?.toUpperCase() === "URGENT"
+                                        ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                                    }`}>
+                                      {testItem.priority}
+                                    </span>
+                                  </td>
                                   <td className="py-4 px-6 text-slate-700 font-medium whitespace-nowrap">
                                     {(testItem.targetDate || testItem.deadlineDate) &&
                                     (testItem.targetDate || testItem.deadlineDate) !== "—" ? (
@@ -1901,6 +2104,7 @@ export default function LabDashboard() {
                             <tr className="bg-slate-50/80 border-y border-slate-200/80 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                               <th className="py-3.5 px-6 font-semibold w-1/6">TEST CODE</th>
                               <th className="py-3.5 px-6 font-semibold w-1/4">TEST NAME</th>
+                              <th className="py-3.5 px-6 font-semibold">FACILITY / TYPE</th>
                               <th className="py-3.5 px-6 font-semibold w-1/6">SAMPLE TYPE</th>
                               <th className="py-3.5 px-6 font-semibold w-1/5">TARGET DATE</th>
                               <th className="py-3.5 px-6 font-semibold">BARCODE</th>
@@ -1919,20 +2123,61 @@ export default function LabDashboard() {
                                   }`}
                                 >
                                   <td className="py-4 px-6 font-semibold text-slate-900">
-                                    <div className="flex items-center gap-2">
-                                      <span>{item.testCode}</span>
-                                      {isBarcodeOverdue && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
-                                          OVERDUE
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-2">
+                                        <span>{item.testCode}</span>
+                                        {isBarcodeOverdue && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
+                                            OVERDUE
+                                          </span>
+                                        )}
+                                      </div>
+                                      {item.isSubTest && (
+                                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded w-fit">
+                                          Sub-Test Tube
                                         </span>
                                       )}
                                     </div>
                                   </td>
                                   <td className="py-4 px-6 text-slate-600">
-                                    {item.testName}
+                                    <div>
+                                      <div className="font-semibold text-slate-800">{item.testName}</div>
+                                      {item.packageName && (
+                                        <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                          Package: <span className="text-slate-700 font-semibold">{item.packageName}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-4 px-6 whitespace-nowrap">
+                                    {item.isOutsourced ? (
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 w-fit">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                                          Outsourced
+                                        </span>
+                                        {item.outsourceLab && item.outsourceLab !== "In-house lab" && (
+                                          <span className="text-[10px] text-slate-500 font-medium">
+                                            {item.outsourceLab}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 w-fit">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                        In-House
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="py-4 px-6 text-slate-600">
-                                    {item.sampleType}
+                                    <div>
+                                      <div className="text-slate-800 font-medium">{item.sampleType}</div>
+                                      {item.containerType && (
+                                        <span className={`inline-block mt-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getContainerBadgeClass(item.containerColor || "purple")}`}>
+                                          {item.containerType}
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="py-4 px-6 text-slate-700 font-medium whitespace-nowrap">
                                     {(item.targetDate || item.deadlineDate) && (item.targetDate || item.deadlineDate) !== "—" ? (
@@ -2387,6 +2632,16 @@ export default function LabDashboard() {
 
 
 
+                {/* High Priority Sample Expiry Alerts */}
+                <div className="px-8">
+                  <SampleExpiryAlertBanner
+                    expiringCount={expiringSoonCount}
+                    expiredCount={expiredStabilityCount}
+                    onFilterUrgent={() => setPriorityFilter((prev) => (prev === "DUE_SOON" ? "ALL" : "DUE_SOON"))}
+                    onFilterExpired={() => setPriorityFilter((prev) => (prev === "EXPIRED" ? "ALL" : "EXPIRED"))}
+                  />
+                </div>
+
                 {/* BEGIN: TableContent */}
                 <div
                   className="overflow-x-auto w-full"
@@ -2419,6 +2674,9 @@ export default function LabDashboard() {
                         <th className="py-5 px-6 font-bold" scope="col">
                           TARGET DATE
                         </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          SAMPLE STABILITY
+                        </th>
                         <th
                           className="py-5 px-8 font-bold text-center"
                           scope="col"
@@ -2431,7 +2689,7 @@ export default function LabDashboard() {
                     <tbody className="divide-y divide-slate-100 text-[14px] text-slate-600">
                       {isLoading ? (
                         <tr>
-                          <td colSpan={6} className="py-14 text-center text-slate-500">
+                          <td colSpan={7} className="py-14 text-center text-slate-500">
                             <div className="flex flex-col items-center justify-center gap-3">
                               <div className="w-8 h-8 border-3 border-[#0b57d0] border-t-transparent rounded-full animate-spin"></div>
                               <span className="text-sm font-medium text-slate-600">
@@ -2443,7 +2701,7 @@ export default function LabDashboard() {
                       ) : filteredTests.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={7}
                             className="py-10 text-center text-slate-400 text-sm"
                           >
                             No test records found matching your search.
@@ -2505,6 +2763,9 @@ export default function LabDashboard() {
                                 ) : (
                                   <span className="text-slate-400 font-normal">—</span>
                                 )}
+                              </td>
+                              <td className="py-5 px-6 whitespace-nowrap">
+                                <SampleTimerBadge info={sampleStabilityMap.get(test.id)} size="sm" />
                               </td>
                               <td className="py-5 px-8 text-center whitespace-nowrap">
                                 {test.status === "PROCESSING" ? (
