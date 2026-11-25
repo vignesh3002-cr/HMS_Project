@@ -26,7 +26,7 @@ export function UserProfileDropdown({
   userAvatar,
   avatarLoading = false,
   onLogout,
-  profilePath = "/profile",
+  profilePath = "/settings?tab=account",
   onProfileClick,
   notificationsPath = "/notifications",
   hideNotifications = false,
@@ -121,13 +121,14 @@ export function UserProfileDropdown({
                   <div className="w-2 h-2 rounded-full bg-[#4F46E5] mr-1" />
                 </button>
               )}
-              <a
-                href="#"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
+              <button
+                type="button"
+                onClick={() => navigate("/settings")}
+                className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
               >
                 <Settings size={18} className="group-hover:text-[#3525CD] transition-colors" />
-                <span className="text-sm">App Settings</span>
-              </a>
+                <span className="text-sm">Settings</span>
+              </button>
             </div>
           </div>
         )}

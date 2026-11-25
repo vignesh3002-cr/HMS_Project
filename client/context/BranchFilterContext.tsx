@@ -10,6 +10,7 @@ import {
 import { branchApi } from "@/api/branch.api";
 import { getUser } from "@/utils/token";
 import { setActiveBranchId } from "@/api/axios";
+import { setActiveTimezone } from "@/utils/timezone";
 
 export const ALL_BRANCHES_VALUE = "__ALL_BRANCHES__";
 // Distinct from ALL_BRANCHES_VALUE - a restricted role (Branch Admin/Staff
@@ -29,6 +30,8 @@ export interface BranchFilterBranch {
   name: string;
   area: string;
   hospital_name: string;
+  /** IANA zone id (e.g. "Asia/Kolkata") - drives all time display. */
+  timezone: string;
 }
 
 interface BranchFilterContextValue {
@@ -109,6 +112,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
         name: item.name || item.branch_name || "Unnamed Branch",
         area: item.area || item.branch_area || "N/A",
         hospital_name: item.hospital_name || item.hospital?.name || "Dummy Hospital",
+        timezone: typeof item.timezone === "string" ? item.timezone : "",
       }));
 
       const role = readUserRole();
@@ -183,6 +187,13 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
   const selectedBranch = isAllBranches
     ? null
     : branches.find((b) => b.id === selectedBranchId) ?? null;
+
+  // Publish the ACTIVE branch's timezone for display formatting
+  // (client/utils/timezone). Chain: selected branch -> first branch with a
+  // zone -> the default (Asia/Kolkata) inside setActiveTimezone itself.
+  useEffect(() => {
+    setActiveTimezone(selectedBranch?.timezone || branches.find((b) => b.timezone)?.timezone);
+  }, [selectedBranch, branches]);
 
   const value = useMemo<BranchFilterContextValue>(
     () => ({

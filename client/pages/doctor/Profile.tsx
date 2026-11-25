@@ -9,6 +9,7 @@ import {
   EmployeeDetailResponse,
 } from "@/api/employee.api";
 import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { parseDate, calculateYearsSince } from "@/utils/parseDate";
 import {
   ArrowLeft,
@@ -216,7 +217,7 @@ export default function DoctorDetailView() {
   const totalExperience = priorExperience + yearsSinceJoining;
   const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
-    ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
+    ? formatInBranchTimezone(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
   const doctorAge = calculateAge((doctorEmployee as any)?.dob);
   const doctorGender = (doctorEmployee as any)?.gender || "—";

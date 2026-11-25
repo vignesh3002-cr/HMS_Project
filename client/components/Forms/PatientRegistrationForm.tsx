@@ -16,6 +16,7 @@ import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
 import { useBranches } from "@/hooks/useMasterData";
 import { patientApi } from "@/api/patient.api";
+import { notificationApi } from "@/api/notification.api";
 import { referralApi } from "@/api/referral.api";
 import type { ReferralRecordDetails } from "@/api/referral.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
@@ -557,16 +558,20 @@ export default function PatientRegistrationForm({
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-  // Post-save popup: send confirmation mail + WhatsApp (opened together)
+  // Post-save popup: confirmation mail (sent directly by the server) +
+  // WhatsApp (opened in a new tab — no WhatsApp API configured yet)
   const [showNotifyPopup, setShowNotifyPopup] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifyPhone, setNotifyPhone] = useState("");
   const [notifySubject, setNotifySubject] = useState("");
   const [notifyMessage, setNotifyMessage] = useState("");
-  const [notifySent, setNotifySent] = useState({ mail: false, whatsapp: false });
+  const [emailSent, setEmailSent] = useState(false);
+  const [whatsappOpened, setWhatsappOpened] = useState(false);
   const [originalFormData, setOriginalFormData] = useState<FormData | null>(null);
   const [age, setAge] = useState<string>("");
   const [referralOtherInput, setReferralOtherInput] = useState<string>("");
+  // Free-typed value for Nationality → "Others"
+  const [nationalityOtherInput, setNationalityOtherInput] = useState<string>("");
   const [referralTypes, setReferralTypes] = useState<string[]>(() =>
     Array.from(new Set([...DEFAULT_REFERRAL_TYPES, ...getSavedCustomReferralTypes()]))
   );
@@ -1202,6 +1207,11 @@ export default function PatientRegistrationForm({
       isOther && referralOtherInput.trim()
         ? referralOtherInput.trim()
         : formData.referral_type.trim();
+    // "Others" saves the typed nationality instead of the literal option
+    const effectiveNationality =
+      formData.patient_nationality === "Others" && nationalityOtherInput.trim()
+        ? nationalityOtherInput.trim()
+        : formData.patient_nationality.trim();
 
     try {
       if (editMode && patientId) {
@@ -1217,7 +1227,7 @@ export default function PatientRegistrationForm({
           alternate_mobile: formData.patient_alternate_mobile || undefined,
           email: formData.patient_email || undefined,
           marital_status: formData.patient_marital_status || undefined,
-          nationality: formData.patient_nationality || undefined,
+          nationality: effectiveNationality || undefined,
           patient_type: formData.patient_type || undefined,
           patient_state: formData.patient_state || undefined,
           patient_district: formData.patient_district || undefined,
@@ -1260,7 +1270,7 @@ export default function PatientRegistrationForm({
       }
 
       // Add mode: no backend call happens here. The patient is registered
-      // ONLY after a mail or WhatsApp message has been opened from the popup
+      // ONLY after a mail or WhatsApp message has been sent from the popup
       // (see createPatientAfterNotify) — otherwise nothing is created.
       const savedPatientName = `${formData.patient_first_name} ${formData.patient_last_name}`.trim();
       const savedBranchName =
@@ -1281,7 +1291,8 @@ export default function PatientRegistrationForm({
           (savedBranchName ? `Branch: ${savedBranchName}\n` : "") +
           `\nThank you.`
       );
-      setNotifySent({ mail: false, whatsapp: false });
+      setEmailSent(false);
+      setWhatsappOpened(false);
       setShowNotifyPopup(true);
     } catch (error: any) {
       toast({
@@ -1297,7 +1308,7 @@ export default function PatientRegistrationForm({
   };
 
   // Registers the new patient. Called ONLY from the notify popup once a mail
-  // or WhatsApp message has been opened — no message, no patient record.
+  // or WhatsApp message has gone out — no message, no patient record.
   const createPatientAfterNotify = async (): Promise<boolean> => {
     if (submitting) return false;
     setSubmitting(true);
@@ -1309,6 +1320,11 @@ export default function PatientRegistrationForm({
       isOther && referralOtherInput.trim()
         ? referralOtherInput.trim()
         : formData.referral_type.trim();
+    // "Others" saves the typed nationality instead of the literal option
+    const effectiveNationality =
+      formData.patient_nationality === "Others" && nationalityOtherInput.trim()
+        ? nationalityOtherInput.trim()
+        : formData.patient_nationality.trim();
 
     // Address and emergency-contact fields map onto the patient_bio_data
     // columns Patient_address / Patient_Emergency_contact_name /
@@ -1330,7 +1346,7 @@ export default function PatientRegistrationForm({
         alternate_mobile: formData.patient_alternate_mobile || undefined,
         email: formData.patient_email || undefined,
         marital_status: formData.patient_marital_status || undefined,
-        nationality: formData.patient_nationality || undefined,
+        nationality: effectiveNationality || undefined,
         patient_type: formData.patient_type || undefined,
         patient_state: formData.patient_state || undefined,
         patient_district: formData.patient_district || undefined,
@@ -1386,22 +1402,27 @@ export default function PatientRegistrationForm({
   };
 
   // ── Post-save notification helpers (mail + WhatsApp) ──────────────────────
+  // The confirmation email is sent directly by the server (no mail app is
+  // ever opened). WhatsApp has no API configured yet, so it opens in a new
+  // tab exactly like the previous version did.
+
   const digitsForWhatsApp = (value: string) => {
     const digits = (value || "").replace(/\D/g, "");
     // Bare 10-digit Indian mobiles need the country code for wa.me links
     return digits.length === 10 ? `91${digits}` : digits;
   };
 
-  const buildMailtoUrl = () =>
-    `mailto:${(notifyEmail || "").trim()}?subject=${encodeURIComponent(
-      notifySubject || ""
-    )}&body=${encodeURIComponent(notifyMessage || "")}`;
-
   const buildWhatsAppUrl = () =>
     `https://wa.me/${digitsForWhatsApp(notifyPhone)}?text=${encodeURIComponent(notifyMessage || "")}`;
 
-  const sendMailOnly = () => {
-    if (!notifyEmail.trim()) {
+  // Sends the confirmation email directly through the backend SMTP and, once
+  // it is out, registers the patient. On failure nothing is registered and
+  // the popup stays open so the address can be fixed.
+  const sendMailOnly = async () => {
+    if (submitting) return;
+
+    const to = notifyEmail.trim();
+    if (!to) {
       toast({
         title: "Email required",
         description: "Enter the patient's email address to send the mail.",
@@ -1409,16 +1430,47 @@ export default function PatientRegistrationForm({
       });
       return;
     }
-    window.location.href = buildMailtoUrl();
-    setNotifySent((s) => ({ ...s, mail: true }));
-    toast({
-      title: "Mail opened",
-      description: "Your default mail app opened with the message ready — press send there.",
-    });
-    // Message handed to the mail client → the patient may now be registered
-    createPatientAfterNotify();
+    if (!notifySubject.trim() || !notifyMessage.trim()) {
+      toast({
+        title: "Message required",
+        description: "Enter a subject and a message for the confirmation email.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // Skip re-sending when a previous attempt already delivered the email
+      // but the patient registration itself failed and is being retried.
+      if (!emailSent) {
+        await notificationApi.sendEmail({
+          to,
+          subject: notifySubject.trim(),
+          text: notifyMessage,
+        });
+        setEmailSent(true);
+        toast({
+          title: "Confirmation email sent",
+          description: "The message was sent directly — no mail app was opened.",
+        });
+      }
+
+      // Email is out → the patient may now be registered
+      await createPatientAfterNotify();
+    } catch (error: any) {
+      toast({
+        title: "Failed to send confirmation email",
+        description:
+          error.response?.data?.message ?? error.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
+  // Opens WhatsApp with the pre-filled message, then registers the patient
   const sendWhatsAppOnly = () => {
     if (!digitsForWhatsApp(notifyPhone)) {
       toast({
@@ -1437,7 +1489,7 @@ export default function PatientRegistrationForm({
       });
       return;
     }
-    setNotifySent((s) => ({ ...s, whatsapp: true }));
+    setWhatsappOpened(true);
     toast({
       title: "WhatsApp opened",
       description: "The message is ready in WhatsApp — press send there.",
@@ -1446,8 +1498,10 @@ export default function PatientRegistrationForm({
     createPatientAfterNotify();
   };
 
-  // Opens the mail client and WhatsApp together, in one single click
-  const sendMailAndWhatsApp = () => {
+  // Sends the mail directly AND opens WhatsApp together, in one single click
+  const handleConfirmAndSend = async () => {
+    if (submitting) return;
+
     const hasMail = !!notifyEmail.trim();
     const hasWhatsapp = !!digitsForWhatsApp(notifyPhone);
 
@@ -1459,40 +1513,75 @@ export default function PatientRegistrationForm({
       });
       return;
     }
+    if (hasMail && (!notifySubject.trim() || !notifyMessage.trim())) {
+      toast({
+        title: "Message required",
+        description: "Enter a subject and a message for the confirmation email.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    let openedAny = false;
+    setSubmitting(true);
+    let delivered = false;
 
-    if (hasWhatsapp) {
-      const opened = window.open(buildWhatsAppUrl(), "_blank", "noopener,noreferrer");
-      if (opened) {
-        setNotifySent((s) => ({ ...s, whatsapp: true }));
-        openedAny = true;
-      } else
+    try {
+      // Email goes out directly through the server — no mail app opens
+      if (hasMail) {
+        try {
+          if (!emailSent) {
+            await notificationApi.sendEmail({
+              to: notifyEmail.trim(),
+              subject: notifySubject.trim(),
+              text: notifyMessage,
+            });
+            setEmailSent(true);
+            toast({
+              title: "Confirmation email sent",
+              description: "The message was sent directly — no mail app was opened.",
+            });
+          }
+          delivered = true;
+        } catch (error: any) {
+          toast({
+            title: "Failed to send confirmation email",
+            description:
+              error.response?.data?.message ?? error.message ?? "Something went wrong.",
+            variant: "destructive",
+          });
+        }
+      } else {
         toast({
-          title: "Pop-up blocked",
-          description: "Allow pop-ups for this site to open WhatsApp automatically.",
-          variant: "destructive",
+          title: "Mail skipped",
+          description: "No email address entered — only WhatsApp will be used.",
         });
-    } else {
-      toast({
-        title: "WhatsApp skipped",
-        description: "No mobile number entered — only the mail will be opened.",
-      });
-    }
+      }
 
-    if (hasMail) {
-      window.location.href = buildMailtoUrl();
-      setNotifySent((s) => ({ ...s, mail: true }));
-      openedAny = true;
-    } else {
-      toast({
-        title: "Mail skipped",
-        description: "No email address entered — only WhatsApp will be opened.",
-      });
-    }
+      // WhatsApp has no API yet → opens in a new tab like the old version
+      if (hasWhatsapp) {
+        const opened = window.open(buildWhatsAppUrl(), "_blank", "noopener,noreferrer");
+        if (opened) {
+          setWhatsappOpened(true);
+          delivered = true;
+        } else {
+          toast({
+            title: "Pop-up blocked",
+            description: "Allow pop-ups for this site to open WhatsApp automatically.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "WhatsApp skipped",
+          description: "No mobile number entered — only the confirmation email will be sent.",
+        });
+      }
 
-    // At least one message went out → the patient may now be registered
-    if (openedAny) createPatientAfterNotify();
+      // At least one message went out → the patient may now be registered
+      if (delivered) await createPatientAfterNotify();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ✕ button — closes the popup silently (no "Patient not created" toast)
@@ -1523,6 +1612,7 @@ export default function PatientRegistrationForm({
     setSameAsCurrent(false);
     setConfirmPassword("");
     setInsuranceFiles([]);
+    setNationalityOtherInput("");
   };
 
   const isDirty = editMode
@@ -2554,7 +2644,7 @@ export default function PatientRegistrationForm({
         onCancel={() => setShowLeaveConfirm(false)}
       />
 
-      {/* ── Post-save popup: send confirmation mail + WhatsApp together ── */}
+      {/* ── Post-save popup: direct confirmation email (sent by the server) ── */}
       <DialogPrimitive.Root
         open={showNotifyPopup}
         onOpenChange={(nextOpen) => {
@@ -2595,8 +2685,8 @@ export default function PatientRegistrationForm({
                   <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2.5">
                     <Mail className="h-4 w-4 text-blue-600" />
                     <span className="text-[13px] font-semibold text-gray-900">Email</span>
-                    {notifySent.mail && (
-                      <span className="ml-auto text-[11px] font-medium text-green-600">Opened</span>
+                    {emailSent && (
+                      <span className="ml-auto text-[11px] font-medium text-green-600">Sent</span>
                     )}
                   </div>
                   <div className="space-y-3 p-4">
@@ -2634,7 +2724,7 @@ export default function PatientRegistrationForm({
                   <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2.5">
                     <MessageCircle className="h-4 w-4 text-green-600" />
                     <span className="text-[13px] font-semibold text-gray-900">WhatsApp</span>
-                    {notifySent.whatsapp && (
+                    {whatsappOpened && (
                       <span className="ml-auto text-[11px] font-medium text-green-600">Opened</span>
                     )}
                   </div>
@@ -2704,14 +2794,14 @@ export default function PatientRegistrationForm({
                 </button>
                 <button
                   type="button"
-                  onClick={sendMailAndWhatsApp}
+                  onClick={handleConfirmAndSend}
                   disabled={submitting}
                   className="h-[40px] rounded-xl bg-blue-600 px-5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Registering…
+                      Sending…
                     </>
                   ) : (
                     <>

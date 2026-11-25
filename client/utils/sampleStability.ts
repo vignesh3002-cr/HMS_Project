@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export type SampleUrgencyLevel =
   | "NOT_COLLECTED"
@@ -202,6 +203,7 @@ export function calculateSampleStability(
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone: getActiveTimezone(),
   });
 
   // Expiry deadline: Use database expiry_datetime if provided, else compute from collection + stabilityHours
@@ -215,6 +217,7 @@ export function calculateSampleStability(
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone: getActiveTimezone(),
   });
 
   if (isCompleted) {

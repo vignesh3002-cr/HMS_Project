@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone } from "@/utils/timezone";
 import { CalendarDays, CheckCircle2, Loader2 } from "lucide-react";
 import API from "@/api/axios";
 import {
@@ -327,7 +328,7 @@ const AbsenceManagement: React.FC = () => {
    */
 
   const toIsoDate = (date: Date): string =>
-    format(date, "yyyy-MM-dd");
+    dayKeyOf(date);
 
   const resolveEmployeeId = async (): Promise<string | null> => {
     const stored = getUser()?.employee_id;
@@ -1601,7 +1602,7 @@ const AbsenceManagement: React.FC = () => {
                     </p>
                     <p className="leading-4 text-[#434653]">
                       {conflict.appointment_date
-                        ? format(
+                        ? formatInBranchTimezone(
                             new Date(conflict.appointment_date),
                             "dd/MM/yyyy"
                           )

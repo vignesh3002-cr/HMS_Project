@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ChevronLeft,
   ChevronRight,
@@ -1227,7 +1228,7 @@ export default function TestingSamples() {
 
           const createdDate = item.created_at ? new Date(item.created_at) : new Date();
           const startTime = !isNaN(createdDate.getTime())
-            ? createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })
+            ? createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() })
             : "10:30 AM";
 
           const regTimeStored =
@@ -1249,11 +1250,11 @@ export default function TestingSamples() {
           );
           const estDate = new Date(createdDate.getTime() + tatHours * 3600 * 1000);
           const estimatedCompletion = !isNaN(estDate.getTime())
-            ? estDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })
+            ? estDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: getActiveTimezone() })
             : "11:30 AM";
 
           const receivedDate = !isNaN(createdDate.getTime())
-            ? createdDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+            ? createdDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: getActiveTimezone() })
             : "22 Sep 2026";
 
           const storedStatus = typeof window !== "undefined"
@@ -2241,6 +2242,7 @@ export default function TestingSamples() {
     const startTimeStr = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: getActiveTimezone(),
     });
 
     setSamples((prev) =>
@@ -3227,10 +3229,6 @@ export default function TestingSamples() {
                     </button>
                   )}
                 </div>
-
-
-
-
 
                 {/* Filter Button */}
                 <div className="relative shrink-0">

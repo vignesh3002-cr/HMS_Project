@@ -31,6 +31,11 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  getActiveTimezone,
+  getNowInActiveTimezone,
+  getTodayInActiveTimezone,
+} from "@/utils/timezone";
 
 /** Sentinel for "take this role off the patient". */
 export const REMOVE = "__REMOVE__";
@@ -41,9 +46,9 @@ export const staffName = (e: {
   last_name?: string | null;
 }) => [e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ");
 
-/** Today's date in hospital time (IST), yyyy-MM-dd. */
-export const istToday = () =>
-  new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+/** Today's date in the ACTIVE BRANCH's timezone, yyyy-MM-dd (name kept for
+ *  existing consumers; was hardcoded IST). */
+export const istToday = () => getTodayInActiveTimezone();
 
 const shiftClock = (t: string) => {
   const hhmm = t.includes("T") ? t.slice(11, 16) : t.slice(0, 5);
@@ -52,17 +57,18 @@ const shiftClock = (t: string) => {
 };
 
 /**
- * The shift in force right now (IST) and the roster date it belongs to.
- * An overnight shift belongs to the day it started, so after midnight the
- * roster date is yesterday.
+ * The shift in force right now (in the active branch's timezone) and the
+ * roster date it belongs to. An overnight shift belongs to the day it
+ * started, so after midnight the roster date is yesterday.
  */
 export function currentShiftContext(
   shifts: BranchShift[]
 ): { shiftCode: string; dutyDate: string } | null {
-  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const nowMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  const today = ist.toISOString().slice(0, 10);
-  const yesterday = new Date(ist.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // "Now" shifted so the UTC getters read the branch's local wall clock.
+  const local = getNowInActiveTimezone();
+  const nowMin = local.getUTCHours() * 60 + local.getUTCMinutes();
+  const today = local.toISOString().slice(0, 10);
+  const yesterday = new Date(local.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   for (const s of shifts) {
     if (s.is_active === false) continue;
@@ -78,7 +84,7 @@ export function currentShiftContext(
   return null;
 }
 
-/** Current date and time in hospital time. */
+/** Current date and time in the active branch's timezone. */
 export const formatNowIst = () =>
   new Date().toLocaleString("en-GB", {
     day: "2-digit",
@@ -87,7 +93,7 @@ export const formatNowIst = () =>
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Asia/Kolkata",
+    timeZone: getActiveTimezone(),
   });
 
 interface AllocateCareTeamDialogProps {

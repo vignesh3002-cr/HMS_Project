@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { getActiveTimezone } from "@/utils/timezone";
 import {
   ArrowLeft,
   Printer,
@@ -108,6 +109,7 @@ function formatCreatedAt(date?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone: getActiveTimezone(),
   });
 }
 
@@ -1202,6 +1204,7 @@ const AppointmentDetails: React.FC = () => {
                           day: "2-digit",
                           month: "short",
                           year: "numeric",
+                          timeZone: "UTC",
                         })
                       : "—";
 

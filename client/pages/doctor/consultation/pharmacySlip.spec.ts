@@ -3,7 +3,10 @@ import {
   allocateQuantity,
   applySavedSlip,
   buildBrandOptions,
+  buildDraftRowsFromSaved,
   buildSlipSourceRows,
+  cloneDraftRow,
+  computeRemovedRowKeys,
   createDraftRow,
   effectiveBaseQuantity,
   effectiveExtraQuantity,
@@ -11,11 +14,13 @@ import {
   formatSlipDuration,
   parseDoseText,
   pickDefaultStrength,
+  savedSlipHasRowKeys,
   slipFrequencyDuration,
   suggestionFor,
   toDisplayRows,
   toSlipOrderItems,
   type SlipDraftRow,
+  type SlipSourceRow,
   type StrengthOption,
 } from "./pharmacySlip";
 import type { PharmacyMasterItem, PharmacySlipItem } from "../../../api/pharmacy.api";
@@ -573,5 +578,279 @@ describe("F/D on the printed rows", () => {
       duration: "4 D",
     });
     expect(items[1]).toMatchObject({ duration: "4 D" });
+  });
+});
+
+describe("ADD / REMOVE rows", () => {
+  const sourcePrimary = (): SlipSourceRow => ({
+    key: "PRIMARY:1",
+    medicineId: "MED-1",
+    genericId: "GEN-1",
+    drugName: "Trastuzumab",
+    drugForm: "Injection",
+    patientDose: "150 mg",
+    patientDoseValue: 150,
+    patientDoseUnit: "mg",
+    role: "PRIMARY",
+    route: "IV",
+    frequency: "",
+    duration: "",
+    instructions: "",
+  });
+
+  const sourceDischarge = (): SlipSourceRow => ({
+    key: "DISCHARGE:1",
+    medicineId: "MED-2",
+    genericId: "GEN-2",
+    drugName: "Paracetamol",
+    drugForm: "Tablet",
+    patientDose: "500 mg",
+    patientDoseValue: 500,
+    patientDoseUnit: "mg",
+    role: "DISCHARGE",
+    route: "Oral",
+    frequency: "1-0-2",
+    duration: "4",
+    durationUnit: "D",
+    instructions: "After food",
+  });
+
+  const master = (): PharmacyMasterItem[] => [
+    masterRow({}),
+    masterRow({
+      pharmacy_item_id: "PHM-30",
+      item_name: "Trastuzumab 30 mg",
+      strength_text: "30 mg",
+      strength_value: 30,
+    }),
+    masterRow({
+      pharmacy_item_id: "PHM-20",
+      item_name: "Trastuzumab 20 mg",
+      strength_text: "20 mg",
+      strength_value: 20,
+    }),
+    masterRow({
+      pharmacy_item_id: "PHM-500",
+      medicine_id: "MED-2",
+      generic_name: "Paracetamol",
+      generic_id: "GEN-2",
+      item_name: "Dolo 500 mg",
+      brand_name: "Dolo",
+      dosage_form: "Tablet",
+      strength_text: "500 mg",
+      strength_value: 500,
+    }),
+  ];
+
+  const savedLine = (
+    overrides: Partial<PharmacySlipItem> = {}
+  ): PharmacySlipItem => ({
+    pharmacy_slip_item_id: "PSI-1",
+    pharmacy_slip_id: "PSL-1",
+    display_order: 0,
+    medicine_id: "MED-1",
+    drug_name: "Trastuzumab",
+    brand_name: "Herceptin",
+    dosage_form: "Injection",
+    patient_dose: "150 mg",
+    dose: "120",
+    dose_unit: "mg",
+    quantity: 1,
+    drug_role: "PRIMARY",
+    route: "IV",
+    frequency: null,
+    duration: null,
+    instructions: null,
+    pharmacy_item_id: "PHM-1",
+    source_row_key: "PRIMARY:1",
+    is_top_up: false,
+    extra_suppressed: false,
+    ...overrides,
+  });
+
+  it("cloneDraftRow copies the medicine but resets the editable values", () => {
+    const row = draft();
+    const clone = cloneDraftRow(row, "ADD:1");
+
+    expect(clone.key).toBe("ADD:1");
+    expect(clone.sourceRowKey).toBe("ADD:1");
+    expect(clone.originKey).toBe("PRIMARY:1");
+    expect(clone.isAdded).toBe(true);
+    expect(clone.drugName).toBe(row.drugName);
+    expect(clone.drugForm).toBe(row.drugForm);
+    expect(clone.patientDose).toBe(row.patientDose);
+    expect(clone.brand).toBe(row.brand);
+    expect(clone.selectedDose).toBe(row.selectedDose);
+    expect(clone.role).toBe(row.role);
+    expect(clone.route).toBe(row.route);
+    expect(clone.quantityOverride).toBe("");
+    expect(clone.extraQuantityOverride).toBe("");
+    expect(clone.extraSuppressed).toBe(false);
+  });
+
+  it("writes the source row key and top-up flag on both lines", () => {
+    const items = toSlipOrderItems([draft()]);
+
+    expect(items[0]).toMatchObject({
+      source_row_key: "PRIMARY:1",
+      is_top_up: false,
+      extra_suppressed: false,
+    });
+    expect(items[1]).toMatchObject({
+      source_row_key: "PRIMARY:1",
+      is_top_up: true,
+    });
+  });
+
+  it("skips a removed top-up and records the suppression on the base line", () => {
+    const items = toSlipOrderItems([draft({ extraSuppressed: true })]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      is_top_up: false,
+      extra_suppressed: true,
+    });
+  });
+
+  it("keeps a separate key for an added copy", () => {
+    const clone = cloneDraftRow(draft(), "ADD:1");
+    const items = toSlipOrderItems([draft(), clone]);
+
+    expect(items.map((item) => item.source_row_key)).toEqual([
+      "PRIMARY:1",
+      "PRIMARY:1",
+      "ADD:1",
+      "ADD:1",
+    ]);
+    expect(items.filter((item) => item.is_top_up)).toHaveLength(2);
+  });
+
+  it("drops a suppressed top-up line and keeps the numbering continuous", () => {
+    const rows = [
+      draft({ extraSuppressed: true }),
+      draft({
+        key: "DISCHARGE:1",
+        sourceRowKey: "DISCHARGE:1",
+        originKey: "DISCHARGE:1",
+        role: "DISCHARGE",
+        drugName: "Paracetamol",
+        drugForm: "Tablet",
+        patientDose: "500 mg",
+        patientDoseValue: 500,
+        patientDoseUnit: "mg",
+        selectedDose: "500",
+        selectedUnit: "mg",
+        brand: "Dolo",
+        strengthLabel: "500 mg",
+        brandOptions: [{ label: "Dolo", strengths: [strength(500)] }],
+      }),
+    ];
+
+    const display = toDisplayRows(rows);
+
+    expect(display).toHaveLength(2);
+    expect(display.map((row) => row.no)).toEqual([1, 2]);
+    expect(display[0].isExtra).toBe(false);
+    expect(display[1].isExtra).toBe(false);
+  });
+
+  it("computeRemovedRowKeys reports known rows that are no longer on screen", () => {
+    const rows = [draft(), cloneDraftRow(draft(), "ADD:1")];
+
+    expect(
+      computeRemovedRowKeys(["PRIMARY:1", "DISCHARGE:1"], rows)
+    ).toEqual(["DISCHARGE:1"]);
+  });
+
+  it("detects slips saved before the row-key columns existed", () => {
+    expect(savedSlipHasRowKeys([savedLine()])).toBe(true);
+    expect(savedSlipHasRowKeys([savedLine({ source_row_key: null })])).toBe(false);
+    expect(savedSlipHasRowKeys(null)).toBe(false);
+  });
+
+  it("rebuilds the doctor's added copies from the saved lines", () => {
+    const rows = buildDraftRowsFromSaved({
+      sourceRows: [sourcePrimary()],
+      savedItems: [
+        savedLine(),
+        savedLine({
+          pharmacy_slip_item_id: "PSI-2",
+          dose: "30",
+          quantity: 1,
+          pharmacy_item_id: "PHM-30",
+          is_top_up: true,
+        }),
+        savedLine({
+          pharmacy_slip_item_id: "PSI-3",
+          source_row_key: "ADD:1",
+          dose: "30",
+          quantity: 2,
+          pharmacy_item_id: "PHM-30",
+        }),
+      ],
+      masterItems: master(),
+    });
+
+    expect(rows.map((row) => row.sourceRowKey)).toEqual(["PRIMARY:1", "ADD:1"]);
+    expect(rows[0].isAdded).toBe(false);
+    expect(rows[1].isAdded).toBe(true);
+    expect(rows[1].originKey).toBe("PRIMARY:1");
+    expect(rows[1].drugName).toBe("Trastuzumab");
+    expect(rows[1].selectedDose).toBe("30");
+    expect(rows[1].quantityOverride).toBe("2");
+  });
+
+  it("does not resurrect a row the doctor removed", () => {
+    const rows = buildDraftRowsFromSaved({
+      sourceRows: [sourcePrimary(), sourceDischarge()],
+      savedItems: [savedLine()],
+      removedKeys: ["DISCHARGE:1"],
+      masterItems: master(),
+    });
+
+    expect(rows.map((row) => row.sourceRowKey)).toEqual(["PRIMARY:1"]);
+  });
+
+  it("appends a medicine added to the order after the slip was saved", () => {
+    const rows = buildDraftRowsFromSaved({
+      sourceRows: [sourcePrimary(), sourceDischarge()],
+      savedItems: [savedLine()],
+      masterItems: master(),
+    });
+
+    expect(rows.map((row) => row.sourceRowKey)).toEqual([
+      "PRIMARY:1",
+      "DISCHARGE:1",
+    ]);
+    expect(rows[1].isAdded).toBe(false);
+    expect(rows[1].quantityOverride).toBe("");
+  });
+
+  it("restores a removed top-up and a typed top-up quantity", () => {
+    const [suppressed] = buildDraftRowsFromSaved({
+      sourceRows: [sourcePrimary()],
+      savedItems: [savedLine({ extra_suppressed: true })],
+      masterItems: master(),
+    });
+
+    expect(suppressed.extraSuppressed).toBe(true);
+
+    const [typed] = buildDraftRowsFromSaved({
+      sourceRows: [sourcePrimary()],
+      savedItems: [
+        savedLine(),
+        savedLine({
+          pharmacy_slip_item_id: "PSI-2",
+          dose: "30",
+          quantity: 4,
+          pharmacy_item_id: "PHM-30",
+          is_top_up: true,
+        }),
+      ],
+      masterItems: master(),
+    });
+
+    expect(typed.extraSuppressed).toBe(false);
+    expect(typed.extraQuantityOverride).toBe("4");
   });
 });

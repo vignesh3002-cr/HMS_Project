@@ -13,6 +13,7 @@ import {
 import HmsTable from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
@@ -27,6 +28,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
@@ -173,7 +175,12 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time, record.duration_minutes),
     sortDate,
-    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    // Display-only: everything dated before today (branch timezone) reads as
+    // "No Show". rawStatus below keeps the real DB value for the flows that
+    // need it (sandwich queue, cancel) -- nothing is ever written back.
+    status: isPastAppointmentNoShow(record.appointment_date)
+      ? "No Show"
+      : STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
     rawStatus: record.status,
     durationMinutes: record.duration_minutes,
     appointmentDateISO: record.appointment_date,
@@ -192,7 +199,7 @@ const AppointmentPage: React.FC = () => {
   // Date selection
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const dateStr = dayKeyOf(selectedDate);
   const branchKey = isAllBranches ? "all" : (selectedBranchId || "all");
 
   const {
@@ -372,17 +379,21 @@ const AppointmentPage: React.FC = () => {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
+    removeAppliedFilter,
   } = useFilterPanel();
 
-  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows: appointments });
+  const { appointmentFilterFields } = useAppointmentFilters({
+    appointmentRows: appointments,
+    filterValues,
+  });
 
   // Search & filter
   const searchableFields: (keyof Appointment)[] = [
     "id",
+    "tokenId",
     "patient",
     "patientId",
     "branch",
-    "date",
     "doctor",
     "doctorId",
     "visitType",
@@ -403,12 +414,13 @@ const AppointmentPage: React.FC = () => {
     }
 
     result = filterDataByValues(
-      result as unknown as Record<string, string | number>[],
+      result as unknown as Record<string, any>[],
       appliedValues,
+      appointmentFilterFields,
     ) as unknown as Appointment[];
 
     return result;
-  }, [searchQuery, appliedValues, appointments]);
+  }, [searchQuery, appliedValues, appointments, appointmentFilterFields]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -456,8 +468,8 @@ const AppointmentPage: React.FC = () => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Appointment Schedule",
-        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Appointment No", cell: (r: Appointment) => r.id },
           { header: "Token", cell: (r: Appointment) => r.tokenId },
@@ -623,13 +635,13 @@ const AppointmentPage: React.FC = () => {
                       <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                         <PopoverTrigger asChild>
                           <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                            {isToday(selectedDate)
+                            {isTodayInActiveTimezone(selectedDate)
                               ? "Today"
-                              : isYesterday(selectedDate)
+                              : isYesterdayInActiveTimezone(selectedDate)
                                 ? "Yesterday"
-                                : isTomorrow(selectedDate)
+                                : isTomorrowInActiveTimezone(selectedDate)
                                   ? "Tomorrow"
-                                  : format(selectedDate, "dd/MM/yyyy")}
+                                  : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
                           </button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
@@ -663,6 +675,7 @@ const AppointmentPage: React.FC = () => {
                       title="Filters"
                       fields={appointmentFilterFields}
                       values={filterValues}
+                      appliedValues={appliedValues}
                       onChange={handleFilterChange}
                       onApply={() => {
                         handleApplyFilter();

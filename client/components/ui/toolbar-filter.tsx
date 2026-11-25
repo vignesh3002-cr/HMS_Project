@@ -8,6 +8,7 @@ import { getUser } from "@/utils/token";
 interface ToolbarFilterProps {
   fields: FilterField[];
   values: Record<string, any>;
+  appliedValues?: Record<string, any>;
   onChange: (name: string, value: any) => void;
   onApply: () => void;
   onClear: () => void;
@@ -18,8 +19,8 @@ interface ToolbarFilterProps {
 }
 
 // NEW: StatusToggle component for showing/hiding deactivated records
-// Only available to HEAD_ADMIN and SUPER_ADMIN roles
-const STATUS_TOGGLE_ROLES = ["HEAD_ADMIN", "SUPER_ADMIN"];
+// Only available to HEAD_ADMIN, SUPER_ADMIN, and BRANCH_ADMIN roles
+const STATUS_TOGGLE_ROLES = ["HEAD_ADMIN", "SUPER_ADMIN", "BRANCH_ADMIN"];
 
 interface StatusToggleProps {
   showDeactivated: boolean;
@@ -37,6 +38,7 @@ export function resolveFilterRole(user: { role_type?: string; role?: string } | 
 export function ToolbarFilter({
   fields,
   values,
+  appliedValues,
   onChange,
   onApply,
   onClear,
@@ -45,13 +47,23 @@ export function ToolbarFilter({
   open,
   onOpenChange,
 }: ToolbarFilterProps) {
+  const effective = appliedValues ?? values ?? {};
+  const activeCount = Object.values(effective).filter(
+    (val) => val !== undefined && val !== null && val !== "" && !(Array.isArray(val) && val.length === 0)
+  ).length;
+
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         {trigger ?? (
-          <button className="flex items-center gap-2 h-[27px] px-4 rounded-md border border-[#E5E7EB] text-[#374151] text-sm font-medium transition-colors duration-150 hover:bg-[#F2F4F6] hover:border-[#00488D]">
-            <Funnel className="w-4 h-4" />
-            Filters
+          <button className="flex items-center gap-1.5 h-[27px] px-3 rounded-md border border-[#E5E7EB] text-[#374151] text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6] hover:border-[#00488D] cursor-pointer">
+            <Funnel className="w-3.5 h-3.5 text-slate-500" />
+            <span>Filters</span>
+            {activeCount > 0 && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#00488D] px-1 text-[10px] font-bold text-white leading-none">
+                {activeCount}
+              </span>
+            )}
           </button>
         )}
       </PopoverTrigger>

@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export interface PrescriptionItem {
   medicine_name?: string;
@@ -166,7 +167,7 @@ export async function generatePrescriptionPdf(prescription: PrescriptionData) {
     : null;
   const patientGender = prescription.patient_history?.patient_gender || prescription.patient_history?.gender || "—";
   
-  const prescriptionDate = prescription.prescription_date ? new Date(prescription.prescription_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : formatDate(prescription.patient_history?.visit_date);
+  const prescriptionDate = prescription.prescription_date ? new Date(prescription.prescription_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) : formatDate(prescription.patient_history?.visit_date);
 
   // Header
   doc.setFontSize(16);

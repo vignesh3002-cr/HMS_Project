@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { formatInBranchTimezone } from "@/utils/timezone";
 import { CalendarDays, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -32,11 +34,14 @@ function formatDateValue(value: string | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
 
-  return format(parsed, "MM, dd, yyyy");
+  // Date-only filter values are stored/compared as calendar days - keep the
+  // day exactly as entered (UTC-anchored "yyyy-MM-dd" parses to UTC midnight),
+  // never shift it into the viewer's zone.
+  return formatInBranchTimezone(parsed, "MM, dd, yyyy");
 }
 
 export function FilterField({ field, value, onChange }: FilterFieldProps) {
-  const { id, label, type, placeholder, options, rows, compact } = field;
+  const { id, label, type, placeholder, options, rows, compact, disabled } = field;
   const [openDatePicker, setOpenDatePicker] = useState(false);
   const [openCombobox, setOpenCombobox] = useState(false);
   const [openMultiselect, setOpenMultiselect] = useState(false);
@@ -57,7 +62,8 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
             value={value ?? ""}
             onChange={(e) => onChange(id, e.target.value)}
             placeholder={placeholder}
-            className={inputClass}
+            disabled={disabled}
+            className={cn(inputClass, disabled && "opacity-50 cursor-not-allowed bg-slate-100 hover:border-[#E2E8F0]")}
           />
         </div>
       );
@@ -121,8 +127,13 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
       return (
         <div className="flex flex-col gap-1.5">
           <label className={labelClass}>{label}</label>
-          <Select value={value ?? ""} onValueChange={(v) => onChange(id, v)}>
-            <SelectTrigger className="h-9 rounded-lg border-[#E2E8F0] bg-white px-3 text-[13px] text-clinical-body shadow-sm transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15">
+          <Select disabled={disabled} value={value ?? ""} onValueChange={(v) => onChange(id, v)}>
+            <SelectTrigger
+              className={cn(
+                "h-9 rounded-lg border-[#E2E8F0] bg-white px-3 text-[13px] text-clinical-body shadow-sm transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15",
+                disabled && "opacity-50 cursor-not-allowed bg-slate-100 hover:border-[#E2E8F0]"
+              )}
+            >
               <SelectValue placeholder={placeholder ?? `Select ${label}`} />
             </SelectTrigger>
             <SelectContent className="rounded-lg border-[#E2E8F0] shadow-lg">
@@ -146,11 +157,21 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
       return (
         <div className="flex flex-col gap-1.5">
           <label className={labelClass}>{label}</label>
-          <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+          <Popover
+            open={disabled ? false : openCombobox}
+            onOpenChange={(open) => {
+              if (disabled) return;
+              setOpenCombobox(open);
+            }}
+          >
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={`${inputClass} flex items-center justify-between text-left`}
+                disabled={disabled}
+                className={cn(
+                  `${inputClass} flex items-center justify-between text-left`,
+                  disabled && "opacity-50 cursor-not-allowed bg-slate-100 hover:border-[#E2E8F0]"
+                )}
               >
                 <span className={selectedOption ? "text-clinical-body" : "text-clinical-label"}>
                   {selectedOption ? selectedOption.label : placeholder ?? `Search ${label}`}
@@ -224,15 +245,21 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
 
       const query = multiSearch.trim().toLowerCase();
       const filteredOptions = query
-        ? (options ?? []).filter((opt) => opt.label.toLowerCase().includes(query))
+        ? (options ?? []).filter(
+            (opt) =>
+              opt.label.toLowerCase().includes(query) ||
+              (opt.sublabel && opt.sublabel.toLowerCase().includes(query)) ||
+              String(opt.value).toLowerCase().includes(query),
+          )
         : options ?? [];
 
       return (
         <div className="flex flex-col gap-1.5">
           <label className={labelClass}>{label}</label>
           <Popover
-            open={openMultiselect}
+            open={disabled ? false : openMultiselect}
             onOpenChange={(next) => {
+              if (disabled) return;
               setOpenMultiselect(next);
               if (!next) setMultiSearch("");
             }}
@@ -240,11 +267,13 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={
+                disabled={disabled}
+                className={cn(
                   compact
                     ? "flex h-9 w-full items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
-                    : "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
-                }
+                    : "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15",
+                  disabled && "opacity-50 cursor-not-allowed bg-slate-100 hover:border-[#E2E8F0]"
+                )}
               >
                 {compact ? (
                   <span className={`truncate ${selectedValues.length === 0 ? "text-clinical-label" : "text-clinical-body"}`}>
@@ -301,7 +330,7 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                   return (
                     <label
                       key={opt.value}
-                      className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-[13px] text-clinical-body transition-colors duration-150 hover:bg-clinical-input-bg"
+                      className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-clinical-body transition-colors duration-150 hover:bg-clinical-input-bg"
                     >
                       <input
                         type="checkbox"
@@ -309,7 +338,10 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                         onChange={() => toggleOption(String(opt.value))}
                         className="h-4 w-4 rounded border-[#CBD5E1] accent-clinical-blue focus:ring-clinical-blue/20"
                       />
-                      {opt.label}
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate font-medium text-clinical-body">{opt.label}</span>
+                        {opt.sublabel && <span className="text-[11px] text-gray-400">{opt.sublabel}</span>}
+                      </div>
                     </label>
                   );
                 })}

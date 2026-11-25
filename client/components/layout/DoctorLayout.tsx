@@ -140,7 +140,7 @@ const DoctorLayout: React.FC<DoctorLayoutProps> = ({
             {/* Transparent backdrop for click-outside close */}
             <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setMobileMenuOpen(false)} />
             {/* Drawer panel */}
-            <div className="fixed left-0 top-0 z-50 h-full w-[230px] bg-[#f6f7f9] border-r border-gray-200 flex flex-col shadow-xl">
+            <div className="fixed left-0 top-0 z-50 h-full w-[230px] bg-[#f6f7f9] dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800 flex flex-col shadow-xl">
               {/* Logo + close */}
               <div className="flex items-center justify-between px-5 pt-6 pb-6">
                 <Link to="/doctor" onClick={() => setMobileMenuOpen(false)} className="block focus:outline-none">
@@ -174,8 +174,8 @@ const DoctorLayout: React.FC<DoctorLayoutProps> = ({
         )}
 
         {/* Doctor Content */}
-        <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden bg-[#f8fafc]">
-          <header className="flex h-16 items-center justify-between bg-white/90 backdrop-blur-sm border-b border-slate-200 px-6">
+        <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden bg-[#f8fafc] dark:bg-slate-950">
+          <header className="flex h-16 items-center justify-between bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 px-6">
 
             {/* Mobile/tablet: hamburger + logo */}
             <div className="flex items-center gap-3 lg:hidden">

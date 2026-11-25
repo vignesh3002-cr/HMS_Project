@@ -37,10 +37,10 @@ export function useStaffFilters({ staffRows, branches }: UseStaffFiltersParams):
     () => toSortedOptions(staffRows.map((r) => r.designation)),
     [staffRows],
   );
-  const statusOptions = useMemo(() => {
-    const unique = Array.from(new Set(staffRows.map((r) => r.status).filter(Boolean)));
-    return unique.sort().map((s) => ({ label: s === "active" ? "Active" : "Inactive", value: s as string }));
-  }, [staffRows]);
+  const statusOptions = useMemo(() => [
+    { label: "Active", value: "active" },
+    { label: "Inactive", value: "inactive" },
+  ], []);
 
   // One searchable dropdown listing every real staff member in the current
   // tab -- each row shows the name (larger) with their ID underneath
@@ -52,10 +52,11 @@ export function useStaffFilters({ staffRows, branches }: UseStaffFiltersParams):
     {
       id: "name",
       label: "Name / ID",
-      type: "combobox",
+      type: "multiselect",
       placeholder: "Search by name or ID",
       options: nameFilterOptions,
       matchKeys: ["name", "id"],
+      compact: true,
     },
     { id: "dept", label: "Department", type: "multiselect", options: departmentOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions },

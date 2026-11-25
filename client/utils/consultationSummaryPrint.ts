@@ -10,6 +10,7 @@ import {
   table,
   text,
 } from "./printHtml";
+import { getActiveTimezone } from "@/utils/timezone";
 
 /* ============================================================
    CONSULTATION SUMMARY PRINT
@@ -88,6 +89,7 @@ export const buildConsultationSummaryHtml = (data: ConsultationSummaryPrintData)
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: getActiveTimezone(),
   });
 
   const patientFields = [

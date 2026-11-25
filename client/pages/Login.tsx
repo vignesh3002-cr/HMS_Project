@@ -1,21 +1,39 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { login } from "../api/auth.api";
+import {
+  login,
+  requestForgotPasswordOtp,
+  verifyForgotPasswordOtp,
+  resetForgotPassword,
+} from "../api/auth.api";
 import { toast } from "@/hooks/use-toast";
 import ElasticPulse from "@/components/ui/Elasticpulse";
 import { saveToken, saveUser } from "../utils/token";
 import { Logo } from "@/components/hms/Logo";
 import { usePermission } from "@/context/PermissionContext";
+import { Lock, Mail, Smartphone, X, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const navigate = useNavigate();
   const { refetch: refetchPermissions } = usePermission();
 
   const [rememberMe, setRememberMe] = useState(false);
+  const [directLogin, setDirectLogin] = useState(() => {
+    return localStorage.getItem("hms_direct_login") === "true";
+  });
+
+  const toggleDirectLogin = () => {
+    setDirectLogin((prev) => {
+      const next = !prev;
+      localStorage.setItem("hms_direct_login", String(next));
+      return next;
+    });
+  };
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -33,13 +51,29 @@ export default function Login() {
 
     try {
       // --------------------------------------------------
-      // 1. LOGIN
+      // 1. LOGIN & CREDENTIAL VERIFICATION
       // --------------------------------------------------
       const response = await login(
         username.trim(),
         password,
-        rememberMe
+        rememberMe,
+        directLogin
       );
+
+      // If OTP is required (2-step verification)
+      if (response.requiresOtp) {
+        sessionStorage.setItem("pendingUsername", username.trim());
+        sessionStorage.setItem("rememberMe", String(rememberMe));
+        sessionStorage.setItem("otpSent", "true");
+
+        toast({
+          title: "Verification Code Sent",
+          description: response.message || "A 6-digit OTP code has been sent to your email.",
+        });
+
+        navigate("/authenticate");
+        return;
+      }
 
       console.log("=================================");
       console.log("LOGIN RESPONSE:", response);
@@ -412,9 +446,47 @@ export default function Login() {
 
               <button
                 type="button"
+                onClick={() => setShowForgotPasswordModal(true)}
                 className="text-xs font-bold leading-4 text-clinical-blue hover:underline"
               >
                 Forgot Password?
+              </button>
+            </div>
+
+            {/* Direct Login Toggle (Cloud / Testing mode) */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition-colors">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <span>⚡ Direct Login</span>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      directLogin
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {directLogin ? "ENABLED" : "DISABLED"}
+                  </span>
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Skip email OTP (for Render cloud testing)
+                </span>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={directLogin}
+                onClick={toggleDirectLogin}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  directLogin ? "bg-[#00488D]" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    directLogin ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
 
@@ -525,6 +597,337 @@ export default function Login() {
 
             </div>
           </div>
+        </div>
+      </div>
+
+      {showForgotPasswordModal && (
+        <ForgotPasswordModal
+          initialUsername={username}
+          onClose={() => setShowForgotPasswordModal(false)}
+          onSuccess={(uname) => {
+            setUsername(uname);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Forgot Password Multi-Phase Modal ────────────────────────────────────────
+
+function ForgotPasswordModal({
+  initialUsername = "",
+  onClose,
+  onSuccess,
+}: {
+  initialUsername?: string;
+  onClose: () => void;
+  onSuccess?: (username: string) => void;
+}) {
+  const [phase, setPhase] = useState<"USERNAME" | "VERIFY_OTP" | "NEW_PASSWORD">("USERNAME");
+  const [uname, setUname] = useState(initialUsername);
+  const [destination, setDestination] = useState("");
+  const [defaultMethod, setDefaultMethod] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const inputCls =
+    "w-full px-3.5 py-2.5 rounded-xl border border-gray-200 bg-white text-xs font-medium text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00488D]/20 focus:border-[#00488D] transition";
+  const labelCls = "block text-xs font-bold text-gray-700 mb-1.5";
+
+  const handleRequestOtp = async () => {
+    if (!uname.trim()) {
+      toast({
+        title: "Username required",
+        description: "Please enter your username to find your account.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await requestForgotPasswordOtp(uname.trim());
+      setDestination(res.destination);
+      setDefaultMethod(res.defaultMethod || "");
+      setPhase("VERIFY_OTP");
+      toast({ title: "OTP Dispatched", description: res.message });
+    } catch (err: any) {
+      toast({
+        title: "Unable to Send Code",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.trim().length !== 6) {
+      toast({
+        title: "Code required",
+        description: "Please enter the 6-digit verification code.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await verifyForgotPasswordOtp(uname.trim(), otpCode.trim());
+      setResetToken(res.resetToken);
+      setPhase("NEW_PASSWORD");
+      toast({ title: "Identity Confirmed", description: "You may now choose a new password." });
+    } catch (err: any) {
+      toast({
+        title: "Verification Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (newPassword.length < 8) {
+      toast({
+        title: "Weak password",
+        description: "Password must be at least 8 characters.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Passwords don't match",
+        description: "New password and confirmation must match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await resetForgotPassword(uname.trim(), resetToken, newPassword);
+      toast({ title: "Password Reset Successful", description: res.message });
+      onSuccess?.(uname.trim());
+      onClose();
+    } catch (err: any) {
+      toast({
+        title: "Reset Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100 font-manrope">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-[#00488D]">
+              <Lock className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Forgot Password</h3>
+              <p className="text-[11px] text-gray-500">
+                {phase === "USERNAME" && "Step 1: Enter your username"}
+                {phase === "VERIFY_OTP" && "Step 2: Enter verification code"}
+                {phase === "NEW_PASSWORD" && "Step 3: Choose your new password"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-4">
+          {/* Phase 1: Enter Username */}
+          {phase === "USERNAME" && (
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Account Username</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={uname}
+                  onChange={(e) => setUname(e.target.value)}
+                  placeholder="e.g. admin or dr_john"
+                  autoFocus
+                  disabled={submitting}
+                />
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                For security, a verification code will be sent to your configured default security channel (mobile SMS or email) to verify your identity.
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleRequestOtp}
+                  disabled={submitting || !uname.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#00488D] rounded-xl hover:bg-[#003A73] transition disabled:opacity-50"
+                >
+                  {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Send Verification Code
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 2: Enter OTP */}
+          {phase === "VERIFY_OTP" && (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-blue-900 leading-relaxed flex items-center gap-2">
+                {defaultMethod.includes("MOBILE") ? (
+                  <Smartphone className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                ) : (
+                  <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                )}
+                <span>
+                  Verification code sent to <strong>{destination}</strong>
+                  {defaultMethod.includes("MOBILE") ? " via SMS" : " via Email"}.
+                </span>
+              </div>
+
+              <div>
+                <label className={labelCls}>6-Digit OTP</label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  inputMode="numeric"
+                  className={`${inputCls} text-center font-bold tracking-widest text-base font-mono`}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="••••••"
+                  autoFocus
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-1">
+                <button
+                  type="button"
+                  onClick={handleRequestOtp}
+                  disabled={submitting}
+                  className="text-xs font-semibold text-blue-600 hover:underline disabled:opacity-50"
+                >
+                  Resend Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhase("USERNAME")}
+                  disabled={submitting}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Change Username
+                </button>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleVerifyOtp}
+                  disabled={submitting || otpCode.length !== 6}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#00488D] rounded-xl hover:bg-[#003A73] transition disabled:opacity-50"
+                >
+                  {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Verify OTP
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 3: Set New Password */}
+          {phase === "NEW_PASSWORD" && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>Identity verified. Enter your new password below.</span>
+              </div>
+
+              <div>
+                <label className={labelCls}>New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    className={`${inputCls} pr-10`}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="At least 8 characters"
+                    autoFocus
+                    disabled={submitting}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    className={`${inputCls} pr-10`}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    disabled={submitting}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={submitting || !newPassword || !confirmPassword}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#00488D] rounded-xl hover:bg-[#003A73] transition disabled:opacity-50"
+                >
+                  {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Save New Password
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </div>

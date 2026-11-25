@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday } from "date-fns";
+import { getTodayInActiveTimezone, formatInBranchTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import {
   ArrowDownUp,
   CalendarPlus,
@@ -25,6 +26,7 @@ import {
 import { employeeApi } from "../../api/employee.api";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { SandwichQueueModal } from "@/components/hms/SandwichQueueModal";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -75,6 +77,9 @@ interface Patient {
   appointmentDateRaw: string;
   appointmentTimeRaw: string;
   originalStatus: string;
+  /** True when the row is only DISPLAYED as "No Show" because its date is before
+   *  today (branch timezone). The DB status in `originalStatus` is untouched. */
+  derivedNoShow: boolean;
   status: AppointmentStatus;
   avatarUrl?: string;
 }
@@ -182,18 +187,21 @@ function shiftIsoDay(iso: string, days: number): string {
 }
 
 function todayIso(): string {
-  return pickerDateToKey(new Date());
+  // Today in the ACTIVE BRANCH timezone, never the viewer's laptop date.
+  return getTodayInActiveTimezone();
 }
 
 function isBeforeToday(dateStr: string): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const apptDate = new Date(dateStr);
-  return apptDate < today;
+  // "Before today" = earlier than TODAY IN THE BRANCH'S timezone, never the
+  // viewer's laptop calendar.
+  return String(dateStr).slice(0, 10) < getTodayInActiveTimezone();
 }
 
 function toPatient(a: AppointmentRecord): Patient {
   const effectiveStatus = a.status ?? "";
+  // Display-only rule: dated before today (branch timezone) -> shown as
+  // "No Show" regardless of the stored status. Nothing is written back.
+  const derivedNoShow = isPastAppointmentNoShow(a.appointment_date);
   const bio = a.patient_bio_data;
   const gender = bio?.patient_gender
     ? bio.patient_gender.charAt(0).toUpperCase() +
@@ -219,7 +227,8 @@ function toPatient(a: AppointmentRecord): Patient {
     originalStatus: a.status ?? "",
     age: bio?.patient_age ?? computeAge(bio?.patient_dob),
     bloodGroup: bio?.patient_blood_group ?? undefined,
-    status: toDisplayStatus(effectiveStatus),
+    derivedNoShow,
+    status: derivedNoShow ? "No Show" : toDisplayStatus(effectiveStatus),
   };
 }
 
@@ -549,6 +558,15 @@ const NON_EDITABLE_STATUSES = [
   "NO_SHOW",
 ];
 
+/** The status every action / filter / sort on this page must agree with: the
+ *  real DB status, except for a past appointment which is only DISPLAYED as
+ *  "No Show" (frontend-only derivation, no write-back). */
+function effectiveRawStatus(
+  patient: Pick<Patient, "originalStatus" | "derivedNoShow">,
+): string {
+  return patient.derivedNoShow ? "NO_SHOW" : patient.originalStatus;
+}
+
 interface PatientActionProps {
   actionBusyId: string | null;
   onCheckIn: (patient: Patient) => void;
@@ -571,12 +589,9 @@ function AppointmentRowMenu({
   PatientActionProps,
   "onReschedule" | "onBookFollowUp" | "onCancelRequest" | "onSandwich"
 >) {
-  const canReschedule = !NON_EDITABLE_STATUSES.includes(
-    patient.originalStatus,
-  );
-  const canCancel = !NON_CANCELABLE_STATUSES.includes(
-    patient.originalStatus,
-  );
+  const rawStatus = effectiveRawStatus(patient);
+  const canReschedule = !NON_EDITABLE_STATUSES.includes(rawStatus);
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(rawStatus);
 
   return (
     <DropdownMenu>
@@ -622,10 +637,10 @@ function AppointmentRowMenu({
           </>
         )}
 
-        {(patient.originalStatus === "NO_SHOW" ||
-          patient.originalStatus === "CANCELLED" ||
-          patient.originalStatus === "SCHEDULED" ||
-          patient.originalStatus === "RESCHEDULED") &&
+        {(rawStatus === "NO_SHOW" ||
+          rawStatus === "CANCELLED" ||
+          rawStatus === "SCHEDULED" ||
+          rawStatus === "RESCHEDULED") &&
           onSandwich && (
             <>
               <DropdownMenuSeparator />
@@ -644,13 +659,16 @@ function AppointmentRowMenu({
 }
 
 function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest, onSandwich }: PatientActionProps & { patient: Patient }) {
-  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
-  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
-  const canCancel = !NON_CANCELABLE_STATUSES.includes(patient.originalStatus);
+  // A past appointment is DISPLAYED as "No Show", so it must behave like one:
+  // no check-in / proceed / cancel, exactly like a real NO_SHOW row.
+  const rawStatus = effectiveRawStatus(patient);
+  const canCheckIn = CHECKIN_STATUSES.includes(rawStatus);
+  const canProceed = PROCEED_STATUSES.includes(rawStatus);
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(rawStatus);
   const isBusy = actionBusyId === patient.id;
 
   if (!canCheckIn && !canProceed && !canCancel) {
-    if (patient.originalStatus === "NO_SHOW" && onSandwich) {
+    if (rawStatus === "NO_SHOW" && onSandwich) {
       return (
         <div className="flex items-center justify-end">
           <button
@@ -725,8 +743,8 @@ function PatientCard({
   onSandwich,
   getCriticalInfo,
 }: { patient: Patient; getCriticalInfo: (id: string) => import("@/components/hms/CriticalPatientIndicator").CriticalInfo } & PatientActionProps) {
-  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
-  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
+  const canCheckIn = CHECKIN_STATUSES.includes(effectiveRawStatus(patient));
+  const canProceed = PROCEED_STATUSES.includes(effectiveRawStatus(patient));
   const isBusy = actionBusyId === patient.id;
   const crit = getCriticalInfo(patient.patientId);
 
@@ -1254,17 +1272,6 @@ export default function AppointmentPage() {
      ======================================================= */
 
   // Filter system — useAppointmentFilters + useFilterPanel
-  const appointmentRows = useMemo(
-    () =>
-      patients.map((p) => ({
-        branch: null as string | null,
-        status: p.originalStatus,
-      })),
-    [patients],
-  );
-
-  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows });
-
   const {
     values: filterValues,
     appliedValues,
@@ -1273,7 +1280,28 @@ export default function AppointmentPage() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
-  } = useFilterPanel(appointmentFilterFields);
+  } = useFilterPanel();
+
+  const appointmentRows = useMemo(
+    () =>
+      patients.map((p) => ({
+        id: p.id,
+        patient: p.name,
+        patientId: p.patientCode,
+        branch: null as string | null,
+        // Derived status, so the "No Show" filter option also catches the
+        // past appointments that are only displayed as no-show.
+        status: effectiveRawStatus(p),
+        visitType: (p as any).visitType || null,
+        tokenId: p.tokenNumber != null ? String(p.tokenNumber) : undefined,
+      })),
+    [patients],
+  );
+
+  const { appointmentFilterFields } = useAppointmentFilters({
+    appointmentRows,
+    filterValues,
+  });
 
   // Search + filter + sort
   const filtered = useMemo(() => {
@@ -1296,7 +1324,7 @@ export default function AppointmentPage() {
       patient: p.name,
       patientId: p.patientCode,
       branch: null as string | null,
-      status: p.originalStatus,
+      status: effectiveRawStatus(p),
     }));
     result = filterDataByValues(filterable, appliedValues, appointmentFilterFields) as Patient[];
 
@@ -1317,7 +1345,7 @@ export default function AppointmentPage() {
             return ((a.tokenNumber ?? 999999) - (b.tokenNumber ?? 999999)) * factor;
           }
           case "status":
-            return a.originalStatus.localeCompare(b.originalStatus) * factor;
+            return effectiveRawStatus(a).localeCompare(effectiveRawStatus(b)) * factor;
           default: {
             const val = String(a[sortField] ?? "").localeCompare(String(b[sortField] ?? ""));
             return val * factor;
@@ -1346,8 +1374,8 @@ export default function AppointmentPage() {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Appointments",
-        subtitle: `${filtered.length} appointment${filtered.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${filtered.length} appointment${filtered.length === 1 ? "" : "s"} - exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "Token #", cell: (r: any) => (r.tokenNumber != null ? `#${r.tokenNumber}` : "—") },
           { header: "Patient Name", cell: (r: any) => r.name },
@@ -1575,13 +1603,13 @@ export default function AppointmentPage() {
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
                         {(() => {
                           const d = isoToPickerDate(selectedDateKey);
-                          return isToday(d)
+                          return isTodayInActiveTimezone(d)
                             ? "Today"
-                            : isYesterday(d)
+                            : isYesterdayInActiveTimezone(d)
                               ? "Yesterday"
-                              : isTomorrow(d)
+                              : isTomorrowInActiveTimezone(d)
                                 ? "Tomorrow"
-                                : format(d, "dd/MM/yyyy");
+                                : formatInBranchTimezone(d, "dd/MM/yyyy");
                         })()}
                       </button>
                     </PopoverTrigger>
@@ -1613,6 +1641,7 @@ export default function AppointmentPage() {
                   title="Filters"
                   fields={appointmentFilterFields}
                   values={filterValues}
+                  appliedValues={appliedValues}
                   onChange={handleFilterChange}
                   onApply={handleApplyFilter}
                   onClear={handleClearFilter}

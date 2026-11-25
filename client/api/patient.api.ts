@@ -103,9 +103,11 @@ export interface UpdatePatientPayload {
 
 // Shape actually returned by GET /patients — matches the real `patient_bio_data`
 // columns plus the `branch`/`user_table` relations the repository includes
-// (see Backend/HMS_Backend patient.repository.ts getPatients). Note this does
-// NOT include diagnosis or assigned-doctor info — getPatients doesn't join
-// patient_history/appointment_history, so that data isn't available yet.
+// (see Backend/HMS_Backend patient.repository.ts getPatients). Diagnosis info
+// is derived server-side in patient.service.ts via buildPatientDiagnoses():
+// `diagnoses` lists EVERY diagnosis (all chemotherapy plans + staging records,
+// de-duplicated) and `diagnosis_name` is the first/primary one kept for
+// backward compatibility; both are null/empty when the patient has none.
 export interface PatientRecord {
   patient_id: string;
   user_id: string | null;
@@ -140,6 +142,14 @@ export interface PatientRecord {
   referral_address?: string | null;
   referral_mail?: string | null;
   referral_branch_name?: string | null;
+  // First (primary) element of `diagnoses`, kept for backward compatibility;
+  // null when the patient has no diagnosis at all.
+  diagnosis_name?: string | null;
+  // EVERY distinct diagnosis of the patient (open + completed chemotherapy
+  // plans, then staging records, de-duplicated) - built by
+  // buildPatientDiagnoses() in backend patientDiagnoses.ts. Empty/absent for
+  // patients with no diagnosis anywhere (UI renders "Not recorded").
+  diagnoses?: string[];
   branch: { branch_name: string | null } | null;
   user_table: { role_type: string | null; user_status: number | null; created_at?: string | null } | null;
 }

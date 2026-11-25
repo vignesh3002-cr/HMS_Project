@@ -359,6 +359,7 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
                     onClick={(e) => {
                       e.stopPropagation();
                       onValueChange?.("");
+                      if (onEditValue) onEditValue("");
                       setSearch("");
                       setOpen(false);
                     }}

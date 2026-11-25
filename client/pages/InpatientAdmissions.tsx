@@ -17,11 +17,14 @@ import {
   Clock,
 } from "lucide-react";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
+import { getActiveTimezone } from "@/utils/timezone";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { dayKeyOf, formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { useFilterPanel } from "@/components/Filter";
+import { useFilterPanel, useInpatientFilters } from "@/components/Filter";
+import { filterDataByValues } from "@/components/Filter/utils";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import {
   ipdApi,
@@ -232,39 +235,17 @@ const InpatientAdmissions: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
-  // Status lists every admission status (not just ones on the current page)
-  // so it stays complete no matter what's currently loaded.
-  const ipdFilterFields = useMemo(() => [
-    {
-      id: "status",
-      label: "Status",
-      type: "multiselect" as const,
-      options: [
-        { label: "Planned", value: "PLANNED" },
-        { label: "Admitted", value: "ADMITTED" },
-        { label: "Discharged", value: "DISCHARGED" },
-        { label: "Cancelled", value: "CANCELLED" },
-        { label: "No-Show", value: "NO_SHOW" },
-      ],
-    },
-    {
-      id: "wardId",
-      label: "Ward",
-      type: "select" as const,
-      options: [
-        { label: "All Wards", value: "" },
-        ...wards.map((w) => ({ label: w.ward_name, value: w.ward_id })),
-      ],
-    },
-  ], [wards]);
-
   const ipdAppliedStatus: string[] = useMemo(
     () => (Array.isArray(ipdAppliedFilterValues.status) ? ipdAppliedFilterValues.status : []),
     [ipdAppliedFilterValues.status],
   );
 
   const ipdAppliedWardId: string = useMemo(
-    () => (typeof ipdAppliedFilterValues.wardId === "string" ? ipdAppliedFilterValues.wardId : ""),
+    () => {
+      const w = ipdAppliedFilterValues.wardId;
+      if (Array.isArray(w)) return w[0] ?? "";
+      return typeof w === "string" ? w : "";
+    },
     [ipdAppliedFilterValues.wardId],
   );
 
@@ -287,7 +268,7 @@ const InpatientAdmissions: React.FC = () => {
   }, [ipdAppliedStatus, ipdDateFilter]);
 
   const dateFilterStr = useMemo(() => {
-    return ipdDateFilter ? format(ipdDateFilter, "yyyy-MM-dd") : "";
+    return ipdDateFilter ? dayKeyOf(ipdDateFilter) : "";
   }, [ipdDateFilter]);
 
   // Load Admissions with React Query (cached per filter combination for 5 min)
@@ -346,6 +327,45 @@ const InpatientAdmissions: React.FC = () => {
   const admissions = admissionsData?.admissions ?? [];
   const ipdTotal = admissionsData?.total ?? 0;
   const ipdTotalPages = admissionsData?.totalPages ?? 1;
+
+  const { inpatientFilterFields } = useInpatientFilters({
+    admissions,
+    wards,
+    filterValues: ipdFilterValues,
+  });
+
+  const filteredAdmissions = useMemo(() => {
+    return filterDataByValues(
+      admissions.map((a) => {
+        const p = a.patient_bio_data;
+        const patientName = p
+          ? [p.patient_first_name, p.patient_middle_name, p.patient_last_name].filter(Boolean).join(" ")
+          : "";
+        const doc = a.employees;
+        const primaryDoctorName = doc
+          ? [doc.first_name, doc.middle_name, doc.last_name].filter(Boolean).join(" ")
+          : "";
+        const dutyDoc = a.assigned_doctor;
+        const dutyDoctorName = dutyDoc
+          ? [dutyDoc.first_name, dutyDoc.middle_name, dutyDoc.last_name].filter(Boolean).join(" ")
+          : "";
+        const nurse = a.assigned_nurse;
+        const dutyNurseName = nurse
+          ? [nurse.first_name, nurse.middle_name, nurse.last_name].filter(Boolean).join(" ")
+          : "";
+        return {
+          ...a,
+          patientName,
+          primaryDoctorName,
+          dutyDoctorName,
+          dutyNurseName,
+          branchName: a.branch?.branch_name ?? "",
+        };
+      }),
+      ipdAppliedFilterValues,
+      inpatientFilterFields,
+    ) as unknown as AdmissionRecord[];
+  }, [admissions, ipdAppliedFilterValues, inpatientFilterFields]);
 
   // Critical-patient indicators for the IPD patient column, mirroring how the
   // OPD table marks critical patients (admissions state must exist first).
@@ -623,8 +643,8 @@ const InpatientAdmissions: React.FC = () => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Inpatient (IPD) Census Report",
-        subtitle: `${admissions.length} admission record${admissions.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
-        filename: `ipd-census-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        subtitle: `${admissions.length} admission record${admissions.length === 1 ? "" : "s"} — exported on ${formatInBranchTimezone(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `ipd-census-${getTodayInActiveTimezone()}.pdf`,
         columns: [
           { header: "IP Number", cell: (r: AdmissionRecord) => r.ip_number || "—" },
           {
@@ -650,7 +670,7 @@ const InpatientAdmissions: React.FC = () => {
           {
             header: "Admitted On",
             cell: (r: AdmissionRecord) =>
-              r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy") : "—",
+              r.admission_date ? formatInBranchTimezone(new Date(r.admission_date), "dd/MM/yyyy") : "—",
           },
           { header: "Status", cell: (r: AdmissionRecord) => r.status || "—" },
         ],
@@ -671,7 +691,7 @@ const InpatientAdmissions: React.FC = () => {
           const doctorName = r.employees
             ? `Dr. ${[r.employees.first_name, r.employees.last_name].filter(Boolean).join(" ")}`
             : "";
-          const admittedOn = r.admission_date ? format(new Date(r.admission_date), "dd/MM/yyyy HH:mm") : "";
+          const admittedOn = r.admission_date ? formatInBranchTimezone(new Date(r.admission_date), "dd/MM/yyyy HH:mm") : "";
           const ward = r.ward_master?.ward_name || "";
           const bed = r.bed_master?.bed_number || "";
           return [
@@ -690,7 +710,7 @@ const InpatientAdmissions: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `ipd-census-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      link.download = `ipd-census-${getTodayInActiveTimezone()}.csv`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -778,7 +798,7 @@ const InpatientAdmissions: React.FC = () => {
               className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded bg-[#F5F3FF] text-[#6D28D9] text-[10px] font-semibold border border-violet-100"
               title={
                 row.bed_master?.reserved_until
-                  ? `Held until ${format(new Date(row.bed_master.reserved_until), "dd MMM, hh:mm a")}`
+                  ? `Held until ${formatInBranchTimezone(new Date(row.bed_master.reserved_until), "dd MMM, hh:mm a")}`
                   : undefined
               }
             >
@@ -798,7 +818,7 @@ const InpatientAdmissions: React.FC = () => {
         return (
           <div className="hms-content-text text-[#191C1E] leading-4">
             <div className="flex items-center gap-1.5">
-              {valid ? format(dt, "MM/dd/yyyy") : "—"}
+              {valid ? formatInBranchTimezone(dt, "MM/dd/yyyy") : "—"}
               {row.admission_type && (
                 <span className="inline-block w-fit text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
                   {row.admission_type}
@@ -806,7 +826,7 @@ const InpatientAdmissions: React.FC = () => {
               )}
             </div>
             <div className="text-[11px] font-medium text-[#8C8D8F] mt-1">
-              {valid ? format(dt, "hh:mm a") : ""}
+              {valid ? formatInBranchTimezone(dt, "hh:mm a") : ""}
             </div>
           </div>
         );
@@ -814,7 +834,7 @@ const InpatientAdmissions: React.FC = () => {
     },
     {
       key: "doctor",
-      label: "DOCTOR",
+      label: "PRIMARY DOCTOR",
       className: "!whitespace-normal",
       render: (row) => {
         const d = row.employees;
@@ -861,7 +881,7 @@ const InpatientAdmissions: React.FC = () => {
     },
     {
       key: "care_team",
-      label: "CARE TEAM",
+      label: "DUTY DOCTOR & NURSE",
       sortable: false,
       className: "!whitespace-normal",
       render: (row) => {
@@ -877,7 +897,7 @@ const InpatientAdmissions: React.FC = () => {
         ) =>
           person ? (
             <div className="flex items-baseline gap-1.5 leading-tight">
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="hms-name-text capitalize">
                 {prefix}
                 {[person.first_name, person.middle_name, person.last_name].filter(Boolean).join(" ")}
@@ -890,19 +910,19 @@ const InpatientAdmissions: React.FC = () => {
               className="flex items-baseline gap-1.5 leading-tight text-left group"
               title={`Assign ${label.toLowerCase()}`}
             >
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="text-[11px] font-semibold text-blue-600 group-hover:underline">+ Assign</span>
             </button>
           ) : (
             <div className="flex items-baseline gap-1.5 leading-tight">
-              <span className="text-[10px] font-semibold uppercase text-slate-400 w-10 shrink-0">{label}</span>
+              <span className="text-[10px] font-semibold uppercase text-slate-400 w-16 shrink-0">{label}</span>
               <span className="text-[11px] text-slate-400">Unassigned</span>
             </div>
           );
         return (
           <div className="flex flex-col gap-1">
-            {slot("Duty", row.assigned_doctor, "Dr. ")}
-            {slot("Nurse", row.assigned_nurse)}
+            {slot("Duty Dr.", row.assigned_doctor, "Dr. ")}
+            {slot("Duty Nurse", row.assigned_nurse)}
           </div>
         );
       },
@@ -1037,7 +1057,7 @@ const InpatientAdmissions: React.FC = () => {
             const occupiedBeds = ipdOverview?.bedsOccupied ?? 0;
             const totalBeds = ipdOverview?.totalBeds ?? 0;
             const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
-            const admittedToday = admittedTodayData?.totalAdmittedToday ?? 0;
+            const admittedToday = admittedTodayData?.totalPatients ?? 0;
             const readyForDischarge = admissions.filter((a) => a.status === "ADMITTED" && Boolean(a.discharge_details_at)).length;
             const plannedAdmissions = admissions.filter((a) => a.status === "PLANNED").length;
 
@@ -1180,13 +1200,13 @@ const InpatientAdmissions: React.FC = () => {
                     <Popover open={isIpdCalendarOpen} onOpenChange={setIsIpdCalendarOpen}>
                       <PopoverTrigger asChild>
                         <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                          {isToday(ipdNavDate)
+                          {isTodayInActiveTimezone(ipdNavDate)
                             ? "Today"
-                            : isYesterday(ipdNavDate)
+                            : isYesterdayInActiveTimezone(ipdNavDate)
                               ? "Yesterday"
-                              : isTomorrow(ipdNavDate)
+                              : isTomorrowInActiveTimezone(ipdNavDate)
                                 ? "Tomorrow"
-                                : format(ipdNavDate, "dd/MM/yyyy")}
+                                : formatInBranchTimezone(ipdNavDate, "dd/MM/yyyy")}
                         </button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
@@ -1214,8 +1234,9 @@ const InpatientAdmissions: React.FC = () => {
                 {/* Filters */}
                 <ToolbarFilter
                   title="Filters"
-                  fields={ipdFilterFields}
+                  fields={inpatientFilterFields}
                   values={ipdFilterValues}
+                  appliedValues={ipdAppliedFilterValues}
                   onChange={handleIpdFilterChange}
                   onApply={() => {
                     handleApplyIpdFilter();
@@ -1243,7 +1264,7 @@ const InpatientAdmissions: React.FC = () => {
               <HmsTable
                 scrollable={false}
                 columns={ipdColumns}
-                data={admissions}
+                data={filteredAdmissions}
                 sortField={ipdSortField}
                 sortDirection={ipdSortDirection}
                 onSort={handleIpdSort}
@@ -1258,7 +1279,7 @@ const InpatientAdmissions: React.FC = () => {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage={
                   ipdDateFilter
-                    ? `No patients were admitted on ${format(ipdDateFilter, "dd MMM yyyy")}.`
+                    ? `No patients were admitted on ${formatInBranchTimezone(ipdDateFilter, "dd MMM yyyy")}.`
                     : "No inpatient admissions found matching your criteria."
                 }
                 rowKey={(row: AdmissionRecord) => row.admission_id}
@@ -1604,7 +1625,7 @@ const InpatientAdmissions: React.FC = () => {
                 </div>
                 <div className="col-span-2 text-[11px] text-slate-500">
                   Saved by {activeAdmission.discharge_details_by_name || activeAdmission.discharge_details_by || "doctor"}
-                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString()}` : ""}
+                  {activeAdmission.discharge_details_at ? ` on ${new Date(activeAdmission.discharge_details_at).toLocaleString(undefined, { timeZone: getActiveTimezone() })}` : ""}
                 </div>
               </div>
 

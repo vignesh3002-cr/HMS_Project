@@ -11,6 +11,10 @@ export { usePatientFilters } from "@/components/Filter/usePatientFilters";
 export { useAppointmentFilters } from "@/components/Filter/useAppointmentFilters";
 export { useDepartmentFilters } from "@/components/Filter/useDepartmentFilters";
 export { useScheduleFilters } from "@/components/Filter/useScheduleFilters";
+export { useProtocolFilters } from "@/components/Filter/useProtocolFilters";
+export { useOrderFilters } from "@/components/Filter/useOrderFilters";
+export { useRescheduleQueueFilters } from "@/components/Filter/useRescheduleQueueFilters";
+export { useInpatientFilters } from "@/components/Filter/useInpatientFilters";
 
 export * from "@/components/Filter/types";
 export * from "@/components/Filter/utils";

@@ -26,6 +26,7 @@ import {
 } from "docx";
 import { formatFileSize, type PatientDocumentItem } from "./patientDocuments";
 import { buildWordSections, wordSectionsToDocxChildren } from "./combinedDocumentWord";
+import { getActiveTimezone } from "@/utils/timezone";
 
 export interface SummaryDocRow {
   [key: string]: string;
@@ -257,7 +258,7 @@ export const downloadChemotherapySummaryDocx = async (
   const keysOf = (rows: readonly SummaryDocRow[], columns: string[]) =>
     rows.map((row) => columns.map((column) => row[column] ?? ""));
 
-  const generatedAt = new Date().toLocaleString();
+  const generatedAt = new Date().toLocaleString(undefined, { timeZone: getActiveTimezone() });
 
   const footer = new Footer({
     children: [

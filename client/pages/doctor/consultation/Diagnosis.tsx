@@ -3,7 +3,22 @@ import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
 import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
 import { chemotherapyApi } from "../../../api/chemotherapy.api";
+import {
+  labTestMasterApi,
+  type LabTestMasterRecord,
+} from "../../../api/labTestMaster.api";
 import { getUser } from "../../../utils/token";
+import { stagingApi } from "../../../api/staging.api";
+import StagingCard, { type StagingAutofill } from "./StagingCard";
+import {
+  EMPTY_STAGE_IHC,
+  normalizeStageDrafts,
+  normalizeStageIhc,
+  stageMirrorValues,
+  stageRecordsToDrafts,
+  stageRuleCodesFor,
+  stageSavePayload,
+} from "./stagingDraft";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
@@ -56,6 +71,11 @@ import {
 } from "./scoreSummary";
 import { patientApi, type PatientRecord } from "../../../api/patient.api";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import type { GenomicTestRecord } from "../../../api/genomics.api";
+import { NgsReportModal } from "./NgsReportModal";
+import { NgsReportsPanel } from "./NgsReportsPanel";
+import { GeneMasterAdminModal } from "./GeneMasterAdminModal";
+import { diagnosisCancerSite } from "./genomicsForm";
 import {
   findActiveEncounter,
   findLatestStagingDetailId,
@@ -125,6 +145,8 @@ const hasDraftContent = (raw: string): boolean => {
       "tStage",
       "nStage",
       "mStage",
+      "stages",
+      "assessmentBased",
     ];
     if (
       arrayKeys.some((key) => {
@@ -1264,6 +1286,7 @@ const EMPTY_FORM_DATA: FormData = {
   secondPrimaryDate: "",
   preDiagnosis: "",
   diseaseStatus: "",
+  assessmentBased: [],
   laterality: [],
   bodySite: [],
   survivor: "",
@@ -1277,6 +1300,8 @@ const EMPTY_FORM_DATA: FormData = {
   tStage: [],
   nStage: [],
   mStage: [],
+  stages: [],
+  stageIhc: { ...EMPTY_STAGE_IHC },
   icdCode: "",
   notes: "",
   investigationReportDate: "",
@@ -1306,6 +1331,9 @@ const normalizeStoredForm = (data: Partial<FormData>): Partial<FormData> => ({
   tStage: asStringArray(data.tStage),
   nStage: asStringArray(data.nStage),
   mStage: asStringArray(data.mStage),
+  stages: normalizeStageDrafts(data.stages),
+  stageIhc: normalizeStageIhc(data.stageIhc),
+  assessmentBased: asStringArray(data.assessmentBased),
   valueEdits:
     data.valueEdits &&
     typeof data.valueEdits === "object" &&
@@ -1394,6 +1422,8 @@ const formStateSignature = (state: DiagnosisFormState) => {
         ];
       }
       if (key === "cancerTypes") return [key, asStringArray(value)];
+      if (key === "stages") return [key, JSON.stringify(value ?? [])];
+      if (key === "stageIhc") return [key, JSON.stringify(value ?? {})];
       if (Array.isArray(value)) return [key, value.map(String).sort()];
       return [key, typeof value === "string" ? value.trim() : value ?? ""];
     });
@@ -1742,6 +1772,14 @@ const Diagnosis: React.FC<{
     string | null
   >(null);
 
+  /* NGS / genomic reports: the popup opened from the Survivor row, the row
+     being edited, and a version counter that refreshes the saved-report
+     cards after every save/delete. */
+  const [ngsModalOpen, setNgsModalOpen] = useState(false);
+  const [ngsEditing, setNgsEditing] = useState<GenomicTestRecord | null>(null);
+  const [ngsVersion, setNgsVersion] = useState(0);
+  const [geneMasterOpen, setGeneMasterOpen] = useState(false);
+
   /* Pinned scores, kept per browser (not per patient - a doctor's favourite
      scores are the same whichever patient is open). */
   const [favouriteScores, setFavouriteScores] = useState<string[]>(() => {
@@ -1885,6 +1923,15 @@ const Diagnosis: React.FC<{
     null
   );
 
+  /* p16 / p40 changes on a later IHC report invalidate a saved schema; the
+     server returns the banners with the stage records. */
+  const [stagingAlerts, setStagingAlerts] = useState<
+    { severity: string; message: string }[]
+  >([]);
+  /* Whether the loaded staging detail already had stage records, so removing
+     the last one still clears the server copy. */
+  const stagingHadRecordsRef = useRef(false);
+
   /* The cancer type catalog, and the types whose options still have to
      load once it arrives (a prefill that landed before it). */
   const cancerTypesRef = useRef<CancerTypeItem[]>([]);
@@ -2015,6 +2062,24 @@ const Diagnosis: React.FC<{
             : undefined;
           if (visitDate && onVisitDateChange) {
             onVisitDateChange(formatPickedDate(visitDate));
+          }
+        }
+
+        /* Stage records are the authority (form_state can lag behind a
+           second browser), so the card is filled from them. A same-visit
+           draft keeps the doctor's unsaved work instead. */
+        if (sourceStagingId) {
+          try {
+            const staged = await stagingApi.records(sourceStagingId);
+            if (cancelled) return;
+            setStagingAlerts(staged.alerts ?? []);
+            if (!keepDraft && staged.records.length > 0) {
+              const drafts = stageRecordsToDrafts(staged.records);
+              setFormData((previous) => ({ ...previous, stages: drafts }));
+            }
+            stagingHadRecordsRef.current = staged.records.length > 0;
+          } catch (stageError) {
+            console.error("Failed to load the saved stage records:", stageError);
           }
         }
         localStorage.setItem(
@@ -2371,6 +2436,10 @@ const Diagnosis: React.FC<{
   >([]);
   const [investigationVisitNo, setInvestigationVisitNo] = useState("");
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
+  /* Lab-test master names offered as assessment-based options. Loaded once
+     on mount from /lab-test-master (no oncology reference route exists for
+     them); the doctor can also type a value that isn't in the list. */
+  const [labTestOptions, setLabTestOptions] = useState<string[]>([]);
   /* Metastasis Sites aren't in the draft: kept with the visit context so
      they survive switching steps (once the context belongs to this visit). */
   useEffect(() => {
@@ -2837,6 +2906,36 @@ const Diagnosis: React.FC<{
 
   useEffect(() => {
     let cancelled = false;
+    labTestMasterApi.getAll()
+      .then((response) => {
+        if (cancelled) return;
+        const names = (response.data.data ?? [])
+          .map((record: LabTestMasterRecord) => record.test_name)
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        /* De-duplicate case-insensitively. */
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        for (const name of names) {
+          const key = name.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(name);
+          }
+        }
+        setLabTestOptions(deduped);
+      })
+      .catch((error) => {
+        console.error("Failed to load lab tests:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
 
     loadDiagnosisCatalog()
       .then((diagnoses) => {
@@ -2943,6 +3042,14 @@ const Diagnosis: React.FC<{
       : formData.type
         ? [formData.type]
         : [];
+
+  /* The staging card's blocks, in selection order (primary first). */
+  const stagingCancerTypes = optionTypes
+    .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+    .filter(
+      (item): item is CancerTypeItem => Boolean(item?.cancer_type_id)
+    )
+    .map((item) => ({ id: item.cancer_type_id, name: item.cancer_type }));
 
   /* "<Type>|<label>" values in the order their cancer types were selected
      (not the order they were ticked); within one type the ticked order
@@ -3487,6 +3594,13 @@ const Diagnosis: React.FC<{
 
     const stageText = primaryValue(formData.cancerStage);
 
+    /* The staging card is the source of the stage now; the legacy arrays are
+       only a fallback for drafts saved before it existed. */
+    const cancerTypeId =
+      cancerTypes.find((item) => item.cancer_type === primaryType)
+        ?.cancer_type_id ?? "";
+    const stageMirror = stageMirrorValues(formData.stages, cancerTypeId);
+
     const derivedScores: AutoFillContext["derivedScores"] = {};
     const selectedScoreItems = orderByType(formData.score)
       .map((value) => scoreItemOf(value))
@@ -3518,13 +3632,73 @@ const Diagnosis: React.FC<{
       diastolic: toNumberOrNull(autoFillEncounter?.diastolic_bp),
       labs: buildAutoFillLabs(),
       stageNumber: stageNumberFromText(stageText),
-      stageText,
-      tStage: primaryValue(formData.tStage),
-      nStage: primaryValue(formData.nStage),
-      mStage: primaryValue(formData.mStage),
+      stageText: stageMirror.stage ?? stageText,
+      tStage: stageMirror.t ?? primaryValue(formData.tStage),
+      nStage: stageMirror.n ?? primaryValue(formData.nStage),
+      mStage: stageMirror.m ?? primaryValue(formData.mStage),
       derivedScores,
     };
   };
+
+  /* Values the staging card can pre-fill: age, PSA, prostate grade group,
+     histologic grade and the NET primary site. The clinician confirms each
+     one in the card. */
+  const stagingAutofill: StagingAutofill = React.useMemo(() => {
+    const primaryType = selectedCancerTypes[0] ?? formData.type ?? "";
+    const firstFor = (values: string[]): string | null => {
+      const ordered = orderByType(values);
+      const match =
+        ordered.find(
+          (value) =>
+            !primaryType || splitQualified(value).cancerType === primaryType
+        ) ?? ordered[0];
+      return match ? splitQualified(match).raw : null;
+    };
+
+    const labs = buildAutoFillLabs();
+
+    let gradeGroup: string | null = null;
+    for (const value of orderByType(formData.score)) {
+      const item = scoreItemOf(value);
+      const definition = item ? scoreDefinitions[item.score_id] : undefined;
+      const assessment = item ? scoreAssessments[item.score_id] : undefined;
+      if (!definition || !assessment) continue;
+      if (
+        !/grade group|gleason/i.test(
+          `${definition.name} ${definition.method ?? ""}`
+        )
+      ) {
+        continue;
+      }
+      const evaluation = evaluateScore(definition, assessment);
+      const digits = String(evaluation.groupLabel ?? "").match(/\b([1-5])\b/);
+      if (digits) {
+        gradeGroup = digits[1];
+        break;
+      }
+    }
+
+    return {
+      age: patientAge(autoFillPatient),
+      psa: labs.psa?.value ?? null,
+      gradeGroup,
+      grade: firstFor(formData.grade),
+      site: firstFor(formData.bodySite),
+      ki67: labs.ki67?.value ?? null,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    autoFillPatient,
+    formData.bodySite,
+    formData.grade,
+    formData.score,
+    formData.type,
+    formData.investigationResults,
+    investigationHistory,
+    selectedCancerTypes,
+    scoreDefinitions,
+    scoreAssessments,
+  ]);
 
   /* Live derivation: once a source score is complete (B01 for NPI's Grade,
      M01 for the IPI scores, ...), fill the linked variable immediately
@@ -3945,6 +4119,21 @@ const Diagnosis: React.FC<{
       handleMultiToggle(field)(`${cancerType}|${row.stage_value}`, true);
     };
 
+  const handleCreateAssessmentBased = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const exists = labTestOptions.some(
+      (option) => option.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (exists) return;
+    setFormData((previous) => {
+      const current = previous.assessmentBased ?? [];
+      if (current.some((value) => value.toLowerCase() === trimmed.toLowerCase()))
+        return previous;
+      return { ...previous, assessmentBased: [...current, trimmed] };
+    });
+  };
+
   const handleAddDiseaseStatus = async (text: string) => {
     const row = await addReferenceValue<DiseaseStatusItem>("disease-statuses", {
       value: text,
@@ -4209,23 +4398,29 @@ const Diagnosis: React.FC<{
     }
 
     /* What is saved for the text columns: the doctor's wording of each
-       picked value. */
-    const clinicalStageText = joinLabels(
-      "cancerStage",
-      orderByType(formData.cancerStage)
-    );
+       picked value. The stage comes from the Staging card; the server
+       overwrites this mirror with its own authoritative copy when the stage
+       records are saved. */
+    const primaryTypeId =
+      cancerTypes.find((item) => item.cancer_type === formData.type)
+        ?.cancer_type_id ?? "";
+    const primaryMirror = stageMirrorValues(formData.stages, primaryTypeId);
+    const clinicalStageText = primaryMirror.stage
+      ? `Stage ${primaryMirror.stage}`
+      : "";
     const siteText = joinLabels("bodySite", orderByType(formData.bodySite));
     const gradeText = joinLabels("grade", orderByType(formData.grade));
     const scoreText = joinLabels("score", orderByType(formData.score));
     const diseaseStatusText = formData.diseaseStatus
       ? labelOf("diseaseStatus", formData.diseaseStatus)
       : "";
+    const assessmentBasedText = formData.assessmentBased.join(", ");
     const tooLong = (
       [
-        ["Cancer Stage", clinicalStageText],
         ["Body Site", siteText],
         ["Grade", gradeText],
         ["Disease Status", diseaseStatusText],
+        ["Assessment Based", assessmentBasedText],
       ] as const
     ).find(([, text]) => text.length > 100);
     if (tooLong) {
@@ -4252,19 +4447,22 @@ const Diagnosis: React.FC<{
         .filter((item): item is CancerTypeItem =>
           Boolean(item?.cancer_type_id)
         )
-        .map((item) => ({
-          cancer_type_id: item.cancer_type_id,
-          cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
-          histopathology: histopathologyFor(item.cancer_type),
-          laterality: lateralityFor(item.cancer_type) ?? null,
-          t_stage: valueFor(formData.tStage, item.cancer_type, "tStage") ?? null,
-          n_stage: valueFor(formData.nStage, item.cancer_type, "nStage") ?? null,
-          m_stage: valueFor(formData.mStage, item.cancer_type, "mStage") ?? null,
-        }));
+        .map((item) => {
+          const codes = stageRuleCodesFor(formData.stages, item.cancer_type_id);
+          return {
+            cancer_type_id: item.cancer_type_id,
+            cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
+            histopathology: histopathologyFor(item.cancer_type),
+            laterality: lateralityFor(item.cancer_type) ?? null,
+            t_stage: codes.t,
+            n_stage: codes.n,
+            m_stage: codes.m,
+          };
+        });
 
-      const primaryTStage = valueFor(formData.tStage, formData.type, "tStage");
-      const primaryNStage = valueFor(formData.nStage, formData.type, "nStage");
-      const primaryMStage = valueFor(formData.mStage, formData.type, "mStage");
+      const primaryTStage = primaryMirror.t;
+      const primaryNStage = primaryMirror.n;
+      const primaryMStage = primaryMirror.m;
       const primaryLaterality = lateralityFor(formData.type);
 
       const diagnosisId = await resolveDiagnosisId(
@@ -4402,11 +4600,20 @@ const Diagnosis: React.FC<{
       };
       /* null = empty: clears the value when this visit's row is updated
          (e.g. a value unticked), left out when a new row is created. */
+      /* The stage columns are only written when this visit actually records a
+         stage: an older staging detail keeps its legacy stage text if the
+         doctor saves the form without opening the staging card. The stage
+         records' own mirror (below) is authoritative when they exist. */
+      const stageFields =
+        formData.stages.length > 0
+          ? {
+              clinical_stage: clinicalStageText || null,
+              t_stage: primaryTStage || null,
+              n_stage: primaryNStage || null,
+              m_stage: primaryMStage || null,
+            }
+          : {};
       const clearableFields: Record<string, unknown> = {
-        clinical_stage: clinicalStageText || null,
-        t_stage: primaryTStage || null,
-        n_stage: primaryNStage || null,
-        m_stage: primaryMStage || null,
         metastasis_sites: metastasisSites.length > 0 ? metastasisSites : null,
         pre_diagnosis: formData.preDiagnosis || null,
         disease_status: diseaseStatusText || null,
@@ -4464,7 +4671,7 @@ const Diagnosis: React.FC<{
         try {
           await API.put(
             `/oncology/staging-details/${existingStagingDetailId}`,
-            { ...stagingFields, ...clearableFields }
+            { ...stagingFields, ...stageFields, ...clearableFields }
           );
         } catch (updateError: any) {
           if (updateError?.response?.status === 404) {
@@ -4483,6 +4690,7 @@ const Diagnosis: React.FC<{
           patient_id: resolvedPatientId,
           ...(visitEncounterNo ? { encounter_no: visitEncounterNo } : {}),
           ...stagingFields,
+          ...stageFields,
           ...Object.fromEntries(
             Object.entries(clearableFields).filter(([, value]) => value !== null)
           ),
@@ -4491,6 +4699,38 @@ const Diagnosis: React.FC<{
       }
 
       if (stagingDetailId) {
+        /* The server re-derives every stage (so the stored group cannot
+           disagree with the rules), mirrors the definitive one onto the
+           legacy columns and moves anything the card no longer shows to
+           history. */
+        const stageRecords = stageSavePayload(formData.stages);
+        if (stageRecords.length > 0 || stagingHadRecordsRef.current) {
+          await stagingApi.saveRecords(stagingDetailId, stageRecords, true);
+          stagingHadRecordsRef.current = stageRecords.length > 0;
+          setStagingAlerts([]);
+        }
+
+        /* p16 / p40 typed beside the card go on the IHC report. Best effort:
+           recording a stage does not require the IHC permission. */
+        const ihcDraft = formData.stageIhc;
+        if (ihcDraft.p16Status || ihcDraft.p40Status || ihcDraft.p16Percent) {
+          try {
+            await stagingApi.saveIhc(stagingDetailId, {
+              p16_status: ihcDraft.p16Status || null,
+              p16_percent:
+                ihcDraft.p16Percent === ""
+                  ? null
+                  : Number(ihcDraft.p16Percent),
+              p40_status: ihcDraft.p40Status || null,
+            });
+          } catch (ihcError: any) {
+            console.error(
+              "Failed to save p16/p40 beside the stage:",
+              ihcError?.response?.data?.message ?? ihcError?.message
+            );
+          }
+        }
+
         baselineRef.current = {
           stagingDetailId,
           ownVisit: unchanged ? baseline.ownVisit : true,
@@ -4771,7 +5011,7 @@ const Diagnosis: React.FC<{
               htmlFor="preDiagnosis"
               className="mb-2 block text-[10px] font-bold text-gray-900"
             >
-              Pre Diagnosis
+              Provision Diagnosis
             </label>
 
             <div className="relative">
@@ -4783,6 +5023,34 @@ const Diagnosis: React.FC<{
                 onChange={handleChange}
                 placeholder="Type the pre diagnosis..."
                 className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-[10px] text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Assessment Based */}
+          <div>
+            <label
+              htmlFor="assessmentBased"
+              className="mb-2 block text-[10px] font-bold text-gray-900"
+            >
+              Assessment Based
+            </label>
+
+            <div className="relative">
+              <MultiSelectDropdown
+                options={labTestOptions.map((name) => ({
+                  label: name,
+                  value: name,
+                }))}
+                value={formData.assessmentBased}
+                onValueChange={(values) =>
+                  setFormData((previous) => ({
+                    ...previous,
+                    assessmentBased: values,
+                  }))
+                }
+                onCreateOption={handleCreateAssessmentBased}
+                placeholder="Select or add a lab test..."
               />
             </div>
           </div>
@@ -4892,17 +5160,7 @@ const Diagnosis: React.FC<{
             </div>
           </div>*/}
 
-          {/* Cancer Stage */}
-          <DiagnosisCheckboxList
-            title="Cancer Stage"
-            groups={buildCheckboxGroups(stageLabels)}
-            selected={orderByType(formData.cancerStage)}
-            onToggle={handleMultiToggle("cancerStage")}
-            loading={diagnosisLoading}
-            addTypes={optionTypes}
-            onAdd={handleAddStage}
-            {...editProps("cancerStage")}
-          />
+          {/* Cancer Stage is derived by the Staging card below. */}
 
           {/* Grade */}
           <DiagnosisCheckboxList
@@ -4955,48 +5213,34 @@ const Diagnosis: React.FC<{
           />
 
           {/* TNM Staging */}
-          <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
-            {/* T Stage */}
-            <DiagnosisCheckboxList
-              title="T Stage"
-              groups={buildCheckboxGroups(tOptions)}
-              selected={orderByType(formData.tStage)}
-              onToggle={handleMultiToggle("tStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("T")}
-              {...editProps("tStage")}
-            />
-
-{/* N Stage */}
-            <DiagnosisCheckboxList
-              title="N Stage"
-              groups={buildCheckboxGroups(nOptions)}
-              selected={orderByType(formData.nStage)}
-              onToggle={handleMultiToggle("nStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("N")}
-              {...editProps("nStage")}
-            />
-
-            {/* M Stage */}
-            <DiagnosisCheckboxList
-              title="M Stage"
-              groups={buildCheckboxGroups(mOptions)}
-              selected={orderByType(formData.mStage)}
-              onToggle={handleMultiToggle("mStage")}
-              loading={diagnosisLoading}
-              addTypes={optionTypes}
-              onAdd={handleAddTnm("M")}
-              {...editProps("mStage")}
-            />
-          </div>
+          <StagingCard
+            patientId={resolvedPatientId}
+            cancerTypes={stagingCancerTypes}
+            value={formData.stages}
+            onChange={(next) =>
+              setFormData((previous) => ({ ...previous, stages: next }))
+            }
+            autofill={stagingAutofill}
+            defaultStageDate={
+              toDateInputValue(formData.diagnosisDate) || undefined
+            }
+            disabled={savingDiagnosis}
+            ihc={formData.stageIhc}
+            onIhcChange={(next) =>
+              setFormData((previous) => ({ ...previous, stageIhc: next }))
+            }
+            alerts={stagingAlerts}
+          />
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
-          {formData.mStage.some((stage) =>
-            labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
-          ) && (
+          {(formData.stages.some((record) =>
+            String(record.derived?.mCode ?? record.m ?? "")
+              .toUpperCase()
+              .startsWith("M1")
+          ) ||
+            formData.mStage.some((stage) =>
+              labelOf("mStage", stage).trim().toUpperCase().startsWith("M1")
+            )) && (
             <div className="col-span-full">
               <label className="mb-2 block text-[10px] font-bold text-gray-900">
                 Metastasis Sites
@@ -5038,46 +5282,81 @@ const Diagnosis: React.FC<{
             />
           </div>
 
-          {/* Survivor */}
-          <div>
-            <label className="mb-2 block text-[10px] font-bold text-gray-900">
-              Survivor
-            </label>
+          {/* Survivor + NGS report entry point */}
+          <div className="flex flex-wrap items-end justify-between gap-3 sm:col-span-2">
+            <div>
+              <label className="mb-2 block text-[10px] font-bold text-gray-900">
+                Survivor
+              </label>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "Yes"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "Yes" ? "" : "Yes",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                Yes
-              </label>
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
-                <input
-                  type="checkbox"
-                  name="survivor"
-                  checked={formData.survivor === "No"}
-                  onChange={() =>
-                    setFormData((previous) => ({
-                      ...previous,
-                      survivor: formData.survivor === "No" ? "" : "No",
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
-                />
-                No
-              </label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "Yes"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "Yes" ? "" : "Yes",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  Yes
+                </label>
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="survivor"
+                    checked={formData.survivor === "No"}
+                    onChange={() =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        survivor: formData.survivor === "No" ? "" : "No",
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                  />
+                  No
+                </label>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setNgsEditing(null);
+                setNgsModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#004785] bg-white px-3.5 py-2 text-[11px] font-bold text-[#004785] shadow-sm transition-all hover:bg-[#F2F4F6] active:scale-[0.98]"
+            >
+              <span className="text-[14px] leading-none">+</span> Add NGS report
+            </button>
           </div>
         </div>
+
+        <NgsReportModal
+          open={ngsModalOpen}
+          onClose={() => {
+            setNgsModalOpen(false);
+            setNgsEditing(null);
+          }}
+          patientId={resolvedPatientId}
+          encounterNo={encounterNo}
+          stagingDetailId={currentStagingDetailId || null}
+          defaultCancerSite={diagnosisCancerSite(
+            formData.type,
+            joinLabels("subType", orderByType(formData.subType))
+          )}
+          editing={ngsEditing}
+          onSaved={() => setNgsVersion((version) => version + 1)}
+        />
+
+        <GeneMasterAdminModal
+          open={geneMasterOpen}
+          onClose={() => setGeneMasterOpen(false)}
+        />
 
         {/* Diagnosis API Error */}
         {diagnosisError && (
@@ -5231,6 +5510,23 @@ const Diagnosis: React.FC<{
           )}
         </div>
 
+           {/* NGS / genomic reports saved against this visit + diagnosis */}
+        <div className="mt-6">
+          <NgsReportsPanel
+            patientId={resolvedPatientId}
+            refreshKey={ngsVersion}
+            onAdd={() => {
+              setNgsEditing(null);
+              setNgsModalOpen(true);
+            }}
+            onEdit={(test) => {
+              setNgsEditing(test);
+              setNgsModalOpen(true);
+            }}
+            onChanged={() => setNgsVersion((version) => version + 1)}
+            onManageGenes={() => setGeneMasterOpen(true)}
+          />
+        </div>
         {/* Footer Action */}
         <div className="mt-12 flex justify-end">
           <button

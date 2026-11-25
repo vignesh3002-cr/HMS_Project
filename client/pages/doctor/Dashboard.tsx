@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { getActiveTimezone, getTodayInActiveTimezone } from "@/utils/timezone";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getActiveBranchId } from "../../api/axios";
 import {
@@ -13,13 +14,14 @@ import { encounterApi } from "../../api/encounter.api";
 import { ipdApi } from "../../api/ipd.api";
 import { chemotherapyApi } from "../../api/chemotherapy.api";
 import { getUser } from "../../utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 import { useToast } from "@/hooks/use-toast";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
 
-type AppointmentStatus = "Check Out" | "Check In" | "Cancelled" | "Admitted";
+type AppointmentStatus = "Check Out" | "Check In" | "Cancelled" | "Admitted" | "No Show";
 
 interface Appointment {
   patientId: string;
@@ -32,11 +34,22 @@ interface Appointment {
   status: AppointmentStatus;
   appointmentId: string;
   originalStatus: string;
+  /** True when the row is only DISPLAYED as "No Show" because its date is
+   *  before today (branch timezone). `originalStatus` stays the stored value. */
+  derivedNoShow: boolean;
   visit_type: string;
   hasEncounter: boolean;
   /* Set only for an inpatient row: the admission's own encounter, which the
      consultation opens on directly (no appointment involved). */
   encounterNo?: string;
+}
+
+/** Status every action on this page must agree with: the stored status, except
+ *  for a past appointment which is only DISPLAYED as "No Show" (frontend-only). */
+function effectiveRawStatus(
+  a: Pick<Appointment, "originalStatus" | "derivedNoShow">,
+): string {
+  return a.derivedNoShow ? "NO_SHOW" : a.originalStatus;
 }
 
 const fallbackHospital = "HMS Main Hospital";
@@ -216,6 +229,12 @@ function statusClasses(status: AppointmentStatus) {
     return "border border-amber-200 bg-amber-100 text-amber-700";
   }
 
+  // Display-only past-appointment status -- neutral grey, never the red used
+  // for an unexpected value.
+  if (status === "No Show") {
+    return "border border-slate-300 bg-slate-100 text-slate-600";
+  }
+
   return "border border-red-200 bg-red-100 text-red-700";
 }
 
@@ -227,6 +246,7 @@ function formatDate(value: string) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -262,10 +282,9 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
 }
 
 function isBeforeToday(dateStr: string): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const apptDate = new Date(dateStr);
-  return apptDate < today;
+  // "Before today" = earlier than TODAY IN THE BRANCH'S timezone, never the
+  // viewer's laptop calendar.
+  return String(dateStr).slice(0, 10) < getTodayInActiveTimezone();
 }
 
 function timeAgo(iso: string): string {
@@ -532,9 +551,15 @@ export default function DoctorDashboard() {
             appointmentDate: item.appointment_date,
             appointmentTime: item.appointment_time,
             phone: item.patient_bio_data?.patient_primary_mobile || "-",
-            status: item.status as AppointmentStatus,
+            // Display-only: dated before today (branch timezone) reads as
+            // "No Show"; originalStatus keeps the stored value, nothing is
+            // written back to the API or the database.
+            status: (isPastAppointmentNoShow(item.appointment_date)
+              ? "No Show"
+              : item.status) as AppointmentStatus,
             appointmentId: item.appointment_id,
             originalStatus: item.status,
+            derivedNoShow: isPastAppointmentNoShow(item.appointment_date),
             visit_type: item.Patient_visit_type || "",
             hasEncounter: false,
           })
@@ -610,6 +635,7 @@ export default function DoctorDashboard() {
             status: "Admitted" as AppointmentStatus,
             appointmentId: "",
             originalStatus: "ADMITTED",
+            derivedNoShow: false,
             visit_type: "Inpatient",
             hasEncounter: true,
             encounterNo: a.encounter_no ?? undefined,
@@ -697,6 +723,7 @@ export default function DoctorDashboard() {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: getActiveTimezone(),
   });
 
   const doctorId = doctor?.employee?.employee_id || "-";
@@ -779,7 +806,7 @@ export default function DoctorDashboard() {
 
             <div className="flex items-center gap-2 pl-2">
               <span className="font-['Manrope',sans-serif] text-xs font-bold tracking-[0.6px] text-[#434654]">
-                {new Date().toLocaleDateString()}
+                {new Date().toLocaleDateString(undefined, { timeZone: getActiveTimezone() })}
               </span>
 
               <Icon
@@ -947,10 +974,11 @@ export default function DoctorDashboard() {
                 <tbody>
                   {dashboardAppointments.map((appointment) => {
                     const crit = getCriticalInfo(appointment.patientId);
+                    const rawStatus = effectiveRawStatus(appointment);
                     return (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
-                      onClick={appointment.originalStatus === "IN_CONSULTATION" ? () => void handleProceed(appointment) : undefined}
+                      onClick={rawStatus === "IN_CONSULTATION" ? () => void handleProceed(appointment) : undefined}
                       className={`relative cursor-pointer transition hover:bg-slate-50`}
                     >
                       <td className="h-[50px] border-b border-slate-100 px-5 py-2 text-xs text-slate-600 relative">
@@ -1013,7 +1041,7 @@ export default function DoctorDashboard() {
                       </td>
 
                       <td className="h-[50px] border-b border-slate-100 px-4 py-2 text-center">
-                        {(appointment.originalStatus === "SCHEDULED"|| appointment.originalStatus === "RESCHEDULED" || appointment.originalStatus === "NOT_CHECKED_IN") && !appointment.hasEncounter && (
+                        {(rawStatus === "SCHEDULED" || rawStatus === "RESCHEDULED" || rawStatus === "NOT_CHECKED_IN") && !appointment.hasEncounter && (
                           <button
                             type="button"
                             onClick={() => handleCheckIn(appointment.appointmentId)}
@@ -1033,7 +1061,7 @@ export default function DoctorDashboard() {
                           )}
                           </button>
                         )}
-                        {((appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") || appointment.hasEncounter) && (
+                        {((rawStatus === "IN_CONSULTATION" || rawStatus === "CHECKED_IN") || appointment.hasEncounter) && (
                           <button
                             type="button"
                             disabled={proceedingKey === (appointment.appointmentId || appointment.encounterNo)}
