@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import CalendarPicker from "@/components/hms/Calender";
@@ -305,12 +306,41 @@ export default function Doctor() {
     handleClearFilter();
   };
  
-  // Real doctors fetched from the backend
-  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
-  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
   const [showDeactivated, setShowDeactivated] = useState(false);
 
-  // Per-doctor slot booking summary for the selected date (list view progress bar)
+  // Real doctors fetched from the backend via useQuery (cached, no refetch on nav)
+  const doctorsQuery = useQuery<EmployeeRecord[]>({
+    queryKey: [
+      "doctors",
+      isAllBranches ? undefined : selectedBranchId,
+      showDeactivated,
+      dayKeyOf(selectedDate),
+    ],
+    queryFn: async () => {
+      const res = await employeeApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
+        includeDeleted: showDeactivated,
+        // Pass the selected date so the backend computes doctor_status
+        // (Active/Leave/Inactive) and the day's total_slots/booked_count.
+        date: dayKeyOf(selectedDate),
+      });
+      const allEmployees = res.data?.data?.employees || [];
+      const me = getUser();
+      const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
+        String(me?.role_type ?? "").toUpperCase()
+      );
+      return allEmployees.filter(
+        (e) =>
+          e.user_table?.role_type === "DOCTOR" &&
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
+          (showDeactivated ? !!e.deleted_at : !e.deleted_at)
+      );
+    },
+  });
+
+  const realDoctors = doctorsQuery.data ?? null;
+  const isDoctorsLoading = doctorsQuery.isLoading;
   const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
   const [slotTimes, setSlotTimes] = useState<Record<string, Array<{branchId:string; branchName:string; times:string[]}>>>({});
 
@@ -369,55 +399,6 @@ export default function Doctor() {
     }
     handleApplyFilter();
   }, [searchParams, setSearchParams, filterValues.status, statusParam, handleApplyFilter]);
-
-  const fetchDoctors = useCallback(async () => {
-    setIsDoctorsLoading(true);
-    console.log("[Doctor Page] Fetching all employees from employeeApi...");
-    try {
-      const res = await employeeApi.getAll({
-        branchId: isAllBranches ? undefined : selectedBranchId,
-        limit: 1000,
-        includeDeleted: showDeactivated,
-        // Pass the selected date so the backend computes doctor_status
-        // (Active/Leave/Inactive) and the day's total_slots/booked_count.
-        date: dayKeyOf(selectedDate),
-      });
-      console.log("[Doctor Page] Response:", res.data);
-      const allEmployees = res.data?.data?.employees || [];
-      const me = getUser();
-      const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
-        String(me?.role_type ?? "").toUpperCase()
-      );
-      const doctors = allEmployees.filter(
-        (e) =>
-          e.user_table?.role_type === "DOCTOR" &&
-          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
-          (showDeactivated ? !!e.deleted_at : !e.deleted_at)
-      );
-      setRealDoctors(doctors);
-      if (doctors.length === 0) {
-        toast({
-          title: "No doctor records found",
-          description: "The employees API returned no doctor records.",
-        });
-      }
-    } catch (err: any) {
-      console.error("[Doctor Page] Error:", err);
-      console.error("[Doctor Page] Error response:", err.response?.data);
-      console.error("[Doctor Page] Error status:", err.response?.status);
-      toast({
-        title: "Failed to load doctors",
-        description: err.response?.data?.message || "Couldn't reach the employees API.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsDoctorsLoading(false);
-    }
-  }, [toast, selectedBranchId, isAllBranches, showDeactivated, selectedDate]);
- 
-useEffect(() => {
-    fetchDoctors();
-  }, [fetchDoctors]);
 
   // Fetch each doctor's booked/total slot counts for the selected single day
   // (list view only). Total slots = the doctor's real working-hours
@@ -578,7 +559,7 @@ useEffect(() => {
         description: `Doctor ${restoreTarget} has been reactivated.`,
       });
       setRestoreTarget(null);
-      fetchDoctors();
+      doctorsQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to restore doctor",
@@ -603,7 +584,7 @@ useEffect(() => {
         description: `Doctor ${deleteTarget} has been deactivated.`,
       });
       setDeleteTarget(null);
-      fetchDoctors();
+      doctorsQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to deactivate doctor",
@@ -786,7 +767,7 @@ useEffect(() => {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
-                <RefreshButton onClick={fetchDoctors} isLoading={isDoctorsLoading} />
+                <RefreshButton onClick={() => doctorsQuery.refetch()} isLoading={isDoctorsLoading} />
               </div>
             </div>
 

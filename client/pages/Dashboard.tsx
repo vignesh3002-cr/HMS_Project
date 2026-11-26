@@ -32,7 +32,7 @@ import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
 import type { CriticalInfo } from "@/components/hms/CriticalPatientIndicator";
 import { WardOccupancyWidget } from "@/components/hms/dashboard/WardOccupancyWidget";
-import { SystemIntegrityWidget } from "@/components/hms/dashboard/SystemIntegrityWidget";
+import { PatientClinicalAlertsWidget } from "@/components/hms/dashboard/PatientClinicalAlertsWidget";
 import { AdminQuickActionToolbar } from "@/components/hms/dashboard/AdminQuickActionToolbar";
 import { KpiSection } from "@/components/hms/dashboard/KpiSection";
 
@@ -1857,21 +1857,19 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Bottom Grid */}
+          {/* Bottom Grid -- Branch Performance & Patient Care & Safety */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-            {/* Branch Performance -- extracted into its own component (incl. Bar/Pie toggle) */}
+            {/* Branch Performance */}
             {can("appointment.read") && (
-            <BranchPerformance selectedDate={selectedDate} />
+              <BranchPerformance selectedDate={selectedDate} />
             )}
 
-            {/* System Integrity Control Center */}
-            <SystemIntegrityWidget
+            {/* Patient Clinical Safety & Priority Queue */}
+            <PatientClinicalAlertsWidget
               criticalPatientCount={criticalPatientCount}
-              doctorsOnLeave={doctorsOnLeave}
               unassignedApptsCount={unassignedApptsCount}
               onFilterCritical={() => {
-                setActiveTab("appointments");
-                setCurrentPage(1);
+                navigate("/patients?critical=true");
               }}
             />
           </div>

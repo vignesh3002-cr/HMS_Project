@@ -26,7 +26,7 @@ import { DiscontinuePlanDialog } from "@/components/chemo/DiscontinuePlanDialog"
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
 import { useBranchFilter } from "@/context/BranchFilterContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { downloadExportPdf } from "@/lib/exportPdf";
 import { getUser } from "@/utils/token";
 import { chemotherapyApi, type ChemoPlan } from "@/api/chemotherapy.api";
@@ -338,6 +338,22 @@ export default function OrderMaster() {
     handleClear: handleFilterClear,
     setAppliedFilter,
   } = useFilterPanel(orderFilterFields);
+
+  const location = useLocation();
+
+  // Auto-apply traditional filter when navigating with ?patient=<name> or ?protocol=<code>
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const patientParam = params.get("patient") || (location.state as any)?.filterPatient;
+    const protocolParam = params.get("protocol") || (location.state as any)?.filterProtocol;
+    if (patientParam) {
+      setAppliedFilter("patient", [patientParam]);
+      setCurrentPage(1);
+    } else if (protocolParam) {
+      setAppliedFilter("protocol", [protocolParam]);
+      setCurrentPage(1);
+    }
+  }, [location.search, location.state]);
 
   const handleApplyFilter = () => {
     handleFilterApply();

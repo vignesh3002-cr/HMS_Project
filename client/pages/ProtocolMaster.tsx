@@ -281,6 +281,16 @@ export default function ProtocolMaster() {
     removeAppliedFilter,
   } = useFilterPanel(protocolFilterFields);
 
+  // Auto-apply traditional filter when navigating with ?protocol=<id>
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const protocolParam = params.get("protocol") || (location.state as any)?.filterProtocol;
+    if (protocolParam) {
+      setAppliedFilter("protocol", [protocolParam]);
+      setCurrentPage(1);
+    }
+  }, [location.search, location.state]);
+
   const [sortField, setSortField] = useState("updated_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday } from "date-fns";
 import { getTodayInActiveTimezone, formatInBranchTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
@@ -980,20 +981,15 @@ export default function AppointmentPage() {
     };
   }, []);
 
-  const fetchAbortRef = useRef<AbortController | null>(null);
-
-  const fetchAppointments = useCallback(async () => {
-    if (!resolved || ownEmployeeIds.length === 0) return;
-
-    fetchAbortRef.current?.abort();
-    const controller = new AbortController();
-    fetchAbortRef.current = controller;
-
-    try {
-      setIsLoading(true);
-      setLoadError(false);
-      setLoadErrorMsg("");
-
+  const appointmentsQuery = useQuery<Patient[]>({
+    queryKey: [
+      "appointments",
+      targetDoctorId,
+      branchIds ? JSON.stringify(branchIds) : null,
+      selectedDateKey,
+      ownEmployeeIds.length,
+    ],
+    queryFn: async () => {
       const employeeId = targetDoctorId ?? getUser()?.employee_id ?? undefined;
       const primaryBranchId =
         getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
@@ -1007,7 +1003,7 @@ export default function AppointmentPage() {
           date: selectedDateKey,
           page: 1,
           limit: 100,
-        }, { signal: controller.signal });
+        });
         const data = first.data?.data;
         const items = data?.appointments ?? [];
         const extraPages = Array.from(
@@ -1020,7 +1016,7 @@ export default function AppointmentPage() {
                 date: selectedDateKey,
                 page: index + 2,
                 limit: 100,
-              }, { signal: controller.signal })
+              })
               .catch(() => null),
         );
         const rest = await Promise.all(extraPages);
@@ -1062,30 +1058,27 @@ export default function AppointmentPage() {
           (y.appointment_date ?? "").localeCompare(x.appointment_date ?? ""),
         );
 
-      setPatients(ownAppointments.map(toPatient));
-    } catch (err: any) {
-      if (err?.name === "CanceledError" || err?.name === "AbortError") return;
-      console.error(
-        "[AppointmentPage] Failed to load appointments:",
-        err
-      );
-      setLoadError(true);
-      setLoadErrorMsg(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Failed to load appointments."
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [resolved, targetDoctorId, branchIds, ownEmployeeIds, selectedDateKey]);
+      return ownAppointments.map(toPatient);
+    },
+    enabled: resolved && ownEmployeeIds.length > 0,
+  });
 
+  // Sync query data into existing state variables used by the rest of the component
   useEffect(() => {
-    fetchAppointments();
-    return () => {
-      fetchAbortRef.current?.abort();
-    };
-  }, [fetchAppointments]);
+    setPatients(appointmentsQuery.data ?? []);
+    setIsLoading(appointmentsQuery.isLoading);
+    setLoadError(appointmentsQuery.isError);
+    setLoadErrorMsg(
+      appointmentsQuery.error
+        ? appointmentsQuery.error.message || "Failed to load appointments."
+        : ""
+    );
+  }, [
+    appointmentsQuery.data,
+    appointmentsQuery.isLoading,
+    appointmentsQuery.isError,
+    appointmentsQuery.error,
+  ]);
 
   /* =======================================================
      ROW ACTIONS
@@ -1104,7 +1097,7 @@ export default function AppointmentPage() {
       await encounterApi.create({
         appointment_id: patient.id,
       });
-      await fetchAppointments();
+      await appointmentsQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to check in patient",
@@ -1150,7 +1143,7 @@ export default function AppointmentPage() {
         title: "Appointment cancelled",
         description: "The slot has been released.",
       });
-      await fetchAppointments();
+      await appointmentsQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to cancel appointment",
@@ -1314,8 +1307,12 @@ export default function AppointmentPage() {
       const factor = sortDirection === "asc" ? 1 : -1;
       result = [...result].sort((a: any, b: any) => {
         switch (sortField) {
-          case "token":
-            return ((a.tokenNumber ?? 999999) - (b.tokenNumber ?? 999999)) * factor;
+          case "token": {
+            if (!a.tokenNumber && !b.tokenNumber) return 0;
+            if (!a.tokenNumber) return 1;
+            if (!b.tokenNumber) return -1;
+            return String(a.tokenNumber).localeCompare(String(b.tokenNumber), undefined, { numeric: true }) * factor;
+          }
           case "age":
             return ((a.age ?? -1) - (b.age ?? -1)) * factor;
           case "appointmentDate": {
@@ -1323,7 +1320,10 @@ export default function AppointmentPage() {
               `${b.appointmentDateRaw} ${b.appointmentTimeRaw}`,
             );
             if (cmp !== 0) return cmp * factor;
-            return ((a.tokenNumber ?? 999999) - (b.tokenNumber ?? 999999)) * factor;
+            if (!a.tokenNumber && !b.tokenNumber) return 0;
+            if (!a.tokenNumber) return 1;
+            if (!b.tokenNumber) return -1;
+            return String(a.tokenNumber).localeCompare(String(b.tokenNumber), undefined, { numeric: true }) * factor;
           }
           case "status":
             return a.originalStatus.localeCompare(b.originalStatus) * factor;
@@ -1631,7 +1631,7 @@ export default function AppointmentPage() {
                 />
 
                 {/* RefreshButton */}
-                <RefreshButton onClick={fetchAppointments} isLoading={isLoading} />
+                <RefreshButton onClick={() => appointmentsQuery.refetch()} isLoading={isLoading} />
               </div>
             </div>
 
@@ -1646,7 +1646,7 @@ export default function AppointmentPage() {
                 <p>{loadErrorMsg || "Failed to load appointments."}</p>
                 <button
                   type="button"
-                  onClick={fetchAppointments}
+                  onClick={() => appointmentsQuery.refetch()}
                   className="text-blue-600 font-medium hover:underline"
                 >
                   Retry
@@ -1778,7 +1778,7 @@ export default function AppointmentPage() {
           }))}
         onSuccess={() => {
           setSandwichTarget(null);
-          fetchAppointments();
+          appointmentsQuery.refetch();
         }}
       />
     </div>

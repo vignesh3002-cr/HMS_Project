@@ -11,15 +11,17 @@ import ElasticPulse from "@/components/ui/Elasticpulse";
 import { saveToken, saveUser } from "../utils/token";
 import { Logo } from "@/components/hms/Logo";
 import { usePermission } from "@/context/PermissionContext";
+import { useAuth } from "@/context/AuthContext";
 import { Lock, Mail, Smartphone, X, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const navigate = useNavigate();
   const { refetch: refetchPermissions } = usePermission();
+  const { login: authLogin } = useAuth();
 
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [directLogin, setDirectLogin] = useState(() => {
-    return localStorage.getItem("hms_direct_login") === "true";
+    return localStorage.getItem("hms_direct_login") !== "false";
   });
 
   const toggleDirectLogin = () => {
@@ -29,8 +31,8 @@ export default function Login() {
       return next;
     });
   };
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("admin123");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
@@ -135,6 +137,7 @@ export default function Login() {
       // --------------------------------------------------
       saveToken(response.token, rememberMe);
       saveUser(response.user, rememberMe);
+      authLogin(response.token, response.user, rememberMe);
       try {
         sessionStorage.setItem("justLoggedIn", "true");
       } catch {}

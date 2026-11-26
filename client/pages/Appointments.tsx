@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Check,
   Loader2,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
@@ -36,6 +37,7 @@ import { SandwichQueueModal } from "@/components/hms/SandwichQueueModal";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
+import { cn } from "@/lib/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { downloadExportPdf } from "@/lib/exportPdf";
@@ -190,9 +192,26 @@ const AppointmentPage: React.FC = () => {
   
   const queryClient = useQueryClient();
 
-  // Date selection
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  // Date selection & URL param sync
+  const [searchParams] = useSearchParams();
+  const dateParam = searchParams.get("date");
+  const parsedDateFromUrl = useMemo(() => {
+    if (!dateParam) return null;
+    const parts = dateParam.split("-").map(Number);
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+    return null;
+  }, [dateParam]);
+
+  const [selectedDate, setSelectedDate] = useState<Date>(parsedDateFromUrl || new Date());
+
+  useEffect(() => {
+    if (parsedDateFromUrl && parsedDateFromUrl.getTime() !== selectedDate.getTime()) {
+      setSelectedDate(parsedDateFromUrl);
+    }
+  }, [parsedDateFromUrl]);
+
   const dateStr = dayKeyOf(selectedDate);
   const branchKey = isAllBranches ? "all" : (selectedBranchId || "all");
 
@@ -342,6 +361,7 @@ const AppointmentPage: React.FC = () => {
   // View type dropdown (List View / Day View / Week View)
   const [viewType, setViewType] = useState<"list" | "day" | "week">("list");
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
 
@@ -450,11 +470,23 @@ const AppointmentPage: React.FC = () => {
   const visibleEnd = Math.min(endIndex, totalRecords);
 
   if (viewType === "day") {
-    return <DayView onViewChange={setViewType} />;
+    return (
+      <DayView
+        onViewChange={setViewType}
+        initialDate={selectedDate}
+        onDateChange={setSelectedDate}
+      />
+    );
   }
 
   if (viewType === "week") {
-    return <WeekView />;
+    return (
+      <WeekView
+        onViewChange={setViewType}
+        initialDate={selectedDate}
+        onDateChange={setSelectedDate}
+      />
+    );
   }
 
   // ---- EXPORT ----
@@ -543,61 +575,55 @@ const AppointmentPage: React.FC = () => {
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
 
                   <div className="flex flex-wrap items-center gap-3">
-
+                    {/* View Switcher */}
                     <div className="relative" ref={viewMenuRef}>
-
                       <button
                         type="button"
                         onClick={() => setIsViewMenuOpen((o) => !o)}
-                        className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
+                        className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors bg-white shadow-2xs"
                       >
-
-                        {viewTypeOptions.find((opt) => opt.key === viewType)?.label}
-
-                        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`} />
-
+                        <span>{viewTypeOptions.find((opt) => opt.key === viewType)?.label ?? "List View"}</span>
+                        <ChevronDown
+                          className={cn(
+                            "w-3.5 h-3.5 text-[#6B7280] transition-transform duration-200",
+                            isViewMenuOpen && "rotate-180",
+                          )}
+                        />
                       </button>
 
-                      <div
-                        className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
-                          isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-                        }`}
-                      >
-                        {viewTypeOptions.map((opt) => (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => {
-                              setIsViewMenuOpen(false);
-                              if (opt.key === "day") {
-                                navigate("/appointments/day-view");
-                              } else if (opt.key === "week") {
-                                navigate("/appointments/week-view");
-                              } else {
+                      {isViewMenuOpen && (
+                        <div className="absolute left-0 top-full mt-1 w-36 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40">
+                          {viewTypeOptions.map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() => {
+                                setIsViewMenuOpen(false);
                                 setViewType(opt.key);
-                              }
-                            }}
-                            className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
-                              viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-                            }`}
-                          >
-                            {opt.label}
-                            {viewType === opt.key && <Check className="w-3 h-3" />}
-                          </button>
-                        ))}
-                      </div>
-
+                                const dateStr = dayKeyOf(selectedDate);
+                                if (opt.key === "day") navigate(`/appointments/day-view?date=${dateStr}`);
+                                else if (opt.key === "week") navigate(`/appointments/week-view?date=${dateStr}`);
+                                else navigate(`/appointments?date=${dateStr}`);
+                              }}
+                              className={cn(
+                                "flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors",
+                                viewType === opt.key
+                                  ? "bg-[#D6E3FF] text-[#00488D]"
+                                  : "text-[#374151] hover:bg-[#F2F4F6]",
+                              )}
+                            >
+                              <span>{opt.label}</span>
+                              {viewType === opt.key && <Check className="w-3.5 h-3.5 text-[#00488D]" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-
                   </div>
 
-
-                  <div className="flex items-start gap-3 flex-wrap justify-start">
-
+                  <div className="flex items-center gap-3 flex-wrap justify-start">
                     {/* Search */}
-
                     <div className="relative">
-
                       <input
                         type="text"
                         placeholder="Search"
@@ -608,37 +634,39 @@ const AppointmentPage: React.FC = () => {
                         }}
                         className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
                       />
-
                       <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
-
                     </div>
 
-
-                    {/* Date nav */}
-
-                    <div className="flex items-center">
-
+                    {/* Date Navigation */}
+                    <div className="flex items-center rounded-lg border border-[#E5E7EB] bg-white shadow-2xs">
                       <button
-                        onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
-                        className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                        type="button"
+                        onClick={() => setSelectedDate((prev) => addDays(prev, -1))}
+                        title="Previous Day"
+                        className="flex items-center justify-center w-7 h-7 border-r border-[#E5E7EB] text-[#424752] hover:bg-[#F2F4F6] transition-colors"
                       >
-                        <ChevronLeft className="w-3 h-3 text-[#424752]" />
+                        <ChevronLeft className="w-3.5 h-3.5" />
                       </button>
-
 
                       <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                         <PopoverTrigger asChild>
-                          <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                            {isTodayInActiveTimezone(selectedDate)
-                              ? "Today"
-                              : isYesterdayInActiveTimezone(selectedDate)
-                                ? "Yesterday"
-                                : isTomorrowInActiveTimezone(selectedDate)
-                                  ? "Tomorrow"
-                                  : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
+                          <button
+                            type="button"
+                            className="flex items-center justify-center h-7 px-3 text-xs font-semibold text-[#374151] hover:bg-[#F2F4F6] transition-colors gap-1.5"
+                          >
+                            <CalendarIcon className="w-3.5 h-3.5 text-[#00488D]" />
+                            <span>
+                              {isTodayInActiveTimezone(selectedDate)
+                                ? "Today"
+                                : isYesterdayInActiveTimezone(selectedDate)
+                                  ? "Yesterday"
+                                  : isTomorrowInActiveTimezone(selectedDate)
+                                    ? "Tomorrow"
+                                    : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
+                            </span>
                           </button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                        <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-xl" align="center">
                           <CalendarPicker
                             selected={selectedDate}
                             hideThemePicker
@@ -652,16 +680,15 @@ const AppointmentPage: React.FC = () => {
                         </PopoverContent>
                       </Popover>
 
-
                       <button
+                        type="button"
                         onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
-                        className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                        title="Next Day"
+                        className="flex items-center justify-center w-7 h-7 border-l border-[#E5E7EB] text-[#424752] hover:bg-[#F2F4F6] transition-colors"
                       >
-                        <ChevronRight className="w-3 h-3 text-[#424752]" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
-
                     </div>
-
 
                     {/* Filters */}
 
