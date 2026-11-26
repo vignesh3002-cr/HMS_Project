@@ -33,6 +33,12 @@ import {
   evaluateAbnormalFlag,
 } from "./testingsamples";
 
+import {
+  isPackageTest,
+  decomposePackageTest,
+  generateSubTestBarcode,
+} from "./packageDecomposition";
+
 export interface QualityCheckParameter {
   id: string;
   parameter: string;
@@ -41,6 +47,20 @@ export interface QualityCheckParameter {
   referenceRange: string;
   status: "Normal" | "Abnormal" | "Critical";
   approved: boolean;
+  subTestKey?: string;
+  subTestName?: string;
+  subTestCode?: string;
+}
+
+export interface ReportSubTestSection {
+  key: string;
+  name: string;
+  code: string;
+  sampleType: string;
+  containerType: string;
+  analyzerBench?: string;
+  stabilityHours?: number;
+  parameters: QualityCheckParameter[];
 }
 
 export interface ReportItem {
@@ -78,6 +98,12 @@ export interface ReportItem {
   deliveredOn?: string;
   targetDate?: string;
   targetDateIso?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  isPackage?: boolean;
+  subSections?: ReportSubTestSection[];
+  parentOrderItemId?: string;
+  containerType?: string;
 }
 
 const normalizeToIsoDate = (value?: string | null): string | null => {
@@ -866,8 +892,35 @@ export default function ReportGeneration() {
           deliveredOn: rep.delivered_datetime ? formatReportDate(rep.delivered_datetime) : undefined,
           targetDate: targetDateFormatted,
           targetDateIso,
+          isPackage: isPackageTest(testPanel, orderItem?.lab_test_master?.test_code, orderItem?.lab_test_master?.includes_details),
+          subSections: (() => {
+            if (!isPackageTest(testPanel, orderItem?.lab_test_master?.test_code, orderItem?.lab_test_master?.includes_details)) return undefined;
+            const subDefs = decomposePackageTest(testPanel, orderItem?.lab_test_master?.test_code, orderItem?.lab_test_master?.includes_details);
+            const sections: ReportSubTestSection[] = [];
+            subDefs.forEach((st) => {
+              const matched = getDefaultQCParametersForPanel(st.name).filter((p) => st.filterParameter(p.parameter));
+              if (matched.length > 0) {
+                sections.push({
+                  key: st.key,
+                  name: st.name,
+                  code: st.code,
+                  sampleType: st.sampleType,
+                  containerType: st.containerType,
+                  analyzerBench: st.analyzerBench,
+                  stabilityHours: st.stabilityHours,
+                  parameters: matched,
+                });
+              }
+            });
+            return sections.length > 0 ? sections : undefined;
+          })(),
         });
       });
+
+      // Load completed testing samples registry early so both backend package unification and local samples use it
+      const completedRegistry: any[] = typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("completed_testing_samples") || "[]")
+        : [];
 
       // 2. Map verified or completed lab items from backend
       items.forEach((item, idx) => {
@@ -875,7 +928,29 @@ export default function ReportGeneration() {
         const storedItemStatus = typeof window !== "undefined"
           ? localStorage.getItem(`testing_sample_status_${item.lab_order_item_id}`)
           : null;
-        const isTestingCompleted = rawItemStatus === "COMPLETED" || storedItemStatus === "COMPLETED";
+
+        const testName = item.lab_test_master?.test_name || "Diagnostic Test";
+        const testCode = item.lab_test_master?.test_code || item.lab_test_id?.replace(/^LABTEST/, "T") || "TEST";
+        const includesDetails = item.lab_test_master?.includes_details;
+        const isPkg = isPackageTest(testName, testCode, includesDetails);
+
+        // For a package test: check if ANY constituent sub-test is completed in testing samples
+        let isAnySubCompleted = false;
+        if (isPkg) {
+          const subDefs = decomposePackageTest(testName, testCode, includesDetails);
+          isAnySubCompleted = subDefs.some((st) => {
+            const subId = `${item.lab_order_item_id}__${st.key}`;
+            return (
+              (typeof window !== "undefined" && (
+                localStorage.getItem(`testing_sample_status_${subId}`) === "COMPLETED" ||
+                localStorage.getItem(`testing_sample_result_${subId}`) !== null
+              )) ||
+              completedRegistry.some((cs: any) => cs.id === subId || cs.parentOrderItemId === item.lab_order_item_id)
+            );
+          });
+        }
+
+        const isTestingCompleted = rawItemStatus === "COMPLETED" || storedItemStatus === "COMPLETED" || isAnySubCompleted;
 
         // ONLY include items where testing has completed or report is already generated
         if (!isTestingCompleted && rawItemStatus !== "REPORT GENERATED") {
@@ -902,7 +977,6 @@ export default function ReportGeneration() {
         const doctorName = doctor ? `Dr. ${doctor.first_name} ${doctor.last_name || ""}`.trim() : "Dr. Sarah Johnson";
         const doctorEmail = (doctor as any)?.email || "doctor@hospital.com";
 
-        const testName = item.lab_test_master?.test_name || "Diagnostic Test";
         const sampleType = item.lab_test_master?.sample_type || item.specimen_type || "Whole Blood (EDTA)";
 
         const isVerified = true;
@@ -912,6 +986,216 @@ export default function ReportGeneration() {
           item.barcode ||
           (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
           getDisplayBarcode({ id: item.lab_order_item_id, requestId: item.lab_order_id });
+
+        const rawTargetDate = item.target_date || (parentOrder as any)?.target_date;
+        const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
+        const targetDateIso = rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined;
+
+        // Check if package test requiring unified multi-section report generation
+        if (isPkg) {
+          const subDefs = decomposePackageTest(testName, testCode, includesDetails);
+          const validSections: ReportSubTestSection[] = [];
+
+          subDefs.forEach((st, sIdx) => {
+            const subId = `${item.lab_order_item_id}__${st.key}`;
+
+            // Filter parameters for this sub-test strictly
+            let subQcParams: QualityCheckParameter[] = [];
+            let storedSubParamsStr = typeof window !== "undefined"
+              ? localStorage.getItem(`testing_sample_params_${subId}`) ||
+                localStorage.getItem(`testing_sample_params_${item.lab_order_item_id}__${st.key}`) ||
+                localStorage.getItem(`testing_sample_params_${item.lab_order_item_id}_${st.code.toLowerCase()}`) ||
+                localStorage.getItem(`testing_sample_params_${item.lab_order_item_id}-${st.code}`)
+              : null;
+
+            if (!storedSubParamsStr) {
+              const matchCs = completedRegistry.find((cs: any) =>
+                cs.id === subId ||
+                cs.id === `${item.lab_order_item_id}__${st.key}` ||
+                (cs.parentOrderItemId === item.lab_order_item_id && (
+                  cs.testCode?.toLowerCase() === st.code.toLowerCase() ||
+                  cs.testName?.toLowerCase().includes(st.name.toLowerCase()) ||
+                  st.name.toLowerCase().includes(cs.testName?.toLowerCase())
+                ))
+              );
+              if (matchCs && matchCs.parameters && matchCs.parameters.length > 0) {
+                storedSubParamsStr = JSON.stringify(matchCs.parameters);
+              }
+            }
+
+            if (storedSubParamsStr) {
+              try {
+                const parsed = JSON.parse(storedSubParamsStr);
+                const converted = convertTestParamsToQCParams(parsed);
+                subQcParams = converted.filter((p) => st.filterParameter(p.parameter));
+              } catch {}
+            }
+
+            if (subQcParams.length === 0 && item.lab_result && item.lab_result.length > 0) {
+              subQcParams = item.lab_result
+                .filter((r) => st.filterParameter(r.parameter_name))
+                .map((r) => {
+                  let qcStatus: "Normal" | "Abnormal" | "Critical" = "Normal";
+                  const flag = (r.abnormal_flag || "").toUpperCase();
+                  if (flag === "CRITICAL" || flag.includes("CRIT")) qcStatus = "Critical";
+                  else if (flag === "HIGH" || flag === "LOW" || flag === "ABNORMAL") qcStatus = "Abnormal";
+                  return {
+                    id: r.lab_result_id || `lr_${st.key}_${r.parameter_name}`,
+                    parameter: r.parameter_name,
+                    result: r.result_value || "—",
+                    approved: true,
+                    observedValue: r.result_value || "—",
+                    unit: r.lab_test_parameter?.unit || resolveStandardParameterUnit(r.parameter_name, st.name) || "",
+                    referenceRange: r.lab_test_parameter?.ref_range_text || resolveStandardParameterRefRange(r.parameter_name, patientAgeGender, st.name) || "Normal",
+                    status: qcStatus,
+                  };
+                });
+            }
+
+            if (subQcParams.length === 0) {
+              const defaultParams = getDefaultQCParametersForPanel(st.name);
+              subQcParams = defaultParams.filter((p) => st.filterParameter(p.parameter));
+            }
+
+            // STRICT FILTER: Absolutely guarantee only parameters matching this sub-test are included
+            subQcParams = subQcParams
+              .filter((p) => st.filterParameter(p.parameter))
+              .map((p) => ({
+                ...p,
+                subTestKey: st.key,
+                subTestName: st.name,
+                subTestCode: st.code,
+              }));
+
+            // Only add sub-tests that actually have parameters
+            if (subQcParams.length > 0) {
+              validSections.push({
+                key: st.key,
+                name: st.name,
+                code: st.code,
+                sampleType: st.sampleType,
+                containerType: st.containerType,
+                analyzerBench: st.analyzerBench,
+                stabilityHours: st.stabilityHours,
+                parameters: subQcParams,
+              });
+            }
+          });
+
+          if (validSections.length > 0) {
+            // Check if united package has stored approval or reviewed status
+            const isPkgApproved = typeof window !== "undefined" && (
+              localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
+              localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED" ||
+              localStorage.getItem(`report_status_item-${item.lab_order_item_id}`) === "GENERATED" ||
+              validSections.every((s) => localStorage.getItem(`report_approved_${item.lab_order_item_id}__${s.key}`) === "GENERATED")
+            );
+
+            const isPkgReviewed = typeof window !== "undefined" && (
+              localStorage.getItem(`report_status_item-${item.lab_order_item_id}`) === "REVIEWED" ||
+              localStorage.getItem(`report_status_${item.lab_order_item_id}`) === "REVIEWED"
+            );
+
+            let pkgStatus: "GENERATED" | "REVIEWED" | "UNDER_REVIEW" = "UNDER_REVIEW";
+            if (isPkgApproved) pkgStatus = "GENERATED";
+            else if (isPkgReviewed) pkgStatus = "REVIEWED";
+
+            // Check if there are previously reviewed parameters saved for this united report
+            const storedReviewedPkgParams = typeof window !== "undefined"
+              ? localStorage.getItem(`report_params_item-${item.lab_order_item_id}`) ||
+                localStorage.getItem(`report_params_${item.lab_order_item_id}`)
+              : null;
+
+            let allUnitedParams = validSections.flatMap((s) => s.parameters);
+            if (storedReviewedPkgParams) {
+              try {
+                const parsedRev = JSON.parse(storedReviewedPkgParams);
+                if (Array.isArray(parsedRev) && parsedRev.length > 0) {
+                  allUnitedParams = allUnitedParams.map((p) => {
+                    const matchRev = parsedRev.find((rp: any) => rp.id === p.id || rp.parameter === p.parameter);
+                    return matchRev
+                      ? {
+                          ...p,
+                          approved: Boolean(matchRev.approved),
+                          result: matchRev.result || p.result,
+                          status: matchRev.status || p.status,
+                        }
+                      : p;
+                  });
+                  validSections.forEach((sec) => {
+                    sec.parameters = sec.parameters.map((sp) => {
+                      const matchRev = parsedRev.find((rp: any) => rp.id === sp.id || rp.parameter === sp.parameter);
+                      return matchRev
+                        ? {
+                            ...sp,
+                            approved: Boolean(matchRev.approved),
+                            result: matchRev.result || sp.result,
+                            status: matchRev.status || sp.status,
+                          }
+                        : sp;
+                    });
+                  });
+                }
+              } catch {}
+            }
+
+            const repReportId = `RPT-${item.lab_order_item_id.slice(-6)}`;
+            existingReportIds.add(item.lab_order_item_id);
+            existingReportIds.add(`item-${item.lab_order_item_id}`);
+            existingReportIds.add(repReportId);
+            existingSampleIds.add(sampleBarcode);
+
+            // Register all sub-test IDs so they are NEVER added as standalone separate rows
+            subDefs.forEach((st) => {
+              existingReportIds.add(`${item.lab_order_item_id}__${st.key}`);
+              existingReportIds.add(`rep-${item.lab_order_item_id}__${st.key}`);
+              existingReportIds.add(`item-${item.lab_order_item_id}__${st.key}`);
+              existingReportIds.add(`SMP-${item.lab_order_item_id.replace(/^LOI/, "").slice(-4)}-${st.code}`);
+              existingSampleIds.add(`${item.lab_order_item_id}__${st.key}`);
+            });
+
+            const storedPkgPdf = typeof window !== "undefined"
+              ? localStorage.getItem(`report_pdf_item-${item.lab_order_item_id}`) ||
+                localStorage.getItem(`report_pdf_${item.lab_order_item_id}`) ||
+                localStorage.getItem(`report_pdf_${repReportId}`)
+              : null;
+
+            mappedList.push({
+              id: `item-${item.lab_order_item_id}`,
+              parentOrderItemId: item.lab_order_item_id,
+              packageName: testName,
+              isPackage: true,
+              isSubTest: false,
+              subSections: validSections,
+              reportId: repReportId,
+              requestId: item.lab_order_id,
+              barcode: sampleBarcode,
+              sampleId: sampleBarcode,
+              patientId,
+              patientPid: patient?.patient_id || patientId,
+              patientName,
+              patientAgeGender,
+              patientEmail: patient?.patient_email || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+              doctorName,
+              doctorEmail,
+              testPanel: testName,
+              generatedDate: formatReportDate(new Date()),
+              completedDate: formatReportDate(new Date()),
+              completedBy: "Pathology Lab",
+              sampleType: validSections.map((s) => s.sampleType).filter((v, i, a) => a.indexOf(v) === i).join(" + "),
+              containerType: validSections.map((s) => s.containerType).join(" • "),
+              status: pkgStatus,
+              findingsSummary: `${testName} (${validSections.map((s) => s.code).join(", ")}): All constituent sub-tests unified into single certified diagnostic report.`,
+              parameters: allUnitedParams,
+              overallDecision: "Approved",
+              reportFile: storedPkgPdf,
+              targetDate: targetDateFormatted,
+              targetDateIso,
+            });
+
+            return;
+          }
+        }
 
         const isApproved = typeof window !== "undefined" && (
           localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
@@ -1076,10 +1360,6 @@ export default function ReportGeneration() {
         existingReportIds.add(item.lab_order_item_id);
         existingSampleIds.add(sampleBarcode);
 
-        const rawTargetDate = item.target_date || (parentOrder as any)?.target_date;
-        const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
-        const targetDateIso = rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined;
-
         mappedList.push({
           id: `item-${item.lab_order_item_id}`,
           reportId: `RPT-PENDING-${item.lab_order_item_id.slice(-6)}`,
@@ -1119,10 +1399,6 @@ export default function ReportGeneration() {
       });
 
       // 3. Map all completed testing samples from Testing Samples lifecycle
-      const completedRegistry: any[] = typeof window !== "undefined"
-        ? JSON.parse(localStorage.getItem("completed_testing_samples") || "[]")
-        : [];
-
       // Check INITIAL_TESTING_SAMPLES for completed samples (like s3 - Priya KFT, or newly completed ones)
       const initialTestingCompleted = INITIAL_TESTING_SAMPLES.filter((s) => {
         const storedStatus = typeof window !== "undefined"
@@ -1179,11 +1455,184 @@ export default function ReportGeneration() {
         }
       }
 
-      // Add each completed testing sample to mappedList if not already present
+      // Process completed samples from Testing Samples lifecycle
+      // STRICT RULE: All sub-tests from testing MUST BE UNITED into a SINGLE package report!
+      // They must NEVER appear as separate report rows or generate separate PDF files.
+      const processedSubTestIds = new Set<string>();
+
       allCompletedSamples.forEach((s) => {
         const sampleId = s.sampleId || s.id;
         const barcode = s.barcode || "";
 
+        const isSubTestSample = Boolean(s.isSubTest || s.packageName || s.parentOrderItemId || (s.id && s.id.includes("__")));
+
+        if (isSubTestSample) {
+          if (processedSubTestIds.has(s.id)) return;
+
+          const parentKey = s.parentOrderItemId || (s.id.includes("__") ? s.id.split("__")[0] : null);
+          const pkgName = s.packageName || (s.id.includes("__") ? decomposePackageTest(s.id.split("__")[0])[0]?.name : undefined) || s.testName;
+
+          // 1. Check if a report item for this package already exists in mappedList
+          const existingPkgReport = mappedList.find((m) =>
+            m.isPackage &&
+            ((parentKey && (m.parentOrderItemId === parentKey || m.id === `item-${parentKey}` || m.id === `pkg-${parentKey}`)) ||
+             (pkgName && m.testPanel?.toLowerCase() === pkgName.toLowerCase() && (m.patientId === s.patientId || m.requestId === s.barcode)))
+          );
+
+          let subParams: QualityCheckParameter[] = [];
+          if (s.parameters && Array.isArray(s.parameters) && s.parameters.length > 0) {
+            subParams = convertTestParamsToQCParams(s.parameters);
+          } else {
+            const storedParamsStr = typeof window !== "undefined"
+              ? localStorage.getItem(`testing_sample_params_${s.id}`)
+              : null;
+            if (storedParamsStr) {
+              try {
+                subParams = convertTestParamsToQCParams(JSON.parse(storedParamsStr));
+              } catch {
+                subParams = getDefaultQCParametersForPanel(s.testName);
+              }
+            } else {
+              subParams = getDefaultQCParametersForPanel(s.testName);
+            }
+          }
+
+          const subKey = s.id.includes("__") ? s.id.split("__")[1] : s.testCode?.toLowerCase() || s.testName.toLowerCase().replace(/\s+/g, "_");
+
+          subParams = subParams.map((p) => ({
+            ...p,
+            subTestKey: subKey,
+            subTestName: s.testName,
+            subTestCode: s.testCode || subKey.toUpperCase(),
+          }));
+
+          if (existingPkgReport) {
+            // Merge into existing package report
+            if (!existingPkgReport.subSections) {
+              existingPkgReport.subSections = [];
+            }
+            const existingSec = existingPkgReport.subSections.find(
+              (sec) => sec.key === subKey || sec.name.toLowerCase() === s.testName.toLowerCase() || sec.code.toLowerCase() === (s.testCode || "").toLowerCase()
+            );
+            if (existingSec) {
+              if (subParams.length > 0) existingSec.parameters = subParams;
+            } else {
+              existingPkgReport.subSections.push({
+                key: subKey,
+                name: s.testName,
+                code: s.testCode || subKey.toUpperCase(),
+                sampleType: s.sampleType || "Specimen",
+                containerType: s.containerType || "Standard Container",
+                analyzerBench: s.analyzerBench,
+                parameters: subParams,
+              });
+            }
+            existingPkgReport.parameters = existingPkgReport.subSections.flatMap((sec) => sec.parameters);
+            processedSubTestIds.add(s.id);
+            return;
+          }
+
+          // 2. If no package report exists yet, collect ALL sibling sub-tests from allCompletedSamples
+          const siblingSubTests = allCompletedSamples.filter((other) =>
+            other !== s &&
+            ((parentKey && (other.parentOrderItemId === parentKey || (other.id && other.id.startsWith(`${parentKey}__`)))) ||
+             (pkgName && other.packageName && other.packageName.toLowerCase() === pkgName.toLowerCase() && other.patientId === s.patientId))
+          );
+
+          const allPkgSubSamples = [s, ...siblingSubTests];
+          allPkgSubSamples.forEach((sub) => processedSubTestIds.add(sub.id));
+
+          const sections: ReportSubTestSection[] = allPkgSubSamples.map((sub, sIdx) => {
+            const sk = sub.id.includes("__") ? sub.id.split("__")[1] : sub.testCode?.toLowerCase() || `sub_${sIdx + 1}`;
+            let sp: QualityCheckParameter[] = [];
+            if (sub.parameters && Array.isArray(sub.parameters) && sub.parameters.length > 0) {
+              sp = convertTestParamsToQCParams(sub.parameters);
+            } else {
+              const spStr = typeof window !== "undefined" ? localStorage.getItem(`testing_sample_params_${sub.id}`) : null;
+              if (spStr) {
+                try {
+                  sp = convertTestParamsToQCParams(JSON.parse(spStr));
+                } catch {
+                  sp = getDefaultQCParametersForPanel(sub.testName);
+                }
+              } else {
+                sp = getDefaultQCParametersForPanel(sub.testName);
+              }
+            }
+            sp = sp.map((p) => ({
+              ...p,
+              subTestKey: sk,
+              subTestName: sub.testName,
+              subTestCode: sub.testCode || sk.toUpperCase(),
+            }));
+            return {
+              key: sk,
+              name: sub.testName,
+              code: sub.testCode || sk.toUpperCase(),
+              sampleType: sub.sampleType || "Whole Blood",
+              containerType: sub.containerType || "Standard Container",
+              analyzerBench: sub.analyzerBench,
+              parameters: sp,
+            };
+          });
+
+          const unitedParams = sections.flatMap((sec) => sec.parameters);
+          const pkgReportId = `RPT-${(parentKey || s.sampleId || s.id).replace(/\D/g, "").slice(-6) || "PKG"}`;
+          const rawTargetDate = s.targetDate || s.target_date;
+          const targetDateFormatted = rawTargetDate ? formatTargetDate(rawTargetDate) : undefined;
+          const targetDateIso = s.targetDateIso || (rawTargetDate ? (normalizeToIsoDate(rawTargetDate) || undefined) : undefined);
+
+          const isPkgApproved = typeof window !== "undefined" && (
+            localStorage.getItem(`report_approved_pkg-${parentKey || s.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_${pkgReportId}`) === "GENERATED"
+          );
+
+          mappedList.push({
+            id: `pkg-${parentKey || s.id}`,
+            parentOrderItemId: parentKey || undefined,
+            packageName: pkgName,
+            isPackage: true,
+            isSubTest: false,
+            subSections: sections,
+            reportId: pkgReportId,
+            requestId: s.barcode || `TRF-${pkgReportId}`,
+            barcode: getDisplayBarcode({ id: s.id, sampleId: s.sampleId, barcode: s.barcode }),
+            sampleId: s.barcode || s.sampleId || pkgReportId,
+            patientId: s.patientId || "P000124",
+            patientPid: s.patientPid || s.patientId || "P000124",
+            patientName: s.patientName || "Patient",
+            patientAgeGender: s.patientAgeGender || "32 Years / Male",
+            patientAvatar: s.patientAvatar || undefined,
+            patientEmail: s.patientEmail || `${(s.patientName || "patient").toLowerCase().replace(/\s+/g, ".")}@email.com`,
+            doctorName: s.doctorName || "Dr. Sarah Johnson",
+            doctorEmail: s.doctorEmail || "doctor@hospital.com",
+            testPanel: pkgName,
+            generatedDate: formatReportDate(s.receivedDate || new Date()),
+            completedDate: s.estimatedCompletion || "Today, 11:30 AM",
+            completedBy: s.receivedBy || "Lab Technician",
+            sampleType: sections.map((sec) => sec.sampleType).filter((v, i, a) => a.indexOf(v) === i).join(" + "),
+            containerType: sections.map((sec) => sec.containerType).join(" • "),
+            status: isPkgApproved ? "GENERATED" : "UNDER_REVIEW",
+            findingsSummary: `${pkgName} (${sections.map((sec) => sec.code).join(", ")}): All constituent sub-tests unified into single certified diagnostic report.`,
+            parameters: unitedParams,
+            overallDecision: "Approved",
+            reviewComments: s.comments || "",
+            clinicalCorrelation: `Clinical testing completed for ${pkgName} package. Correlate clinically.`,
+            approvalRemarks: isPkgApproved ? "Report approved and certified." : "Awaiting pathologist sign-off.",
+            approverName: "Dr. Sarah Johnson",
+            approverRole: "Senior Pathologist",
+            signatureUrl: "certified-default",
+            reportFile: typeof window !== "undefined"
+              ? localStorage.getItem(`report_pdf_pkg-${parentKey || s.id}`) || localStorage.getItem(`report_pdf_${pkgReportId}`)
+              : null,
+            targetDate: targetDateFormatted,
+            targetDateIso,
+          });
+
+          return;
+        }
+
+        // --- NON-SUBTEST: Standard standalone test mapping ---
         // Check if this sample is already in mappedList
         const alreadyExists = mappedList.some(
           (m) =>
@@ -1245,6 +1694,10 @@ export default function ReportGeneration() {
 
         mappedList.push({
           id: `rep-${s.id}`,
+          parentOrderItemId: s.parentOrderItemId,
+          packageName: s.packageName,
+          isSubTest: false,
+          containerType: s.containerType,
           reportId,
           requestId: barcode || `TRF-${sampleId}`,
           barcode: getDisplayBarcode({ id: s.id, sampleId, barcode }),
@@ -1292,14 +1745,33 @@ export default function ReportGeneration() {
         if (r.status === "GENERATED") return true;
         if (r.status === "DRAFT") return false;
 
-        const rawId = r.id.replace("rep-", "").replace("item-", "");
+        const rawId = r.id.replace("rep-", "").replace("item-", "").replace("pkg-", "");
 
         // 1. Check if marked completed in localStorage
         const storedStatus = typeof window !== "undefined"
           ? localStorage.getItem(`testing_sample_status_${rawId}`) ||
-            localStorage.getItem(`testing_sample_status_${r.id}`)
+            localStorage.getItem(`testing_sample_status_${r.id}`) ||
+            (r.parentOrderItemId ? localStorage.getItem(`testing_sample_status_${r.parentOrderItemId}`) : null)
           : null;
         if (storedStatus === "COMPLETED") return true;
+
+        // 1.1 For package reports: include if any constituent sub-test was completed in testing
+        if (r.isPackage) {
+          if (r.id.startsWith("pkg-")) return true; // Created specifically from completed sub-tests
+          if (r.subSections && r.subSections.length > 0) {
+            const isAnySubDone = r.subSections.some((sec) => {
+              const subId = `${rawId}__${sec.key}`;
+              return (
+                (typeof window !== "undefined" && (
+                  localStorage.getItem(`testing_sample_status_${subId}`) === "COMPLETED" ||
+                  localStorage.getItem(`testing_sample_result_${subId}`) !== null
+                )) ||
+                completedRegistry.some((cs: any) => cs.id === subId || cs.parentOrderItemId === rawId || (r.parentOrderItemId && cs.parentOrderItemId === r.parentOrderItemId))
+              );
+            });
+            if (isAnySubDone) return true;
+          }
+        }
 
         // 2. Check completed_testing_samples registry
         if (
@@ -1434,6 +1906,18 @@ export default function ReportGeneration() {
         ? "CRITICAL"
         : "REVIEWED";
 
+    const updatedSubSections = selectedReport.subSections
+      ? selectedReport.subSections.map((sec) => ({
+          ...sec,
+          parameters: sec.parameters.map((sp) => {
+            const match = currentParameters.find((cp) => cp.id === sp.id || cp.parameter === sp.parameter);
+            return match
+              ? { ...sp, approved: match.approved, result: match.result, status: match.status }
+              : sp;
+          }),
+        }))
+      : undefined;
+
     setReports((prev) =>
       prev.map((r) =>
         r.id === selectedReport.id
@@ -1443,6 +1927,7 @@ export default function ReportGeneration() {
               overallDecision,
               reviewComments,
               parameters: currentParameters,
+              subSections: updatedSubSections || r.subSections,
             }
           : r,
       ),
@@ -1454,6 +1939,7 @@ export default function ReportGeneration() {
       overallDecision,
       reviewComments,
       parameters: currentParameters,
+      subSections: updatedSubSections || prev.subSections,
     } : null));
 
     const rawId = selectedReport.id.replace("rep-", "").replace("item-", "");
@@ -1602,6 +2088,23 @@ export default function ReportGeneration() {
     // 2. Generate the accredited PDF document
     let generatedPdfBase64: string | null = null;
     try {
+      const pdfSections = selectedReport.subSections && selectedReport.subSections.length > 0
+        ? selectedReport.subSections.map((sec) => ({
+            title: sec.name,
+            subtitle: `${sec.sampleType} • ${sec.containerType}`,
+            code: sec.code,
+            parameters: sec.parameters.map((p) => {
+              const matched = certifiedParameters.find((cp) => cp.id === p.id || cp.parameter === p.parameter);
+              return {
+                ...p,
+                result: matched?.result ?? p.result,
+                status: matched?.status ?? p.status,
+                approved: true,
+              };
+            }),
+          }))
+        : undefined;
+
       const pdfResult = generateLabReportPdf({
         reportId: selectedReport.reportId,
         requestId: selectedReport.requestId,
@@ -1631,6 +2134,7 @@ export default function ReportGeneration() {
         approvalDate: approvalDateTime,
         signatureUrl: digitalSignature,
         overallDecision: "Approved",
+        sections: pdfSections,
         parameters: certifiedParameters,
       });
       generatedPdfBase64 = pdfResult.pdfBase64;
@@ -1806,6 +2310,23 @@ export default function ReportGeneration() {
       ...p,
       approved: true,
     }));
+    const pdfSections = report.subSections && report.subSections.length > 0
+      ? report.subSections.map((sec) => ({
+          title: sec.name,
+          subtitle: `${sec.sampleType} • ${sec.containerType}`,
+          code: sec.code,
+          parameters: sec.parameters.map((p) => {
+            const matched = certifiedParameters.find((cp) => cp.id === p.id || cp.parameter === p.parameter);
+            return {
+              ...p,
+              result: matched?.result ?? p.result,
+              status: matched?.status ?? p.status,
+              approved: true,
+            };
+          }),
+        }))
+      : undefined;
+
     openLabReportPdfPreview(
       {
         reportId: report.reportId,
@@ -1840,6 +2361,7 @@ export default function ReportGeneration() {
         approvalDate: report.approvalDate,
         signatureUrl: report.signatureUrl,
         overallDecision: report.overallDecision || "Approved",
+        sections: pdfSections,
         parameters: certifiedParameters,
       },
       report.reportId
@@ -1855,6 +2377,23 @@ export default function ReportGeneration() {
       ...p,
       approved: true,
     }));
+    const pdfSections = report.subSections && report.subSections.length > 0
+      ? report.subSections.map((sec) => ({
+          title: sec.name,
+          subtitle: `${sec.sampleType} • ${sec.containerType}`,
+          code: sec.code,
+          parameters: sec.parameters.map((p) => {
+            const matched = certifiedParameters.find((cp) => cp.id === p.id || cp.parameter === p.parameter);
+            return {
+              ...p,
+              result: matched?.result ?? p.result,
+              status: matched?.status ?? p.status,
+              approved: true,
+            };
+          }),
+        }))
+      : undefined;
+
     downloadLabReportPdf({
       reportId: report.reportId,
       requestId: report.requestId,
@@ -1888,6 +2427,7 @@ export default function ReportGeneration() {
       approvalDate: report.approvalDate,
       signatureUrl: report.signatureUrl,
       overallDecision: report.overallDecision || "Approved",
+      sections: pdfSections,
       parameters: certifiedParameters,
     });
     toast({
@@ -2209,73 +2749,160 @@ export default function ReportGeneration() {
               {/* BEGIN: LaboratoryTestResultsTable */}
               <section
                 aria-label="Diagnostic Results Table"
-                className="overflow-x-auto mb-8"
+                className="overflow-x-auto mb-8 space-y-6"
               >
-                <table className="w-full text-left border border-black text-[13px] border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 font-bold text-black uppercase text-[11px] tracking-wider border border-black">
-                      <th
-                        className="py-2.5 px-4 font-bold border border-black"
-                        scope="col"
-                      >
-                        PARAMETER
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        RESULT
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        UNIT
-                      </th>
-                      <th
-                        className="py-2.5 px-4 text-center font-bold border border-black"
-                        scope="col"
-                      >
-                        REFERENCE RANGE
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-gray-900 font-medium">
-                    {(selectedReport.parameters && selectedReport.parameters.length > 0 ? selectedReport.parameters : DEFAULT_QC_PARAMETERS).map((p, idx) => {
-                      const statusLower = String(p.status || "").toLowerCase();
-                      const isCritical = statusLower.includes("crit");
-                      const isAbnormal = !isCritical && (statusLower.includes("abnormal") || statusLower.includes("high") || statusLower.includes("low") || statusLower.includes("warn"));
+                {selectedReport.subSections && selectedReport.subSections.length > 0 ? (
+                  selectedReport.subSections.map((sec, secIdx) => (
+                    <div key={sec.key || secIdx} className="border border-black overflow-hidden">
+                      {/* Sub-Test Section Header Banner */}
+                      <div className="bg-slate-100 border-b border-black px-4 py-2 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#00488D]" />
+                          <span className="font-bold text-black text-xs uppercase tracking-wide">
+                            Sub-Test {secIdx + 1}: {sec.name}
+                          </span>
+                          <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 bg-white border border-black rounded">
+                            {sec.code}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-700 font-medium">
+                          <span>{sec.sampleType}</span>
+                          <span>•</span>
+                          <span className="font-semibold text-black">{sec.containerType}</span>
+                        </div>
+                      </div>
 
-                      return (
-                        <tr
-                          key={idx}
-                          className="hover:bg-slate-50/50 border border-black"
+                      {/* Parameters Table */}
+                      <table className="w-full text-left text-[13px] border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 font-bold text-black uppercase text-[10.5px] tracking-wider border-b border-black">
+                            <th className="py-2.5 px-4 font-bold border-r border-black" scope="col">
+                              PARAMETER
+                            </th>
+                            <th className="py-2.5 px-4 text-center font-bold border-r border-black" scope="col">
+                              RESULT
+                            </th>
+                            <th className="py-2.5 px-4 text-center font-bold border-r border-black" scope="col">
+                              UNIT
+                            </th>
+                            <th className="py-2.5 px-4 text-center font-bold" scope="col">
+                              REFERENCE RANGE
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-gray-900 font-medium divide-y divide-black/20">
+                          {sec.parameters.map((p, pIdx) => {
+                            const statusLower = String(p.status || "").toLowerCase();
+                            const isCritical = statusLower.includes("crit");
+                            const isAbnormal =
+                              !isCritical &&
+                              (statusLower.includes("abnormal") ||
+                                statusLower.includes("high") ||
+                                statusLower.includes("low") ||
+                                statusLower.includes("warn"));
+
+                            return (
+                              <tr key={p.id || pIdx} className="hover:bg-slate-50/50">
+                                <td className="py-2 px-4 font-semibold text-gray-900 border-r border-black">
+                                  {p.parameter}
+                                </td>
+                                <td
+                                  className={`py-2 px-4 text-center font-mono border-r border-black ${
+                                    isCritical
+                                      ? "text-red-600 font-bold"
+                                      : isAbnormal
+                                      ? "text-[#ca8a04] font-bold"
+                                      : "text-black font-medium"
+                                  }`}
+                                >
+                                  {p.result}
+                                </td>
+                                <td className="py-2 px-4 text-center border-r border-black">
+                                  {p.unit || resolveStandardParameterUnit(p.parameter, sec.name) || "—"}
+                                </td>
+                                <td className="py-2 px-4 text-center">
+                                  {p.referenceRange ||
+                                    resolveStandardParameterRefRange(
+                                      p.parameter,
+                                      selectedReport.patientAgeGender,
+                                      sec.name
+                                    ) ||
+                                    "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))
+                ) : (
+                  <table className="w-full text-left border border-black text-[13px] border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 font-bold text-black uppercase text-[11px] tracking-wider border border-black">
+                        <th
+                          className="py-2.5 px-4 font-bold border border-black"
+                          scope="col"
                         >
-                          <td className="py-2 px-4 font-semibold text-gray-900 border border-black">
-                            {p.parameter}
-                          </td>
-                          <td
-                            className={`py-2 px-4 text-center font-mono border border-black ${
-                              isCritical
-                                ? "text-red-600 font-bold"
-                                : isAbnormal
-                                ? "text-[#ca8a04] font-bold"
-                                : "text-black font-medium"
-                            }`}
+                          PARAMETER
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          RESULT
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          UNIT
+                        </th>
+                        <th
+                          className="py-2.5 px-4 text-center font-bold border border-black"
+                          scope="col"
+                        >
+                          REFERENCE RANGE
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-gray-900 font-medium">
+                      {(selectedReport.parameters && selectedReport.parameters.length > 0 ? selectedReport.parameters : DEFAULT_QC_PARAMETERS).map((p, idx) => {
+                        const statusLower = String(p.status || "").toLowerCase();
+                        const isCritical = statusLower.includes("crit");
+                        const isAbnormal = !isCritical && (statusLower.includes("abnormal") || statusLower.includes("high") || statusLower.includes("low") || statusLower.includes("warn"));
+
+                        return (
+                          <tr
+                            key={idx}
+                            className="hover:bg-slate-50/50 border border-black"
                           >
-                            {p.result}
-                          </td>
-                          <td className="py-2 px-4 text-center border border-black">
-                            {p.unit || resolveStandardParameterUnit(p.parameter, selectedReport.testPanel) || "—"}
-                          </td>
-                          <td className="py-2 px-4 text-center border border-black">
-                            {p.referenceRange || resolveStandardParameterRefRange(p.parameter, selectedReport.patientAgeGender, selectedReport.testPanel) || "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="py-2 px-4 font-semibold text-gray-900 border border-black">
+                              {p.parameter}
+                            </td>
+                            <td
+                              className={`py-2 px-4 text-center font-mono border border-black ${
+                                isCritical
+                                  ? "text-red-600 font-bold"
+                                  : isAbnormal
+                                  ? "text-[#ca8a04] font-bold"
+                                  : "text-black font-medium"
+                              }`}
+                            >
+                              {p.result}
+                            </td>
+                            <td className="py-2 px-4 text-center border border-black">
+                              {p.unit || resolveStandardParameterUnit(p.parameter, selectedReport.testPanel) || "—"}
+                            </td>
+                            <td className="py-2 px-4 text-center border border-black">
+                              {p.referenceRange || resolveStandardParameterRefRange(p.parameter, selectedReport.patientAgeGender, selectedReport.testPanel) || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </section>
               {/* END: LaboratoryTestResultsTable */}
 
@@ -3253,10 +3880,10 @@ export default function ReportGeneration() {
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-bold text-slate-800">
-                      Test Parameter Analysis
+                      {selectedReport.isPackage ? "United Package Parameter Analysis" : "Test Parameter Analysis"}
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Panel: {selectedReport.testPanel}
+                      Panel: {selectedReport.testPanel} {selectedReport.isPackage && `(${selectedReport.subSections?.length || 0} Sub-Tests United)`}
                     </p>
                   </div>
                   <button
@@ -3267,98 +3894,199 @@ export default function ReportGeneration() {
                     Approve All Parameters
                   </button>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-                        <th className="py-3.5 px-6 font-semibold w-1/4" scope="col">
-                          PARAMETER
-                        </th>
-                        <th
-                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
-                          scope="col"
-                        >
-                          RESULT
-                        </th>
-                        <th
-                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
-                          scope="col"
-                        >
-                          UNIT
-                        </th>
-                        <th
-                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
-                          scope="col"
-                        >
-                          REFERENCE RANGE
-                        </th>
-                        <th
-                          className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
-                          scope="col"
-                        >
-                          STATUS
-                        </th>
-                        <th
-                          className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
-                          scope="col"
-                        >
-                          ACTION
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {currentParameters.map((p) => (
-                        <tr
-                          key={p.id}
-                          className="hover:bg-slate-50/70 transition-colors"
-                        >
-                          <td className="py-3 px-6 font-medium text-slate-900">
-                            {p.parameter}
-                          </td>
-                          <td className="py-3 px-6 text-slate-500 font-medium border-l border-slate-100 font-mono">
-                            {p.result}
-                          </td>
-                          <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
-                            {p.unit}
-                          </td>
-                          <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
-                            {p.referenceRange}
-                          </td>
-                          <td className="py-3 px-6 text-center border-l border-slate-100">
-                            {p.status === "Normal" ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-emerald-700 bg-emerald-50">
-                                Normal
+
+                {selectedReport.subSections && selectedReport.subSections.length > 0 ? (
+                  <div className="p-6 space-y-6">
+                    {selectedReport.subSections.map((sec, secIdx) => {
+                      const secParams = currentParameters.filter((p) => p.subTestKey === sec.key);
+                      const displayParams = secParams.length > 0 ? secParams : sec.parameters;
+
+                      return (
+                        <div key={sec.key || secIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                          {/* Sub-Test Header */}
+                          <div className="px-5 py-3 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-[#00488D] text-white flex items-center justify-center font-bold text-[11px]">
+                                {secIdx + 1}
                               </span>
-                            ) : p.status === "Critical" ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-red-700 bg-red-50">
-                                Critical
+                              <span className="font-bold text-slate-900 text-xs">
+                                {sec.name}
                               </span>
-                            ) : (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-amber-700 bg-amber-50">
-                                Abnormal
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-700">
+                                {sec.code}
                               </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-6 text-center border-l border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleToggleParameterApproval(p.id)
-                              }
-                              className={`px-4 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
-                                p.approved
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
-                                  : "text-blue-600 border border-blue-200 hover:bg-blue-50"
-                              }`}
-                            >
-                              {p.approved ? "Approved ✓" : "Approve"}
-                            </button>
-                          </td>
+                              <span className="text-[11px] text-slate-500 font-medium">
+                                • {sec.containerType}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-bold text-[#00488D] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
+                              {displayParams.length} Parameters
+                            </span>
+                          </div>
+
+                          {/* Parameters Table */}
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-sm bg-white">
+                              <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                                  <th className="py-3 px-6 font-semibold w-1/4" scope="col">
+                                    PARAMETER
+                                  </th>
+                                  <th className="py-3 px-6 font-semibold border-l border-slate-100" scope="col">
+                                    RESULT
+                                  </th>
+                                  <th className="py-3 px-6 font-semibold border-l border-slate-100" scope="col">
+                                    UNIT
+                                  </th>
+                                  <th className="py-3 px-6 font-semibold border-l border-slate-100" scope="col">
+                                    REFERENCE RANGE
+                                  </th>
+                                  <th className="py-3 px-6 font-semibold border-l border-slate-100 text-center" scope="col">
+                                    STATUS
+                                  </th>
+                                  <th className="py-3 px-6 font-semibold border-l border-slate-100 text-center" scope="col">
+                                    ACTION
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-700">
+                                {displayParams.map((p) => (
+                                  <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                                    <td className="py-3 px-6 font-medium text-slate-900">{p.parameter}</td>
+                                    <td className="py-3 px-6 text-slate-500 font-medium border-l border-slate-100 font-mono">{p.result}</td>
+                                    <td className="py-3 px-6 text-slate-600 border-l border-slate-100">{p.unit}</td>
+                                    <td className="py-3 px-6 text-slate-600 border-l border-slate-100">{p.referenceRange}</td>
+                                    <td className="py-3 px-6 text-center border-l border-slate-100">
+                                      {p.status === "Normal" ? (
+                                        <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-emerald-700 bg-emerald-50">
+                                          Normal
+                                        </span>
+                                      ) : p.status === "Critical" ? (
+                                        <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-red-700 bg-red-50">
+                                          Critical
+                                        </span>
+                                      ) : (
+                                        <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-amber-700 bg-amber-50">
+                                          Abnormal
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="py-3 px-6 text-center border-l border-slate-100">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleParameterApproval(p.id)}
+                                        className={`px-4 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                                          p.approved
+                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
+                                            : "text-blue-600 border border-blue-200 hover:bg-blue-50"
+                                        }`}
+                                      >
+                                        {p.approved ? "Approved ✓" : "Approve"}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                          <th className="py-3.5 px-6 font-semibold w-1/4" scope="col">
+                            PARAMETER
+                          </th>
+                          <th
+                            className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                            scope="col"
+                          >
+                            RESULT
+                          </th>
+                          <th
+                            className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                            scope="col"
+                          >
+                            UNIT
+                          </th>
+                          <th
+                            className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                            scope="col"
+                          >
+                            REFERENCE RANGE
+                          </th>
+                          <th
+                            className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
+                            scope="col"
+                          >
+                            STATUS
+                          </th>
+                          <th
+                            className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
+                            scope="col"
+                          >
+                            ACTION
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {currentParameters.map((p) => (
+                          <tr
+                            key={p.id}
+                            className="hover:bg-slate-50/70 transition-colors"
+                          >
+                            <td className="py-3 px-6 font-medium text-slate-900">
+                              {p.parameter}
+                            </td>
+                            <td className="py-3 px-6 text-slate-500 font-medium border-l border-slate-100 font-mono">
+                              {p.result}
+                            </td>
+                            <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
+                              {p.unit}
+                            </td>
+                            <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
+                              {p.referenceRange}
+                            </td>
+                            <td className="py-3 px-6 text-center border-l border-slate-100">
+                              {p.status === "Normal" ? (
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-emerald-700 bg-emerald-50">
+                                  Normal
+                                </span>
+                              ) : p.status === "Critical" ? (
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-red-700 bg-red-50">
+                                  Critical
+                                </span>
+                              ) : (
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-amber-700 bg-amber-50">
+                                  Abnormal
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-6 text-center border-l border-slate-100">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleToggleParameterApproval(p.id)
+                                }
+                                className={`px-4 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                                  p.approved
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
+                                    : "text-blue-600 border border-blue-200 hover:bg-blue-50"
+                                }`}
+                              >
+                                {p.approved ? "Approved ✓" : "Approve"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
               {/* END: Parameter Results Table */}
 
@@ -3947,17 +4675,45 @@ export default function ReportGeneration() {
                                 {r.doctorName}
                               </td>
                               <td className="py-5 px-6 whitespace-nowrap">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-slate-800 block">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-800 block">
                                     {r.testPanel}
                                   </span>
+                                  {r.isPackage && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                      PACKAGE ({r.subSections?.length || 0} Sub-Tests)
+                                    </span>
+                                  )}
+                                  {r.isSubTest && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      Sub-Test
+                                    </span>
+                                  )}
                                   {isOverdue && (
                                     <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wide uppercase">
                                       OVERDUE
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                {r.subSections && r.subSections.length > 0 && (
+                                  <div className="text-[11px] text-purple-700 font-semibold mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-slate-500 font-normal">United:</span>
+                                    {r.subSections.map((s, sIdx) => (
+                                      <span
+                                        key={s.key || sIdx}
+                                        className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 font-mono text-[10px]"
+                                      >
+                                        {s.code} ({s.parameters.length} params)
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {r.packageName && !r.isPackage && (
+                                  <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                    Package: <span className="text-slate-700 font-semibold">{r.packageName}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
                                   {r.sampleType && <span>{r.sampleType}</span>}
                                   {r.targetDate && (
                                     <span className={`font-semibold ${isOverdue ? "text-rose-700" : "text-slate-500"}`}>

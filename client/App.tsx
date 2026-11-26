@@ -94,6 +94,22 @@ import RoleManagement from "./pages/admin/RoleManagement";
 import AccessDenied from "./pages/AccessDenied";
 
 // ============================================================
+// SYSTEM OWNER
+// ============================================================
+
+import OwnerLogin from "./pages/OwnerLogin";
+import OwnerDashboard from "./pages/OwnerDashboard";
+
+// ============================================================
+// SUPER ADMIN
+// ============================================================
+
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+import Hospitals from "./pages/Hospitals";
+import UsersPage from "./pages/Users";
+import Branches from "./pages/Branches";
+
+// ============================================================
 // DOCTOR PORTAL
 // ============================================================
 
@@ -115,6 +131,18 @@ import ReportGeneration from "./pages/doctor/lab/reportgeneration";
 import ReportTransfer from "./pages/doctor/lab/reporttransfer";
 import LabProfile from "./pages/doctor/lab/labprofile";
 import LabMaster from "./pages/doctor/lab/labmaster";
+
+// ============================================================
+// PATIENT PORTAL
+// ============================================================
+
+import { PatientPortalLayout } from "@/components/patient-portal/PatientPortalLayout";
+import PatientDashboard from "./pages/patient/PatientDashboard";
+import PatientAppointments from "./pages/patient/PatientAppointments";
+import PatientLabReports from "./pages/patient/PatientLabReports";
+import PatientPrescriptions from "./pages/patient/PatientPrescriptions";
+import PatientHealthHistory from "./pages/patient/PatientHealthHistory";
+import PatientChemotherapy from "./pages/patient/PatientChemotherapy";
 
 // ============================================================
 // HOOKS / AUTH
@@ -447,6 +475,44 @@ const protectedRoutes = [
   },
 
   // ----------------------------------------------------------
+  // System Owner
+  // ----------------------------------------------------------
+
+  {
+    path: "/owner-dashboard",
+    element: <OwnerDashboard />,
+    permission: "hospital.read",
+  },
+
+  // ----------------------------------------------------------
+  // Super Admin
+  // ----------------------------------------------------------
+
+  {
+    path: "/super-admin",
+    element: <SuperAdminDashboard />,
+    permission: "hospital.read",
+  },
+
+  {
+    path: "/hospitals",
+    element: <Hospitals />,
+    permission: "hospital.read",
+  },
+
+  {
+    path: "/users",
+    element: <UsersPage />,
+    permission: "employee.read",
+  },
+
+  {
+    path: "/branches",
+    element: <Branches />,
+    permission: "branch.read",
+  },
+
+  // ----------------------------------------------------------
   // Staff
   // ----------------------------------------------------------
 
@@ -558,7 +624,12 @@ const RememberMeCheck = () => {
   if (!getToken() || !user) return null; // token without a usable session -> Login handles cleanup
 
   const roleType = String(user.role_type ?? "").trim().toUpperCase();
-  const targetDashboard = roleType === "LAB_TECHNICIAN" ? "/lab/dashboard" : "/dashboard";
+  const targetDashboard =
+    roleType === "PATIENT"
+      ? "/patient/dashboard"
+      : roleType === "LAB_TECHNICIAN"
+      ? "/lab/dashboard"
+      : "/dashboard";
 
   // Logged-in user landed on the login route: NEVER paint the Login form.
   // It used to render fully for one frame before the redirect effect fired,
@@ -601,6 +672,11 @@ const App = () => (
             <Route
               path="/"
               element={<Login />}
+            />
+
+            <Route
+              path="/owner-login"
+              element={<OwnerLogin />}
             />
 
             <Route
@@ -729,6 +805,61 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <LabMaster />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
+
+            {/* ==================================================
+                PATIENT PORTAL
+            ================================================== */}
+
+            <Route element={<PatientPortalLayout />}>
+              <Route
+                path="/patient/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <PatientDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/appointments"
+                element={
+                  <ProtectedRoute>
+                    <PatientAppointments />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/chemotherapy"
+                element={
+                  <ProtectedRoute>
+                    <PatientChemotherapy />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/reports"
+                element={
+                  <ProtectedRoute>
+                    <PatientLabReports />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/prescriptions"
+                element={
+                  <ProtectedRoute>
+                    <PatientPrescriptions />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/history"
+                element={
+                  <ProtectedRoute>
+                    <PatientHealthHistory />
                   </ProtectedRoute>
                 }
               />

@@ -33,6 +33,11 @@ import {
   FlaskConical,
   Activity,
 } from "lucide-react";
+import {
+  isPackageTest,
+  decomposePackageTest,
+  generateSubTestBarcode,
+} from "./packageDecomposition";
 
 /* ================================================================
    Type definitions
@@ -53,6 +58,11 @@ interface OrderTestItem {
   targetDate?: string;
   targetDateIso?: string;
   deadlineDate?: string;
+  isOutsourced?: boolean;
+  outsourceLab?: string;
+  packageName?: string;
+  isSubTest?: boolean;
+  parentOrderItemId?: string;
 }
 
 interface TrackedOrder {
@@ -373,8 +383,8 @@ export default function LabOrders() {
         const pAddr = [patient?.patient_address || patient?.Patient_address || patient?.current_address, patient?.patient_area, patient?.patient_district]
           .filter(Boolean).join(", ") || "";
 
-        // map each test item
-        const tests: OrderTestItem[] = orderItems.map((oi) => {
+        // map each test item (decomposing packages into individual sub-tests)
+        const tests: OrderTestItem[] = orderItems.flatMap((oi) => {
           const itemId = oi.lab_order_item_id || String(oi.id);
           const rawStatus = (oi.item_status || "").toUpperCase();
 
@@ -404,10 +414,6 @@ export default function LabOrders() {
             lsStatus === "COMPLETED" ||
             Boolean(lsResult);
 
-          // Tests which are not completed MUST show as Pending
-          let status: OrderTestItem["status"] = isTestItemCompleted ? "COMPLETED" : "PENDING";
-          let statusLabel = isTestItemCompleted ? "Completed" : "Pending";
-
           const itemRawTarget = oi.target_date || (order as any).target_date;
           const targetDateFormatted = formatTargetDate(itemRawTarget);
           const targetDateIso = toIsoDateString(itemRawTarget);
@@ -433,10 +439,71 @@ export default function LabOrders() {
               })
             : undefined;
 
-          return {
+          const rawTestName = oi.lab_test_master?.test_name || "Diagnostic Test";
+          const rawTestCode = oi.lab_test_master?.test_code || oi.lab_test_id?.replace(/^LABTEST/, "T") || "TEST";
+          const includesDetails = oi.lab_test_master?.includes_details;
+
+          if (isPackageTest(rawTestName, rawTestCode, includesDetails)) {
+            const subDefs = decomposePackageTest(rawTestName, rawTestCode, includesDetails);
+            return subDefs.map((st, sIdx) => {
+              const subId = `${itemId}__${st.key}`;
+              const subBarcode =
+                (oi.sample_collection && oi.sample_collection[sIdx]?.barcode) ||
+                (typeof window !== "undefined"
+                  ? localStorage.getItem(`generated_barcode_item_${subId}`) ||
+                    localStorage.getItem(`generated_barcode_item_${itemId}__${st.key}`) ||
+                    localStorage.getItem(`generated_barcode_item_${itemId}_${st.code.toLowerCase()}`) ||
+                    undefined
+                  : undefined) ||
+                generateSubTestBarcode(barcode || `BC${order.lab_order_id.replace(/\D/g, "").slice(-6) || "2405"}`, st.code, sIdx);
+
+              const subLsStatus = typeof window !== "undefined" ? localStorage.getItem(`testing_sample_status_${subId}`) : null;
+              const subLsResult = typeof window !== "undefined" ? localStorage.getItem(`testing_sample_result_${subId}`) || undefined : undefined;
+              let subLsParams: any[] = [];
+              try {
+                const pp = typeof window !== "undefined" ? localStorage.getItem(`testing_sample_params_${subId}`) : null;
+                if (pp) subLsParams = JSON.parse(pp);
+              } catch { /* ignore */ }
+
+              const isSubCompleted =
+                isTestItemCompleted ||
+                subLsStatus === "COMPLETED" ||
+                Boolean(subLsResult);
+
+              const subStatus: OrderTestItem["status"] = isSubCompleted ? "COMPLETED" : "PENDING";
+              const subStatusLabel = isSubCompleted ? "Completed" : "Pending";
+
+              return {
+                id: subId,
+                parentOrderItemId: itemId,
+                packageName: rawTestName,
+                isSubTest: true,
+                testCode: st.code,
+                testName: st.name,
+                sampleType: `${st.sampleType} • ${st.containerType}`,
+                barcode: subBarcode,
+                status: subStatus,
+                statusLabel: subStatusLabel,
+                completedAt: subStatus === "COMPLETED" ? (oi.updated_at ? new Date(oi.updated_at).toLocaleString() : "—") : undefined,
+                resultSummary: subLsResult || lsResult,
+                parameters: subLsParams.length > 0 ? subLsParams : undefined,
+                targetDate: targetDateFormatted !== "—" ? targetDateFormatted : undefined,
+                targetDateIso: targetDateIso || undefined,
+                deadlineDate,
+                isOutsourced: (oi.lab_test_master as any)?.is_outsourced ?? false,
+                outsourceLab: (oi.lab_test_master as any)?.outsource_lab || ((oi.lab_test_master as any)?.is_outsourced ? "Outsourced Partner" : "In-house lab"),
+              };
+            });
+          }
+
+          // Tests which are not completed MUST show as Pending
+          let status: OrderTestItem["status"] = isTestItemCompleted ? "COMPLETED" : "PENDING";
+          let statusLabel = isTestItemCompleted ? "Completed" : "Pending";
+
+          return [{
             id: itemId,
-            testCode: oi.lab_test_master?.test_code || oi.lab_test_id?.replace(/^LABTEST/, "T") || "TEST",
-            testName: oi.lab_test_master?.test_name || "Diagnostic Test",
+            testCode: rawTestCode,
+            testName: rawTestName,
             sampleType: oi.lab_test_master?.sample_type || oi.specimen_type || "Whole Blood",
             barcode,
             status,
@@ -447,7 +514,9 @@ export default function LabOrders() {
             targetDate: targetDateFormatted !== "—" ? targetDateFormatted : undefined,
             targetDateIso: targetDateIso || undefined,
             deadlineDate,
-          };
+            isOutsourced: (oi.lab_test_master as any)?.is_outsourced ?? false,
+            outsourceLab: (oi.lab_test_master as any)?.outsource_lab || ((oi.lab_test_master as any)?.is_outsourced ? "Outsourced Partner" : "In-house lab"),
+          }];
         });
 
         // if order had no items from backend, create a placeholder so the order still shows
@@ -1815,6 +1884,20 @@ export default function LabOrders() {
                               {t.testCode}
                             </span>
                             <h4 className="text-sm font-bold text-slate-900">{t.testName}</h4>
+                            {t.isSubTest && t.packageName && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                Sub-Test • {t.packageName}
+                              </span>
+                            )}
+                            {t.isOutsourced ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                OUTSOURCED: {t.outsourceLab || "Partner Lab"}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                IN-HOUSE
+                              </span>
+                            )}
                             {testOverdue && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-rose-600 text-white tracking-wider uppercase">
                                 OVERDUE

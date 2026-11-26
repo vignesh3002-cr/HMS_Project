@@ -27,6 +27,7 @@ import {
 import { employeeApi } from "../../api/employee.api";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
+import { isPastAppointmentNoShow } from "@/lib/appointmentNoShow";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { SandwichQueueModal } from "@/components/hms/SandwichQueueModal";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -77,6 +78,9 @@ interface Patient {
   appointmentDateRaw: string;
   appointmentTimeRaw: string;
   originalStatus: string;
+  /** True when the row is only DISPLAYED as "No Show" because its date is before
+   *  today (branch timezone). The DB status in `originalStatus` is untouched. */
+  derivedNoShow: boolean;
   status: AppointmentStatus;
   avatarUrl?: string;
 }
@@ -196,6 +200,9 @@ function isBeforeToday(dateStr: string): boolean {
 
 function toPatient(a: AppointmentRecord): Patient {
   const effectiveStatus = a.status ?? "";
+  // Display-only rule: dated before today (branch timezone) -> shown as
+  // "No Show" regardless of the stored status. Nothing is written back.
+  const derivedNoShow = isPastAppointmentNoShow(a.appointment_date);
   const bio = a.patient_bio_data;
   const gender = bio?.patient_gender
     ? bio.patient_gender.charAt(0).toUpperCase() +
@@ -221,7 +228,8 @@ function toPatient(a: AppointmentRecord): Patient {
     originalStatus: a.status ?? "",
     age: bio?.patient_age ?? computeAge(bio?.patient_dob),
     bloodGroup: bio?.patient_blood_group ?? undefined,
-    status: toDisplayStatus(effectiveStatus),
+    derivedNoShow,
+    status: derivedNoShow ? "No Show" : toDisplayStatus(effectiveStatus),
   };
 }
 
@@ -551,6 +559,15 @@ const NON_EDITABLE_STATUSES = [
   "NO_SHOW",
 ];
 
+/** The status every action / filter / sort on this page must agree with: the
+ *  real DB status, except for a past appointment which is only DISPLAYED as
+ *  "No Show" (frontend-only derivation, no write-back). */
+function effectiveRawStatus(
+  patient: Pick<Patient, "originalStatus" | "derivedNoShow">,
+): string {
+  return patient.derivedNoShow ? "NO_SHOW" : patient.originalStatus;
+}
+
 interface PatientActionProps {
   actionBusyId: string | null;
   onCheckIn: (patient: Patient) => void;
@@ -573,12 +590,9 @@ function AppointmentRowMenu({
   PatientActionProps,
   "onReschedule" | "onBookFollowUp" | "onCancelRequest" | "onSandwich"
 >) {
-  const canReschedule = !NON_EDITABLE_STATUSES.includes(
-    patient.originalStatus,
-  );
-  const canCancel = !NON_CANCELABLE_STATUSES.includes(
-    patient.originalStatus,
-  );
+  const rawStatus = effectiveRawStatus(patient);
+  const canReschedule = !NON_EDITABLE_STATUSES.includes(rawStatus);
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(rawStatus);
 
   return (
     <DropdownMenu>
@@ -624,10 +638,10 @@ function AppointmentRowMenu({
           </>
         )}
 
-        {(patient.originalStatus === "NO_SHOW" ||
-          patient.originalStatus === "CANCELLED" ||
-          patient.originalStatus === "SCHEDULED" ||
-          patient.originalStatus === "RESCHEDULED") &&
+        {(rawStatus === "NO_SHOW" ||
+          rawStatus === "CANCELLED" ||
+          rawStatus === "SCHEDULED" ||
+          rawStatus === "RESCHEDULED") &&
           onSandwich && (
             <>
               <DropdownMenuSeparator />
@@ -646,13 +660,16 @@ function AppointmentRowMenu({
 }
 
 function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest, onSandwich }: PatientActionProps & { patient: Patient }) {
-  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
-  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
-  const canCancel = !NON_CANCELABLE_STATUSES.includes(patient.originalStatus);
+  // A past appointment is DISPLAYED as "No Show", so it must behave like one:
+  // no check-in / proceed / cancel, exactly like a real NO_SHOW row.
+  const rawStatus = effectiveRawStatus(patient);
+  const canCheckIn = CHECKIN_STATUSES.includes(rawStatus);
+  const canProceed = PROCEED_STATUSES.includes(rawStatus);
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(rawStatus);
   const isBusy = actionBusyId === patient.id;
 
   if (!canCheckIn && !canProceed && !canCancel) {
-    if (patient.originalStatus === "NO_SHOW" && onSandwich) {
+    if (rawStatus === "NO_SHOW" && onSandwich) {
       return (
         <div className="flex items-center justify-end">
           <button
@@ -727,8 +744,8 @@ function PatientCard({
   onSandwich,
   getCriticalInfo,
 }: { patient: Patient; getCriticalInfo: (id: string) => import("@/components/hms/CriticalPatientIndicator").CriticalInfo } & PatientActionProps) {
-  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
-  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
+  const canCheckIn = CHECKIN_STATUSES.includes(effectiveRawStatus(patient));
+  const canProceed = PROCEED_STATUSES.includes(effectiveRawStatus(patient));
   const isBusy = actionBusyId === patient.id;
   const crit = getCriticalInfo(patient.patientId);
 
@@ -1265,7 +1282,9 @@ export default function AppointmentPage() {
         patient: p.name,
         patientId: p.patientCode,
         branch: null as string | null,
-        status: p.originalStatus,
+        // Derived status, so the "No Show" filter option also catches the
+        // past appointments that are only displayed as no-show.
+        status: effectiveRawStatus(p),
         visitType: (p as any).visitType || null,
         tokenId: p.tokenNumber != null ? String(p.tokenNumber) : undefined,
       })),
@@ -1298,7 +1317,7 @@ export default function AppointmentPage() {
       patient: p.name,
       patientId: p.patientCode,
       branch: null as string | null,
-      status: p.originalStatus,
+      status: effectiveRawStatus(p),
     }));
     result = filterDataByValues(filterable, appliedValues, appointmentFilterFields) as Patient[];
 
@@ -1326,7 +1345,7 @@ export default function AppointmentPage() {
             return String(a.tokenNumber).localeCompare(String(b.tokenNumber), undefined, { numeric: true }) * factor;
           }
           case "status":
-            return a.originalStatus.localeCompare(b.originalStatus) * factor;
+            return effectiveRawStatus(a).localeCompare(effectiveRawStatus(b)) * factor;
           default: {
             const val = String(a[sortField] ?? "").localeCompare(String(b[sortField] ?? ""));
             return val * factor;

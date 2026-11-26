@@ -15,19 +15,28 @@ export interface SampleStabilityInfo {
   deadlineTime: Date | null;
   formattedDeadlineTime: string;
   remainingMinutes: number;
+  remainingSeconds: number;
+  digitalCountdown: string; // e.g., "01:45:20" or "Expired before 2 hrs"
+  percentRemaining: number; // 0 to 100 for progress bar
   isExpired: boolean;
-  isExpiringSoon: boolean;
+  isExpiringSoon: boolean; // <= 30m
+  isWarning: boolean;      // 30m - 60m
+  isSafe: boolean;         // > 60m
   isCollected: boolean;
+  isCompleted: boolean;
   urgencyLevel: SampleUrgencyLevel;
   badgeLabel: string;
+  expiredBeforeLabel?: string; // e.g. "Expired before 2 hrs"
   badgeClasses: string;
   dotClasses: string;
   stabilityHours: number;
+  alertBannerMessage?: string;
 }
 
 /**
  * Determines the clinical stability window in hours.
- * Clinical standards:
+ * 1. Checks explicit database expiry_time_hours if present.
+ * 2. Clinical standards heuristic:
  * - Arterial Blood Gas (ABG): 0.5 - 1 hr
  * - Coagulation (PT/INR): 2 hrs
  * - Unseparated Blood Glucose / Potassium / Electrolytes: 2 hrs
@@ -39,8 +48,14 @@ export function resolveStabilityHours(
   testName?: string,
   sampleType?: string,
   tatHours?: number | string | null,
-  priority?: string | null
+  priority?: string | null,
+  dbExpiryHours?: number | string | null
 ): number {
+  if (dbExpiryHours != null && !Number.isNaN(Number(dbExpiryHours))) {
+    const parsedDb = Number(dbExpiryHours);
+    if (parsedDb > 0) return parsedDb;
+  }
+
   const p = (priority || "").toLowerCase();
   if (p === "stat" || p === "emergency") return 1;
 
@@ -73,7 +88,6 @@ export function parseDateSafe(input?: string | Date | null): Date | null {
   const d = new Date(input);
   if (!isNaN(d.getTime())) return d;
 
-  // Handle DD/MM/YYYY or DD-MM-YYYY formats if needed
   const parts = String(input).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
   if (parts) {
     const day = parseInt(parts[1], 10);
@@ -91,6 +105,33 @@ export function parseDateSafe(input?: string | Date | null): Date | null {
 }
 
 /**
+ * Formats elapsed overtime in human-readable clinical phrasing:
+ * e.g., "Expired before 2 hrs", "Expired before 1 hr 15 mins", "Expired before 25 mins"
+ */
+export function formatExpiredBefore(elapsedSeconds: number): string {
+  const totalSec = Math.max(0, Math.floor(elapsedSeconds));
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+
+  if (hours >= 1) {
+    if (minutes > 0) {
+      return `Expired before ${hours} hr${hours > 1 ? "s" : ""} ${minutes} min${minutes > 1 ? "s" : ""}`;
+    }
+    return `Expired before ${hours} hr${hours > 1 ? "s" : ""}`;
+  }
+
+  if (minutes >= 1) {
+    if (seconds > 0 && minutes < 5) {
+      return `Expired before ${minutes} min${minutes > 1 ? "s" : ""} ${seconds}s`;
+    }
+    return `Expired before ${minutes} min${minutes > 1 ? "s" : ""}`;
+  }
+
+  return `Expired before ${seconds} sec${seconds !== 1 ? "s" : ""}`;
+}
+
+/**
  * Calculates real-time sample stability, countdown, and urgency tier.
  * NOTE: The timer for sample expiry starts strictly AFTER THE SAMPLE IS COLLECTED.
  * If the sample is not yet collected, the countdown does NOT start.
@@ -100,7 +141,8 @@ export function calculateSampleStability(
   stabilityHours: number = 2,
   status?: string,
   nowTime: number = Date.now(),
-  isCollected: boolean = true
+  isCollected: boolean = true,
+  expiryTimeInput?: string | Date | null
 ): SampleStabilityInfo {
   const isCompleted =
     (status || "").toUpperCase() === "COMPLETED" ||
@@ -114,11 +156,17 @@ export function calculateSampleStability(
       deadlineTime: null,
       formattedDeadlineTime: "—",
       remainingMinutes: 9999,
+      remainingSeconds: 999999,
+      digitalCountdown: "—:—",
+      percentRemaining: 100,
       isExpired: false,
       isExpiringSoon: false,
+      isWarning: false,
+      isSafe: true,
       isCollected: false,
+      isCompleted,
       urgencyLevel: isCompleted ? "COMPLETED" : "NOT_COLLECTED",
-      badgeLabel: isCompleted ? "Completed" : "Awaiting Collection",
+      badgeLabel: isCompleted ? "Completed" : "Awaiting Draw",
       badgeClasses: "bg-slate-100 text-slate-500 border border-slate-200 font-medium",
       dotClasses: "bg-slate-400",
       stabilityHours,
@@ -134,11 +182,17 @@ export function calculateSampleStability(
       deadlineTime: null,
       formattedDeadlineTime: "—",
       remainingMinutes: 9999,
+      remainingSeconds: 999999,
+      digitalCountdown: "—:—",
+      percentRemaining: 100,
       isExpired: false,
       isExpiringSoon: false,
+      isWarning: false,
+      isSafe: true,
       isCollected: false,
+      isCompleted,
       urgencyLevel: isCompleted ? "COMPLETED" : "NOT_COLLECTED",
-      badgeLabel: isCompleted ? "Completed" : "Awaiting Collection",
+      badgeLabel: isCompleted ? "Completed" : "Awaiting Draw",
       badgeClasses: "bg-slate-100 text-slate-500 border border-slate-200 font-medium",
       dotClasses: "bg-slate-400",
       stabilityHours,
@@ -152,9 +206,13 @@ export function calculateSampleStability(
     timeZone: getActiveTimezone(),
   });
 
-  // Expiry deadline is measured from the exact sample collection time
-  const deadlineMs = collectionDate.getTime() + stabilityHours * 3600 * 1000;
-  const deadlineDate = new Date(deadlineMs);
+  // Expiry deadline: Use database expiry_datetime if provided, else compute from collection + stabilityHours
+  let deadlineDate = parseDateSafe(expiryTimeInput);
+  if (!deadlineDate) {
+    const deadlineMs = collectionDate.getTime() + stabilityHours * 3600 * 1000;
+    deadlineDate = new Date(deadlineMs);
+  }
+
   const formattedDeadlineTime = deadlineDate.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -169,53 +227,81 @@ export function calculateSampleStability(
       deadlineTime: deadlineDate,
       formattedDeadlineTime,
       remainingMinutes: 0,
+      remainingSeconds: 0,
+      digitalCountdown: "00:00:00",
+      percentRemaining: 100,
       isExpired: false,
       isExpiringSoon: false,
+      isWarning: false,
+      isSafe: true,
       isCollected: true,
+      isCompleted: true,
       urgencyLevel: "COMPLETED",
       badgeLabel: "Completed",
-      badgeClasses: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+      badgeClasses: "bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium",
       dotClasses: "bg-emerald-500",
       stabilityHours,
     };
   }
 
-  const diffMs = deadlineMs - nowTime;
+  const diffMs = deadlineDate.getTime() - nowTime;
+  const remainingTotalSeconds = Math.floor(diffMs / 1000);
   const remainingMinutes = Math.floor(diffMs / 60000);
-  const isExpired = remainingMinutes <= 0;
-  const isExpiringSoon = remainingMinutes > 0 && remainingMinutes <= 30;
+  const isExpired = remainingTotalSeconds <= 0;
+  const isExpiringSoon = !isExpired && remainingMinutes <= 30;
+  const isWarning = !isExpired && remainingMinutes > 30 && remainingMinutes <= 60;
+  const isSafe = !isExpired && remainingMinutes > 60;
+
+  // Format digital countdown: HH:MM:SS
+  const absSec = Math.abs(remainingTotalSeconds);
+  const h = Math.floor(absSec / 3600);
+  const m = Math.floor((absSec % 3600) / 60);
+  const s = absSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  const elapsedSec = isExpired ? Math.abs(remainingTotalSeconds) : 0;
+  const expiredBeforeLabel = isExpired ? formatExpiredBefore(elapsedSec) : undefined;
+
+  // Before expiry: timer counts down in seconds (e.g. 29, 28, 27)
+  // After expiry: displays "Expired before 2 hrs"
+  const digitalCountdown = isExpired
+    ? (expiredBeforeLabel || "Expired")
+    : `${pad(h)}:${pad(m)}:${pad(s)}`;
+
+  // Calculate percentage remaining for the progress bar
+  const totalWindowSec = Math.max(1, stabilityHours * 3600);
+  const percentRemaining = isExpired
+    ? 0
+    : Math.min(100, Math.max(0, Math.round((remainingTotalSeconds / totalWindowSec) * 100)));
 
   let urgencyLevel: SampleUrgencyLevel = "SAFE";
   let badgeLabel = "";
   let badgeClasses = "";
   let dotClasses = "";
+  let alertBannerMessage: string | undefined = undefined;
 
   if (isExpired) {
     urgencyLevel = "EXPIRED";
-    const overdueMins = Math.abs(remainingMinutes);
-    const hrs = Math.floor(overdueMins / 60);
-    const mins = overdueMins % 60;
-    const overdueText = hrs > 0 ? `+${hrs}h ${mins}m` : `+${mins}m`;
-    badgeLabel = `EXPIRED (${overdueText})`;
-    badgeClasses = "bg-rose-100 text-rose-800 border border-rose-300 font-bold";
-    dotClasses = "bg-rose-600 animate-ping";
-  } else if (remainingMinutes <= 30) {
-    urgencyLevel = "CRITICAL";
-    badgeLabel = `${remainingMinutes}m left • URGENT`;
-    badgeClasses = "bg-red-50 text-red-700 border border-red-300 font-bold animate-pulse shadow-xs";
-    dotClasses = "bg-red-600";
-  } else if (remainingMinutes <= 60) {
-    urgencyLevel = "WARNING";
-    badgeLabel = `${remainingMinutes}m left`;
-    badgeClasses = "bg-amber-50 text-amber-700 border border-amber-300 font-semibold";
-    dotClasses = "bg-amber-500";
+    badgeLabel = expiredBeforeLabel || "Expired";
+    // After expiry: High visibility red/rose style
+    badgeClasses = "bg-rose-50 text-rose-700 border border-rose-300 font-bold shadow-2xs";
+    dotClasses = "bg-rose-600";
+    alertBannerMessage = `⛔ Specimen Expired: ${expiredBeforeLabel}. Sample recollection or supervisor override required.`;
   } else {
-    urgencyLevel = "SAFE";
-    const hrs = Math.floor(remainingMinutes / 60);
-    const mins = remainingMinutes % 60;
-    badgeLabel = `${hrs}h ${mins}m left`;
-    badgeClasses = "bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium";
-    dotClasses = "bg-emerald-500";
+    // BEFORE EXPIRY: Displayed in GREEN COLOUR with reducing seconds (29, 28, 27...)
+    badgeLabel = `${pad(h)}:${pad(m)}:${pad(s)} left`;
+    badgeClasses = "bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold shadow-2xs";
+    dotClasses = "bg-emerald-500 animate-pulse";
+
+    if (remainingMinutes <= 30) {
+      urgencyLevel = "CRITICAL";
+      alertBannerMessage = `⚠️ Short Time Alert: Only ${remainingMinutes}m left before sample expires! Complete testing and record results immediately.`;
+    } else if (remainingMinutes <= 60) {
+      urgencyLevel = "WARNING";
+      alertBannerMessage = `⏰ Caution: Specimen expiring in ${remainingMinutes} minutes. Expedite testing on analyzer.`;
+    } else {
+      urgencyLevel = "SAFE";
+    }
   }
 
   return {
@@ -224,22 +310,30 @@ export function calculateSampleStability(
     deadlineTime: deadlineDate,
     formattedDeadlineTime,
     remainingMinutes,
+    remainingSeconds: remainingTotalSeconds,
+    digitalCountdown,
+    percentRemaining,
     isExpired,
     isExpiringSoon,
+    isWarning,
+    isSafe,
     isCollected: true,
+    isCompleted: false,
     urgencyLevel,
     badgeLabel,
+    expiredBeforeLabel,
     badgeClasses,
     dotClasses,
     stabilityHours,
+    alertBannerMessage,
   };
 }
 
 /**
  * React hook that yields the current timestamp, updating every `intervalMs` ms.
- * Single centralized timer for zero performance overhead.
+ * Defaults to 1000ms (1 second) so seconds count down (29, 28, 27...) in real-time.
  */
-export function useCurrentTimeTicker(intervalMs: number = 30000): number {
+export function useCurrentTimeTicker(intervalMs: number = 1000): number {
   const [now, setNow] = useState<number>(Date.now());
 
   useEffect(() => {
