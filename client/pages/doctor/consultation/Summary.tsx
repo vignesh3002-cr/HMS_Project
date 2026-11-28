@@ -6,12 +6,26 @@ import autoTable from 'jspdf-autotable';
 import type { Styles } from 'jspdf-autotable';
 import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
-import { getUser } from "../../../utils/token";
+import { getToken, getUser } from "../../../utils/token";
+import {
+  CONSENT_FORM_ACCEPT,
+  CONSENT_FORM_MAX_BYTES,
+  blobToDataUrl,
+  imageSizeOf,
+  isPdfConsentForm,
+  isSupportedConsentFormFile,
+  renderPdfPagesToDataUrls,
+} from "../../../utils/consentForm";
 import { clinicalDetailsApi, type EncounterClinicalDetails } from "../../../api/clinicalDetails.api";
 import { patientApi } from "../../../api/patient.api";
 import { employeeApi } from "../../../api/employee.api";
 import { branchApi } from "../../../api/branch.api";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import { fileToBase64 } from "../../../api/genomics.api";
+import {
+  consentApi,
+  type PlanConsentRecord,
+} from "../../../api/consent.api";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
 import {
   formatDaysDuration,
@@ -229,6 +243,9 @@ type SummaryPlan = {
   karnofsky_score?: number | string | null;
   diagnosis_id?: string | null;
   staging_detail_id?: string | null;
+  encounter_no?: string | null;
+  consent_taken?: boolean | null;
+  consent_date?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   employees?: {
@@ -468,6 +485,19 @@ function VisitSectionView({ section }: { section: VisitSection }) {
    reference them without being recreated on every Summary render). */
 export type ConsentRole = "patient" | "witness" | "doctor";
 export interface ConsentSignature { dataUrl: string; width: number; height: number; }
+
+/* A physically signed consent form stored in patient_document with
+   document_type = CONSENT_FORM. It replaces the generated consent pages in
+   the printed summary. */
+export interface UploadedConsentDocument {
+  document_id: string;
+  file_name: string;
+  file_type?: string | null;
+  encounter_no?: string | null;
+  created_at?: string | null;
+  document_type?: string | null;
+  chemotherapy_plan_id?: string | null;
+}
 
 const CAPTURE_W = 400;
 const CAPTURE_H = 200;
@@ -760,8 +790,10 @@ const Summary: React.FC<{
   const [doctorInfo, setDoctorInfo] = useState({ name: "", regNo: "" });
   const [branchContact, setBranchContact] = useState("");
 
-  /* Consent signature capture (patient / witness / doctor), persisted to
-     localStorage so captured signatures survive refresh and re-print. */
+  /* Consent is owned by the current chemotherapy plan: e-signatures in
+     chemotherapy_plan_consent and signed forms in patient_document. Both are
+     reloaded on every visit of the same plan and cleared when a new plan
+     starts. */
   const [consentSignatures, setConsentSignatures] =
     useState<Record<ConsentRole, ConsentSignature | null>>({
       patient: null,
@@ -769,6 +801,33 @@ const Summary: React.FC<{
       doctor: null,
     });
   const [consentDate, setConsentDate] = useState("");
+  const [consentSignerFields, setConsentSignerFields] = useState({
+    patient_name: "",
+    witness_name: "",
+    witness_relation: "",
+    doctor_name: "",
+    doctor_reg_no: "",
+  });
+  const [planConsent, setPlanConsent] = useState<PlanConsentRecord | null>(null);
+  const [consentLoaded, setConsentLoaded] = useState(false);
+  const [consentSaveState, setConsentSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [consentSaveError, setConsentSaveError] = useState("");
+  /* Every signed form attached to (or filed against the visit of) this plan. */
+  const [consentForms, setConsentForms] = useState<UploadedConsentDocument[]>([]);
+  /* Older patient-level consent forms the doctor can still attach. */
+  const [unassignedConsentForms, setUnassignedConsentForms] = useState<
+    UploadedConsentDocument[]
+  >([]);
+  const [attachingConsentId, setAttachingConsentId] = useState("");
+  const [consentFormsLoading, setConsentFormsLoading] = useState(false);
+  const [consentUploading, setConsentUploading] = useState(false);
+  const [consentUploadError, setConsentUploadError] = useState("");
+  const consentFileInputRef = useRef<HTMLInputElement>(null);
+  /* Auto-save only after a local edit, never just because a plan loaded. */
+  const consentDirtyRef = useRef(false);
+  const consentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
   const [summarySymptoms, setSummarySymptoms] = useState<string[]>([]);
@@ -828,54 +887,528 @@ const Summary: React.FC<{
   /* "Add To Print": the headings picked for the printout. */
   const [printSections, setPrintSections] = useState<string[]>([]);
 
-  /* Consent signature key: persists per patient + encounter so signatures
-     survive refresh and re-print. Falls back to patientId-only when the
-     encounter number isn't resolved yet. */
-  const consentStorageKey = () =>
-    `hms_consent_signatures_${resolvedPatientId}_${encounterNo || ""}`;
+  /* Consent form uploads are patient documents tagged CONSENT_FORM and
+     scoped to the current chemotherapy plan. */
+  const consentEncounterNo = () => encounterNo || resolvedSummaryEncounterNo || "";
 
-  /* Load persisted consent signatures from localStorage on mount. */
-  useEffect(() => {
-    if (!resolvedPatientId) return;
-    const stored = localStorage.getItem(consentStorageKey());
-    if (!stored) return;
+  const consentDocumentViewUrl = (documentId: string) =>
+    consentApi.viewUrl(documentId, getToken());
+
+  /* The database stores only the signature image; width/height are measured
+     here so the printed blocks keep the right aspect ratio. */
+  const signatureFromDataUrl = async (
+    dataUrl?: string | null
+  ): Promise<ConsentSignature | null> => {
+    if (!dataUrl) return null;
     try {
-      const parsed = JSON.parse(stored);
-      const next: Record<ConsentRole, ConsentSignature | null> = {
-        patient: null,
-        witness: null,
-        doctor: null,
+      const size = await imageSizeOf(dataUrl);
+      return {
+        dataUrl,
+        width: size.width || CAPTURE_W,
+        height: size.height || CAPTURE_H,
       };
-      for (const role of ["patient", "witness", "doctor"] as ConsentRole[]) {
-        const entry = parsed?.[role];
-        if (entry && typeof entry.dataUrl === "string") next[role] = entry;
-      }
-      if (parsed.consentDate) setConsentDate(String(parsed.consentDate));
-      setConsentSignatures(next);
     } catch {
-      /* Ignore corrupt storage. */
+      return { dataUrl, width: CAPTURE_W, height: CAPTURE_H };
     }
-  }, [resolvedPatientId, encounterNo]);
+  };
 
-  /* Persist consent signatures to localStorage whenever they change, and
-     auto-set the consent date once all three roles are captured. */
-  useEffect(() => {
-    if (!resolvedPatientId) return;
-    try {
-      localStorage.setItem(
-        consentStorageKey(),
-        JSON.stringify({ ...consentSignatures, consentDate })
-      );
-    } catch {
-      /* localStorage quota exceeded - keep working in memory only. */
+  const signaturesFromConsent = async (record: PlanConsentRecord | null) => {
+    const [patient, witness, doctor] = await Promise.all([
+      signatureFromDataUrl(record?.patient_signature),
+      signatureFromDataUrl(record?.witness_signature),
+      signatureFromDataUrl(record?.doctor_signature),
+    ]);
+    return { patient, witness, doctor };
+  };
+
+  /* The API accepts YYYY-MM-DD; the UI shows DD-MM-YYYY. */
+  const consentDateToIso = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const dmy = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (dmy) {
+      return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
     }
-    const allCaptured = ["patient", "witness", "doctor"].every(
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime())
+      ? null
+      : parsed.toISOString().slice(0, 10);
+  };
+
+  /* Only forms explicitly attached to this plan count: the plan list also
+     returns legacy forms filed against the plan's visit, and the backend gate
+     checks chemotherapy_plan_id, so an unattached form must not read as ready. */
+  const attachedConsentForms = () =>
+    consentForms.filter((form) => Boolean(form.chemotherapy_plan_id));
+
+  const consentIsReady = () =>
+    planConsent?.status === "SIGNED" ||
+    attachedConsentForms().length > 0 ||
+    Boolean(plan?.consent_taken);
+
+  /* Both lists are needed together: the plan list also returns legacy
+     documents filed against the plan's visit, which must not be repeated in
+     the "not yet attached" list. */
+  const fetchPlanConsentDocuments = async (planId: string) => {
+    const [formsResponse, unassignedResponse] = await Promise.all([
+      consentApi.listPlanConsentForms(planId),
+      resolvedPatientId
+        ? consentApi.listUnassignedConsentForms(resolvedPatientId)
+        : Promise.resolve({
+            data: { success: true, data: [] as UploadedConsentDocument[] },
+          }),
+    ]);
+    const forms = (formsResponse.data?.data ?? []) as UploadedConsentDocument[];
+    const unassignedAll = (unassignedResponse.data?.data ??
+      []) as UploadedConsentDocument[];
+    return {
+      forms,
+      unassigned: unassignedAll.filter(
+        (doc) => !forms.some((form) => form.document_id === doc.document_id)
+      ),
+    };
+  };
+
+  const refreshConsentDocuments = async (planId: string) => {
+    const { forms, unassigned } = await fetchPlanConsentDocuments(planId);
+    setConsentForms(forms);
+    setUnassignedConsentForms(unassigned);
+    setPlan((prev) =>
+      prev && prev.chemotherapy_plan_id === planId
+        ? {
+            ...prev,
+            consent_taken:
+              forms.some((form) => Boolean(form.chemotherapy_plan_id)) ||
+              planConsent?.status === "SIGNED",
+          }
+        : prev
+    );
+    return forms;
+  };
+
+  /* Auto-saved when any signature, date or signer field changes. */
+  const savePlanConsentNow = async (): Promise<boolean> => {
+    const planId = plan?.chemotherapy_plan_id;
+    if (!planId || !consentLoaded) return false;
+
+    if (consentSaveTimerRef.current) {
+      clearTimeout(consentSaveTimerRef.current);
+      consentSaveTimerRef.current = null;
+    }
+
+    const allCaptured = (["patient", "witness", "doctor"] as ConsentRole[]).every(
+      (role) => Boolean(consentSignatures[role]?.dataUrl)
+    );
+
+    setConsentSaveState("saving");
+    setConsentSaveError("");
+    try {
+      const response = await consentApi.savePlanConsent(planId, {
+        patient_signature: consentSignatures.patient?.dataUrl ?? null,
+        witness_signature: consentSignatures.witness?.dataUrl ?? null,
+        doctor_signature: consentSignatures.doctor?.dataUrl ?? null,
+        patient_name: consentSignerFields.patient_name.trim() || null,
+        witness_name: consentSignerFields.witness_name.trim() || null,
+        witness_relation:
+          consentSignerFields.witness_relation.trim() || null,
+        doctor_name: consentSignerFields.doctor_name.trim() || null,
+        doctor_reg_no: consentSignerFields.doctor_reg_no.trim() || null,
+        consent_date:
+          consentDateToIso(consentDate) ??
+          (allCaptured ? new Date().toISOString().slice(0, 10) : null),
+      });
+      const record = response.data?.data ?? null;
+      setPlanConsent(record);
+      setPlan((prev) =>
+        prev && prev.chemotherapy_plan_id === planId
+          ? {
+              ...prev,
+              consent_taken:
+                record?.status === "SIGNED" ||
+                consentForms.some((form) =>
+                  Boolean(form.chemotherapy_plan_id)
+                ),
+              consent_date: record?.consent_date ?? null,
+            }
+          : prev
+      );
+      if (record?.consent_date && !consentDate) {
+        setConsentDate(formatDateDMY(record.consent_date));
+      } else if (!record?.consent_date && !allCaptured) {
+        setConsentDate("");
+      }
+      consentDirtyRef.current = false;
+      setConsentSaveState("saved");
+      return true;
+    } catch (error: any) {
+      setConsentSaveState("error");
+      setConsentSaveError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "The consent signatures could not be saved."
+      );
+      return false;
+    }
+  };
+
+  /* Load the plan's consent record and signed forms on plan change. */
+  useEffect(() => {
+    const planId = plan?.chemotherapy_plan_id;
+    if (!planId) {
+      setPlanConsent(null);
+      setConsentSignatures({ patient: null, witness: null, doctor: null });
+      setConsentDate("");
+      setConsentSignerFields({
+        patient_name: "",
+        witness_name: "",
+        witness_relation: "",
+        doctor_name: "",
+        doctor_reg_no: "",
+      });
+      setConsentForms([]);
+      setUnassignedConsentForms([]);
+      setConsentFormsLoading(false);
+      setConsentLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+    setConsentLoaded(false);
+    setConsentFormsLoading(true);
+    setConsentUploadError("");
+    setConsentSaveState("idle");
+    setConsentSaveError("");
+    consentDirtyRef.current = false;
+
+    void (async () => {
+      try {
+        const [consentResponse, documents] = await Promise.all([
+          consentApi.getPlanConsent(planId),
+          fetchPlanConsentDocuments(planId),
+        ]);
+        const record = consentResponse.data?.data ?? null;
+        const signatures = await signaturesFromConsent(record);
+        if (cancelled) return;
+
+        setPlanConsent(record);
+        /* A signature drawn while the record was still loading wins over the
+           stored one: never clobber a local edit. */
+        if (!consentDirtyRef.current) {
+          setConsentSignatures(signatures);
+          setConsentDate(
+            record?.consent_date
+              ? formatDateDMY(record.consent_date)
+              : plan?.consent_date
+                ? formatDateDMY(plan.consent_date)
+                : ""
+          );
+          setConsentSignerFields({
+            patient_name: record?.patient_name ?? "",
+            witness_name: record?.witness_name ?? "",
+            witness_relation: record?.witness_relation ?? "",
+            doctor_name: record?.doctor_name ?? "",
+            doctor_reg_no: record?.doctor_reg_no ?? "",
+          });
+        }
+        setConsentForms(documents.forms);
+        setUnassignedConsentForms(documents.unassigned);
+        setPlan((prev) =>
+          prev && prev.chemotherapy_plan_id === planId
+            ? {
+                ...prev,
+                consent_taken:
+                  record?.status === "SIGNED" ||
+                  documents.forms.some((form) =>
+                    Boolean(form.chemotherapy_plan_id)
+                  ),
+              }
+            : prev
+        );
+      } catch (error) {
+        console.warn("Could not load plan consent:", error);
+        if (!cancelled) {
+          setConsentUploadError(
+            "Could not load the consent details for this plan."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setConsentFormsLoading(false);
+          setConsentLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.chemotherapy_plan_id, resolvedPatientId]);
+
+  /* Prefill the signer names from the patient and the signing doctor. */
+  useEffect(() => {
+    if (!consentLoaded) return;
+    setConsentSignerFields((prev) => {
+      const next = {
+        ...prev,
+        patient_name: prev.patient_name || patientName,
+        doctor_name: prev.doctor_name || doctorInfo.name,
+        doctor_reg_no: prev.doctor_reg_no || doctorInfo.regNo,
+      };
+      return next.patient_name === prev.patient_name &&
+        next.doctor_name === prev.doctor_name &&
+        next.doctor_reg_no === prev.doctor_reg_no
+        ? prev
+        : next;
+    });
+  }, [patientName, doctorInfo.name, doctorInfo.regNo, consentLoaded]);
+
+  /* Once all three roles are captured, stamp the consent date. */
+  useEffect(() => {
+    if (!consentLoaded) return;
+    const allCaptured = (["patient", "witness", "doctor"] as ConsentRole[]).every(
       (role) => Boolean(consentSignatures[role]?.dataUrl)
     );
     if (allCaptured && !consentDate) {
       setConsentDate(formatDateDMY(new Date().toISOString()));
     }
-  }, [resolvedPatientId, encounterNo, consentSignatures, consentDate]);
+  }, [consentSignatures, consentDate, consentLoaded]);
+
+  /* Debounced auto-save after a local edit. */
+  useEffect(() => {
+    if (
+      !plan?.chemotherapy_plan_id ||
+      !consentLoaded ||
+      !consentDirtyRef.current
+    ) {
+      return;
+    }
+    if (consentSaveTimerRef.current) {
+      clearTimeout(consentSaveTimerRef.current);
+    }
+    consentSaveTimerRef.current = setTimeout(() => {
+      consentSaveTimerRef.current = null;
+      void savePlanConsentNow();
+    }, 700);
+    return () => {
+      if (consentSaveTimerRef.current) {
+        clearTimeout(consentSaveTimerRef.current);
+        consentSaveTimerRef.current = null;
+      }
+    };
+  }, [
+    consentSignatures,
+    consentDate,
+    consentSignerFields,
+    plan?.chemotherapy_plan_id,
+    consentLoaded,
+  ]);
+
+  const updateConsentSignature = (
+    role: ConsentRole,
+    signature: ConsentSignature | null
+  ) => {
+    consentDirtyRef.current = true;
+    setConsentSaveState("idle");
+    setConsentSaveError("");
+    setConsentSignatures((prev) => ({ ...prev, [role]: signature }));
+  };
+
+  const updateConsentSignerField = (
+    key: keyof typeof consentSignerFields,
+    value: string
+  ) => {
+    consentDirtyRef.current = true;
+    setConsentSaveState("idle");
+    setConsentSaveError("");
+    setConsentSignerFields((prev) => ({ ...prev, [key]: value }));
+  };
+
+  /* Upload one or more physically signed forms against the current plan. */
+  const uploadConsentForms = async (files: File[]) => {
+    const planId = plan?.chemotherapy_plan_id;
+    setConsentUploadError("");
+    if (!resolvedPatientId || !planId) {
+      setConsentUploadError(
+        "Open a chemotherapy plan before uploading a consent form."
+      );
+      return;
+    }
+    if (files.length === 0) return;
+
+    const accepted: File[] = [];
+    const problems: string[] = [];
+    for (const file of files) {
+      if (file.size > CONSENT_FORM_MAX_BYTES) {
+        problems.push(`${file.name}: the file must be 10 MB or smaller.`);
+      } else if (!isSupportedConsentFormFile(file)) {
+        problems.push(`${file.name}: upload a PDF, PNG or JPEG.`);
+      } else {
+        accepted.push(file);
+      }
+    }
+    if (problems.length > 0) setConsentUploadError(problems.join(" "));
+    if (accepted.length === 0) return;
+
+    setConsentUploading(true);
+    const currentUser = getUser();
+    const uploadedBy =
+      currentUser?.name || currentUser?.username || currentUser?.role || "Doctor";
+    const encounter = consentEncounterNo();
+    const failures: string[] = [];
+
+    try {
+      for (const file of accepted) {
+        try {
+          const base64 = await fileToBase64(file);
+          const response = await consentApi.uploadConsentForm({
+            patient_id: resolvedPatientId,
+            file_name: file.name,
+            original_name: file.name,
+            file_type: file.type || "application/pdf",
+            file_size: file.size,
+            file_data: base64,
+            category: "Clinical",
+            uploaded_by: uploadedBy,
+            encounter_no: encounter || undefined,
+            document_type: "CONSENT_FORM",
+            chemotherapy_plan_id: planId,
+          });
+          if (!response.data?.data?.document_id) {
+            throw new Error(
+              response.data?.message || "The consent form could not be saved."
+            );
+          }
+        } catch (error: any) {
+          failures.push(
+            `${file.name}: ${
+              error?.response?.data?.message ||
+              error?.message ||
+              "upload failed"
+            }`
+          );
+        }
+      }
+
+      if (failures.length > 0) setConsentUploadError(failures.join(" "));
+      if (accepted.length > failures.length) {
+        setPlan((prev) => (prev ? { ...prev, consent_taken: true } : prev));
+      }
+      await refreshConsentDocuments(planId);
+    } catch (error: any) {
+      setConsentUploadError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "The consent forms could not be uploaded."
+      );
+    } finally {
+      setConsentUploading(false);
+    }
+  };
+
+  const handleConsentFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    /* Allow picking the same files again after a failed attempt. */
+    event.target.value = "";
+    if (files.length > 0) void uploadConsentForms(files);
+  };
+
+  const removeConsentForm = async (document: UploadedConsentDocument) => {
+    const planId = plan?.chemotherapy_plan_id;
+    if (!planId) return;
+    const confirmed = window.confirm(
+      `Remove "${document.file_name}"? The printout will use the remaining consent forms or the generated consent pages.`
+    );
+    if (!confirmed) return;
+
+    setConsentUploadError("");
+    try {
+      await consentApi.deleteConsentForm(document.document_id);
+      await refreshConsentDocuments(planId);
+    } catch (error: any) {
+      setConsentUploadError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "The consent form could not be removed."
+      );
+    }
+  };
+
+  /* Legacy consent forms (uploaded before plan scoping) stay visible until
+     the doctor explicitly attaches them to this plan. */
+  const attachConsentForm = async (document: UploadedConsentDocument) => {
+    const planId = plan?.chemotherapy_plan_id;
+    if (!planId) return;
+    setConsentUploadError("");
+    setAttachingConsentId(document.document_id);
+    try {
+      await consentApi.attachConsentFormToPlan(document.document_id, planId);
+      await refreshConsentDocuments(planId);
+    } catch (error: any) {
+      setConsentUploadError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "The consent form could not be attached to this plan."
+      );
+    } finally {
+      setAttachingConsentId("");
+    }
+  };
+
+  /* Resolve every attached form (metadata + bytes) for printing. */
+  const loadConsentDocumentForPrint = async (
+    document: UploadedConsentDocument
+  ): Promise<{
+    file_name: string;
+    file_type: string;
+    dataUrl: string;
+  } | null> => {
+    try {
+      const response = await consentApi.downloadConsentForm(document.document_id);
+      const blob =
+        response.data instanceof Blob
+          ? response.data
+          : new Blob([response.data as any], {
+              type: document.file_type || undefined,
+            });
+      return {
+        file_name: document.file_name,
+        file_type: document.file_type || blob.type || "",
+        dataUrl: await blobToDataUrl(blob),
+      };
+    } catch (error) {
+      console.warn("Could not load a consent form for printing:", error);
+      return null;
+    }
+  };
+
+  /* Only forms attached to the plan replace the generated consent pages: an
+     older form still awaiting "Attach to this plan" must not be printed as
+     this course's consent. */
+  const loadUploadedConsentsForPrint = async () => {
+    let documents = attachedConsentForms();
+    const planId = plan?.chemotherapy_plan_id;
+    if (documents.length === 0 && planId) {
+      try {
+        const response = await consentApi.listPlanConsentForms(planId);
+        documents = ((response.data?.data ?? []) as UploadedConsentDocument[]).filter(
+          (document) => Boolean(document.chemotherapy_plan_id)
+        );
+      } catch (error) {
+        console.warn(
+          "Could not load the plan's consent forms for printing:",
+          error
+        );
+      }
+    }
+    const loaded = await Promise.all(
+      documents.map(loadConsentDocumentForPrint)
+    );
+    return loaded.filter(
+      (item): item is NonNullable<typeof item> => Boolean(item)
+    );
+  };
 
   useEffect(() => {
     if (!appointmentId) return;
@@ -2078,7 +2611,10 @@ const Summary: React.FC<{
   const printOptions = visitSections.map((section) => ({ label: section.title, value: section.key }));
   const chosenPrintSections = visitSections.filter((section) => printSections.includes(section.key));
 
-  const handleDownloadSummary = (mode: "download" | "print" = "download") => {
+  const buildSummaryPdf = async (
+    mode: "download" | "print" = "download",
+    printWindow: Window | null = null
+  ) => {
     const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -2630,253 +3166,506 @@ const Summary: React.FC<{
     visitPages = false;
 
     /* ---------- Last page: chemotherapy consent ---------- */
+    /* Consent is shown only while this course is open. A completed or
+       discontinued plan keeps its record in the database but no longer
+       prints its old consent on later visits. */
+    if (!isChemoPlanClosed(plan)) {
+    /* Physically signed consent forms attached to this plan replace the
+       generated consent pages. When e-signatures were also captured, a compact
+       signature record page is printed before the attachments. */
+    const uploadedConsents = await loadUploadedConsentsForPrint();
+
     doc.addPage();
     consentStartPage = doc.getNumberOfPages();
 
-    const drawConsentTitle = () => {
+    const drawConsentTitle = (title = "Chemotherapy Consent form") => {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(13);
       doc.setTextColor(...BLACK);
-      doc.text("Chemotherapy Consent form", pageWidth / 2, 50, { align: "center" });
+      doc.text(title, pageWidth / 2, 50, { align: "center" });
       return 72;
     };
 
-    y = drawConsentTitle();
-
     const consentWidth = pageWidth - marginX * 2;
 
-    const writeConsent = (text: string, options: { bold?: boolean; indent?: number; gap?: number } = {}) => {
-      const indent = options.indent ?? 0;
-      doc.setFont("helvetica", options.bold ? "bold" : "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(...BLACK);
-      const lines = doc.splitTextToSize(text, consentWidth - indent) as string[];
-      if (y + lines.length * 13.5 > contentBottom) {
-        doc.addPage();
-        y = drawConsentTitle();
+    if (uploadedConsents.length > 0) {
+      const hasSignatureRecord =
+        planConsent?.status === "SIGNED" ||
+        Boolean(
+          planConsent?.patient_signature ||
+            planConsent?.witness_signature ||
+            planConsent?.doctor_signature
+        ) ||
+        (["patient", "witness", "doctor"] as ConsentRole[]).some((role) =>
+          Boolean(consentSignatures[role]?.dataUrl)
+        );
+
+      if (hasSignatureRecord) {
+        const titleBottom = drawConsentTitle(
+          "Chemotherapy Consent - Signature Record"
+        );
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...GREY);
+        doc.text(
+          "Electronically captured for this chemotherapy plan",
+          pageWidth / 2,
+          titleBottom - 12,
+          { align: "center" }
+        );
+
+        let recordY = titleBottom + 8;
+        const recordRows: Array<[string, string]> = [
+          ["Patient", consentSignerFields.patient_name || patientName || "—"],
+          [
+            "Witness",
+            [
+              consentSignerFields.witness_name,
+              consentSignerFields.witness_relation
+                ? `(${consentSignerFields.witness_relation})`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ") || "—",
+          ],
+          [
+            "Doctor",
+            [
+              consentSignerFields.doctor_name,
+              consentSignerFields.doctor_reg_no
+                ? `Reg. No: ${consentSignerFields.doctor_reg_no}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ") || "—",
+          ],
+          ["Consent status", planConsent?.status || "—"],
+          [
+            "Consent date",
+            consentDate ||
+              (planConsent?.consent_date
+                ? formatDateDMY(planConsent.consent_date)
+                : "—"),
+          ],
+        ];
+        recordRows.forEach(([label, value]) => {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(...BLACK);
+          doc.text(`${label}:`, marginX, recordY);
+          doc.setFont("helvetica", "normal");
+          doc.text(value, marginX + 90, recordY);
+          recordY += 18;
+        });
+
+        recordY += 10;
+        const blockWidth = (consentWidth - 2 * 16) / 3;
+        const signatureRoles: Array<{
+          role: ConsentRole;
+          label: string;
+          name: string;
+        }> = [
+          {
+            role: "patient",
+            label: "Patient Signature",
+            name: consentSignerFields.patient_name,
+          },
+          {
+            role: "witness",
+            label: "Witness Signature",
+            name: consentSignerFields.witness_name,
+          },
+          {
+            role: "doctor",
+            label: "Doctor Signature",
+            name: consentSignerFields.doctor_name,
+          },
+        ];
+        signatureRoles.forEach((entry, index) => {
+          const x = marginX + index * (blockWidth + 16);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(...BLACK);
+          doc.text(entry.label, x, recordY);
+          const signature = consentSignatures[entry.role];
+          if (signature) {
+            const drawHeight = 38;
+            const aspect = signature.height
+              ? signature.width / signature.height
+              : 2;
+            const drawWidth = Math.min(blockWidth, drawHeight * aspect);
+            doc.addImage(
+              signature.dataUrl,
+              "PNG",
+              x + (blockWidth - drawWidth) / 2,
+              recordY + 6,
+              drawWidth,
+              drawHeight
+            );
+          } else {
+            doc.setDrawColor(160, 160, 160);
+            doc.setLineWidth(0.5);
+            doc.line(x, recordY + 34, x + blockWidth, recordY + 34);
+          }
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(...GREY);
+          doc.text(entry.name || "—", x, recordY + 52);
+        });
+      }
+
+      for (
+        let documentIndex = 0;
+        documentIndex < uploadedConsents.length;
+        documentIndex++
+      ) {
+        const uploaded = uploadedConsents[documentIndex];
+        if (documentIndex > 0 || hasSignatureRecord) {
+          doc.addPage();
+        }
+
+        /* Render the uploaded form to page images: images are used as-is,
+           PDFs are rasterized page by page because jsPDF cannot import a
+           PDF. */
+        const pageImages = isPdfConsentForm(
+          uploaded.file_name,
+          uploaded.file_type
+        )
+          ? await renderPdfPagesToDataUrls(uploaded.dataUrl).catch((error) => {
+              console.warn("Could not render the uploaded consent PDF:", error);
+              return [] as string[];
+            })
+          : [uploaded.dataUrl];
+
+        const titleBottom = drawConsentTitle();
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...GREY);
+        doc.text(
+          `Uploaded consent form${
+            uploadedConsents.length > 1
+              ? ` ${documentIndex + 1} of ${uploadedConsents.length}`
+              : ""
+          }: ${uploaded.file_name}`,
+          pageWidth / 2,
+          titleBottom - 12,
+          { align: "center" }
+        );
+
+        if (pageImages.length === 0) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(...BLACK);
+          doc.text(
+            `The uploaded consent form (${uploaded.file_name}) could not be embedded.`,
+            marginX,
+            titleBottom + 10
+          );
+          doc.text(
+            "Please attach the original signed form to this summary.",
+            marginX,
+            titleBottom + 26
+          );
+          continue;
+        }
+
+        const contentTop = titleBottom + 8;
+        for (let index = 0; index < pageImages.length; index++) {
+          if (index > 0) {
+            doc.addPage();
+            drawConsentTitle();
+          }
+          const availableWidth = consentWidth;
+          const availableHeight = contentBottom - contentTop;
+          let drawWidth = availableWidth;
+          let drawHeight = availableHeight;
+          try {
+            const size = await imageSizeOf(pageImages[index]);
+            const scale = Math.min(
+              availableWidth / size.width,
+              availableHeight / size.height
+            );
+            drawWidth = size.width * scale;
+            drawHeight = size.height * scale;
+          } catch {
+            /* Fall back to filling the content area. */
+          }
+          const x = marginX + (availableWidth - drawWidth) / 2;
+          const imageY = contentTop + (availableHeight - drawHeight) / 2;
+          try {
+            doc.addImage(
+              pageImages[index],
+              pageImages[index].startsWith("data:image/png") ? "PNG" : "JPEG",
+              x,
+              imageY,
+              drawWidth,
+              drawHeight
+            );
+          } catch (error) {
+            console.warn("Could not embed the consent form page:", error);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.setTextColor(...BLACK);
+            doc.text(
+              `Page ${index + 1} of the uploaded consent form could not be embedded.`,
+              marginX,
+              contentTop + 10
+            );
+          }
+        }
+      }
+    } else {
+      y = drawConsentTitle();
+
+      const writeConsent = (text: string, options: { bold?: boolean; indent?: number; gap?: number } = {}) => {
+        const indent = options.indent ?? 0;
         doc.setFont("helvetica", options.bold ? "bold" : "normal");
         doc.setFontSize(10);
-      }
-      doc.text(lines, marginX + indent, y);
-      y += lines.length * 13.5 + (options.gap ?? 4);
-    };
+        doc.setTextColor(...BLACK);
+        const lines = doc.splitTextToSize(text, consentWidth - indent) as string[];
+        if (y + lines.length * 13.5 > contentBottom) {
+          doc.addPage();
+          y = drawConsentTitle();
+        }
+        doc.text(lines, marginX + indent, y);
+        y += lines.length * 13.5 + (options.gap ?? 4);
+      };
 
-    const drawFillLine = (label: string, value = "") => {
-      const full = `${label}: ${value || "______________________________________________"}`;
-      const lines = doc.splitTextToSize(full, consentWidth) as string[];
-      if (y + lines.length * 13.5 > contentBottom) {
+      /* ---- Page 1 ---- */
+      writeConsent(
+        `I ${patientName || "____________________"} Understand that I have been diagnosed with ${visitDiagnosisName || "____________________"} and I will be treated with anticancer therapy potentially including biological agents to try to reduce or possibly eliminate the cancer cells in body.`,
+        { gap: 8 }
+      );
+
+      writeConsent(
+        "This consent form authorization is for repeat cycles of the medications listed below. I here by consent to treatment with the following anticancer therapy: (Please list drugs)",
+        { gap: 2 }
+      );
+
+      const consentDrugsList = chemotherapyOrders
+        .map((item) => item.drug)
+        .filter(Boolean)
+        .join(", ");
+      writeConsent(consentDrugsList || "_______________________________________________________________", { gap: 8 });
+
+      writeConsent(
+        "This will be administered under the direction of the oncology consultants at the mentioned facility. The substantial risks/potential side effects from this therapy may include, but are not limited to nausea and vomiting, diarrhea, mouth sores, fatigue, loss of appetite, hair loss, skin rash, constipation, numb fingers or toes, pain, tiredness, chills/fever, sterility, headache, damage to blood vessels, elevated blood sugar, eye irritation, bleeding into the bladder, allergic reaction, damage at the IV site, hearing loss, vision changes, abnormalities in the liver, kidney, lung, heart, pancreas, other organs or brain function, low red blood count which result in loss of energy, low white blood cell count which may increase risk of infection, low platelet count which may cause bruising or bleeding, secondary cancer, complications leading to death & others.",
+        { gap: 4 }
+      );
+
+      writeConsent(
+        "Substantial risks/side effects may be treated with medications for nausea, diarrhea, pain, and high blood sugar and / or bladder problems. The substantial risk/side effects of low blood counts may be treated with antibiotics, other medications, hospitalizations, or transfusion of red blood cells or platelets.",
+        { gap: 4 }
+      );
+
+      writeConsent(
+        "I am aware that therapy may involve substantial risks/side effects to me (or my fetus, if I am pregnant) which cannot be predicted. I have been told to use effective birth control to prevent pregnancy. I will tell my doctor immediately. The potential benefit(s) of this therapy include but are not limited to better control of my cancer, or improvement in symptoms related to my cancer.",
+        { gap: 4 }
+      );
+
+      writeConsent(
+        "I understand that the information I have received about risks is not exhaustive and there may be other more remote risks.",
+        { gap: 4 }
+      );
+
+      writeConsent(
+        "Possibility of loss of life & other late complications of chemotherapy were also explained.",
+        { gap: 8 }
+      );
+
+      /* Signature block #1 */
+      const blockWidth = (consentWidth - 2 * 16) / 3;
+      const sigImgHeight = 20;
+      const sig1HasImage = ["patient", "witness", "doctor"].some(
+        (role) => Boolean(consentSignatures[role]?.dataUrl)
+      );
+      const sig1Height = 6 + 3 * 20 + (sig1HasImage ? sigImgHeight : 0);
+      if (y + sig1Height > contentBottom) {
         doc.addPage();
         y = drawConsentTitle();
       }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(...BLACK);
-      doc.text(lines, marginX, y);
-      y += lines.length * 13.5 + 6;
-    };
+      const sig1Rows = [
+        ["Patient Signature", "Witness Signature", "Doctor Signature"],
+        [
+          `Name: ${consentSignerFields.patient_name}`.trim(),
+          `1. Name: ${consentSignerFields.witness_name}`.trim(),
+          `Name: ${consentSignerFields.doctor_name}`.trim(),
+        ],
+        [
+          `2. Relations: ${consentSignerFields.witness_relation}`.trim(),
+          "",
+          consentSignerFields.doctor_reg_no
+            ? `Reg. No: ${consentSignerFields.doctor_reg_no}`
+            : "",
+        ],
+      ];
+      const consentRoles: ConsentRole[] = ["patient", "witness", "doctor"];
+      sig1Rows.forEach((row, rowIndex) => {
+        const rowY = y + 6 + rowIndex * 20;
+        row.forEach((cell, cellIndex) => {
+          const x = marginX + cellIndex * (blockWidth + 16);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(...BLACK);
+          doc.text(cell, x, rowY);
+          if (rowIndex > 0) {
+            const lineX = x + doc.getTextWidth(cell) + 4;
+            const role = consentRoles[cellIndex];
+            const sig = consentSignatures[role];
+            if (rowIndex === 1 && sig) {
+              const availW = x + blockWidth - lineX;
+              const aspect = sig.width / sig.height;
+              const drawH = sigImgHeight;
+              const drawW = Math.min(availW, drawH * aspect);
+              /* A long printed name can leave no room for the image. */
+              if (availW > 12 && drawW > 0) {
+                doc.addImage(
+                  sig.dataUrl,
+                  "PNG",
+                  lineX + (availW - drawW) / 2,
+                  rowY + 1,
+                  drawW,
+                  drawH
+                );
+              }
+            } else {
+              doc.setDrawColor(160, 160, 160);
+              doc.setLineWidth(0.5);
+              doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+            }
+          }
+        });
+      });
+      y += sig1Height;
 
-    /* ---- Page 1 ---- */
-    writeConsent(
-      `I ${patientName || "____________________"} Understand that I have been diagnosed with ${visitDiagnosisName || "____________________"} and I will be treated with anticancer therapy potentially including biological agents to try to reduce or possibly eliminate the cancer cells in body.`,
-      { gap: 8 }
-    );
+      writeConsent("P.T.O", { gap: 4 });
 
-    writeConsent(
-      "This consent form authorization is for repeat cycles of the medications listed below. I here by consent to treatment with the following anticancer therapy: (Please list drugs)",
-      { gap: 2 }
-    );
-
-    const consentDrugsList = chemotherapyOrders
-      .map((item) => item.drug)
-      .filter(Boolean)
-      .join(", ");
-    writeConsent(consentDrugsList || "_______________________________________________________________", { gap: 8 });
-
-    writeConsent(
-      "This will be administered under the direction of the oncology consultants at the mentioned facility. The substantial risks/potential side effects from this therapy may include, but are not limited to nausea and vomiting, diarrhea, mouth sores, fatigue, loss of appetite, hair loss, skin rash, constipation, numb fingers or toes, pain, tiredness, chills/fever, sterility, headache, damage to blood vessels, elevated blood sugar, eye irritation, bleeding into the bladder, allergic reaction, damage at the IV site, hearing loss, vision changes, abnormalities in the liver, kidney, lung, heart, pancreas, other organs or brain function, low red blood count which result in loss of energy, low white blood cell count which may increase risk of infection, low platelet count which may cause bruising or bleeding, secondary cancer, complications leading to death & others.",
-      { gap: 4 }
-    );
-
-    writeConsent(
-      "Substantial risks/side effects may be treated with medications for nausea, diarrhea, pain, and high blood sugar and / or bladder problems. The substantial risk/side effects of low blood counts may be treated with antibiotics, other medications, hospitalizations, or transfusion of red blood cells or platelets.",
-      { gap: 4 }
-    );
-
-    writeConsent(
-      "I am aware that therapy may involve substantial risks/side effects to me (or my fetus, if I am pregnant) which cannot be predicted. I have been told to use effective birth control to prevent pregnancy. I will tell my doctor immediately. The potential benefit(s) of this therapy include but are not limited to better control of my cancer, or improvement in symptoms related to my cancer.",
-      { gap: 4 }
-    );
-
-    writeConsent(
-      "I understand that the information I have received about risks is not exhaustive and there may be other more remote risks.",
-      { gap: 4 }
-    );
-
-    writeConsent(
-      "Possibility of loss of life & other late complications of chemotherapy were also explained.",
-      { gap: 8 }
-    );
-
-    /* Signature block #1 */
-    const blockWidth = (consentWidth - 2 * 16) / 3;
-    const sigImgHeight = 20;
-    const sig1HasImage = ["patient", "witness", "doctor"].some(
-      (role) => Boolean(consentSignatures[role]?.dataUrl)
-    );
-    const sig1Height = 6 + 3 * 20 + (sig1HasImage ? sigImgHeight : 0);
-    if (y + sig1Height > contentBottom) {
+      /* ---- Page 2 ---- */
       doc.addPage();
       y = drawConsentTitle();
-    }
-    const sig1Rows = [
-      ["Patient Signature", "Witness Signature", "Doctor Signature"],
-      ["Name:", "1. Name:", ""],
-      ["2. Relations:", "", ""],
-    ];
-    const consentRoles: ConsentRole[] = ["patient", "witness", "doctor"];
-    sig1Rows.forEach((row, rowIndex) => {
-      const rowY = y + 6 + rowIndex * 20;
-      row.forEach((cell, cellIndex) => {
-        const x = marginX + cellIndex * (blockWidth + 16);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(...BLACK);
-        doc.text(cell, x, rowY);
-        if (rowIndex > 0) {
-          const lineX = x + doc.getTextWidth(cell) + 4;
-          const role = consentRoles[cellIndex];
-          const sig = consentSignatures[role];
-          if (rowIndex === 1 && sig) {
-            const availW = x + blockWidth - lineX;
-            const aspect = sig.width / sig.height;
-            const drawH = sigImgHeight;
-            const drawW = Math.min(availW, drawH * aspect);
-            doc.addImage(
-              sig.dataUrl,
-              "PNG",
-              lineX + (availW - drawW) / 2,
-              rowY + 1,
-              drawW,
-              drawH
-            );
-          } else {
-            doc.setDrawColor(160, 160, 160);
-            doc.setLineWidth(0.5);
-            doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
-          }
+
+      writeConsent("I have had the opportunity to ask questions regarding the proposed treatment(s) and of my questions have been answered to my satisfaction and in terms I understand.", { gap: 4 });
+      writeConsent("I have read or have had read to me this information Consent Form.", { gap: 4 });
+      writeConsent("I have had explained to me and understand the potential benefits and drawbacks, potential problems related to operation the likelihood of success, the possible results of non-treatment, and any medically reasonable alternatives.", { gap: 4 });
+      writeConsent("I have received no guarantees from anyone regarding the results that may be obtained.", { gap: 4 });
+      writeConsent("Consent. I do hereby consent to the above described treatment,", { gap: 4 });
+      writeConsent("I am also informed that Case record, clinical data and biological specimen will be used for further research / Publication purpose.", { gap: 8 });
+
+      writeConsent("The following were also clearly explained,", { bold: true, gap: 4 });
+
+      const treatmentIntentRaw = (context || "").toLowerCase();
+      const intentCurative = treatmentIntentRaw.includes("curative");
+      const intentPalliative = treatmentIntentRaw.includes("palliative");
+
+      const showFertility = patientMeta.age && !isNaN(Number(patientMeta.age)) && Number(patientMeta.age) < 35;
+
+      const reassessAfter = plan?.cycle_interval_days
+        ? `Every ${plan.cycle_interval_days} days`
+        : nextVisitDate || "";
+
+      const ptoFields = [
+        ["Treatment Plan:", protocol || ""],
+        ["HPE:", summaryClinicalFindings || ""],
+        [`Treatment Intent:  ${intentCurative ? "[X] " : "[ ] "}CURATIVE /  ${intentPalliative ? "[X] " : "[ ] "}PALLIATIVE`, ""],
+        ["Stage of Disease:", stage || ""],
+        ["Duration of Treatment:", duration || ""],
+        ["Reassess plan after:", reassessAfter || ""],
+        ...(showFertility ? [["If age less than 35, Sperm Preservation / Fertility Counseling Done:  [ ] Yes  [ ] No  [ ] NA", ""]] : []),
+        ["Is there any doubts on financial aspects / treatment plan  [ ] YES  [ ] NO", ""],
+      ];
+
+      ptoFields.forEach(([label, value]) => {
+        const full = `${label} ${value}`;
+        const lines = doc.splitTextToSize(full, consentWidth) as string[];
+        if (y + lines.length * 13.5 > contentBottom) {
+          doc.addPage();
+          y = drawConsentTitle();
         }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(...BLACK);
+        doc.text(lines, marginX, y);
+        y += lines.length * 13.5 + 6;
       });
-    });
-    y += sig1Height;
 
-    writeConsent("P.T.O", { gap: 4 });
-
-    /* ---- Page 2 ---- */
-    doc.addPage();
-    y = drawConsentTitle();
-
-    writeConsent("I have had the opportunity to ask questions regarding the proposed treatment(s) and of my questions have been answered to my satisfaction and in terms I understand.", { gap: 4 });
-    writeConsent("I have read or have had read to me this information Consent Form.", { gap: 4 });
-    writeConsent("I have had explained to me and understand the potential benefits and drawbacks, potential problems related to operation the likelihood of success, the possible results of non-treatment, and any medically reasonable alternatives.", { gap: 4 });
-    writeConsent("I have received no guarantees from anyone regarding the results that may be obtained.", { gap: 4 });
-    writeConsent("Consent. I do hereby consent to the above described treatment,", { gap: 4 });
-    writeConsent("I am also informed that Case record, clinical data and biological specimen will be used for further research / Publication purpose.", { gap: 8 });
-
-    writeConsent("The following were also clearly explained,", { bold: true, gap: 4 });
-
-    const treatmentIntentRaw = (context || "").toLowerCase();
-    const intentCurative = treatmentIntentRaw.includes("curative");
-    const intentPalliative = treatmentIntentRaw.includes("palliative");
-
-    const showFertility = patientMeta.age && !isNaN(Number(patientMeta.age)) && Number(patientMeta.age) < 35;
-
-    const reassessAfter = plan?.cycle_interval_days
-      ? `Every ${plan.cycle_interval_days} days`
-      : nextVisitDate || "";
-
-    const ptoFields = [
-      ["Treatment Plan:", protocol || ""],
-      ["HPE:", summaryClinicalFindings || ""],
-      [`Treatment Intent:  ${intentCurative ? "[X] " : "[ ] "}CURATIVE /  ${intentPalliative ? "[X] " : "[ ] "}PALLIATIVE`, ""],
-      ["Stage of Disease:", stage || ""],
-      ["Duration of Treatment:", duration || ""],
-      ["Reassess plan after:", reassessAfter || ""],
-      ...(showFertility ? [["If age less than 35, Sperm Preservation / Fertility Counseling Done:  [ ] Yes  [ ] No  [ ] NA", ""]] : []),
-      ["Is there any doubts on financial aspects / treatment plan  [ ] YES  [ ] NO", ""],
-    ];
-
-    ptoFields.forEach(([label, value]) => {
-      const full = `${label} ${value}`;
-      const lines = doc.splitTextToSize(full, consentWidth) as string[];
-      if (y + lines.length * 13.5 > contentBottom) {
+      /* Signature block #2 */
+      const sig2HasImage = ["patient", "witness", "doctor"].some(
+        (role) => Boolean(consentSignatures[role]?.dataUrl)
+      );
+      const sig2Height = 6 + 3 * 20 + (sig2HasImage ? sigImgHeight : 0);
+      if (y + sig2Height > contentBottom) {
         doc.addPage();
         y = drawConsentTitle();
       }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(...BLACK);
-      doc.text(lines, marginX, y);
-      y += lines.length * 13.5 + 6;
-    });
-
-    /* Signature block #2 */
-    const sig2HasImage = ["patient", "witness", "doctor"].some(
-      (role) => Boolean(consentSignatures[role]?.dataUrl)
-    );
-    const sig2Height = 6 + 3 * 20 + (sig2HasImage ? sigImgHeight : 0);
-    if (y + sig2Height > contentBottom) {
-      doc.addPage();
-      y = drawConsentTitle();
-    }
-    const sig2Rows = [
-      ["Patient Signature", "Witness Signature", "Doctor Signature"],
-      ["Name:", "1. Name:", "2. Mobile no:"],
-      ["2. Relations:", "", "3. Mobile no:"],
-    ];
-    sig2Rows.forEach((row, rowIndex) => {
-      const rowY = y + 6 + rowIndex * 20;
-      row.forEach((cell, cellIndex) => {
-        const x = marginX + cellIndex * (blockWidth + 16);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(...BLACK);
-        doc.text(cell, x, rowY);
-        if (rowIndex > 0) {
-          const lineX = x + doc.getTextWidth(cell) + 4;
-          const role = consentRoles[cellIndex];
-          const sig = consentSignatures[role];
-          if (rowIndex === 1 && sig) {
-            const availW = x + blockWidth - lineX;
-            const aspect = sig.width / sig.height;
-            const drawH = sigImgHeight;
-            const drawW = Math.min(availW, drawH * aspect);
-            doc.addImage(
-              sig.dataUrl,
-              "PNG",
-              lineX + (availW - drawW) / 2,
-              rowY + 1,
-              drawW,
-              drawH
-            );
-          } else {
-            doc.setDrawColor(160, 160, 160);
-            doc.setLineWidth(0.5);
-            doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+      const sig2Rows = [
+        ["Patient Signature", "Witness Signature", "Doctor Signature"],
+        [
+          `Name: ${consentSignerFields.patient_name}`.trim(),
+          `1. Name: ${consentSignerFields.witness_name}`.trim(),
+          `2. Name: ${consentSignerFields.doctor_name}`.trim(),
+        ],
+        [
+          `2. Relations: ${consentSignerFields.witness_relation}`.trim(),
+          "",
+          consentSignerFields.doctor_reg_no
+            ? `Reg. No: ${consentSignerFields.doctor_reg_no}`
+            : "",
+        ],
+      ];
+      sig2Rows.forEach((row, rowIndex) => {
+        const rowY = y + 6 + rowIndex * 20;
+        row.forEach((cell, cellIndex) => {
+          const x = marginX + cellIndex * (blockWidth + 16);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(...BLACK);
+          doc.text(cell, x, rowY);
+          if (rowIndex > 0) {
+            const lineX = x + doc.getTextWidth(cell) + 4;
+            const role = consentRoles[cellIndex];
+            const sig = consentSignatures[role];
+            if (rowIndex === 1 && sig) {
+              const availW = x + blockWidth - lineX;
+              const aspect = sig.width / sig.height;
+              const drawH = sigImgHeight;
+              const drawW = Math.min(availW, drawH * aspect);
+              /* A long printed name can leave no room for the image. */
+              if (availW > 12 && drawW > 0) {
+                doc.addImage(
+                  sig.dataUrl,
+                  "PNG",
+                  lineX + (availW - drawW) / 2,
+                  rowY + 1,
+                  drawW,
+                  drawH
+                );
+              }
+            } else {
+              doc.setDrawColor(160, 160, 160);
+              doc.setLineWidth(0.5);
+              doc.line(lineX, rowY + 1, x + blockWidth, rowY + 1);
+            }
           }
-        }
+        });
       });
-    });
-    y += sig2Height;
+      y += sig2Height;
 
-    if (consentDate) {
-      writeConsent(`Consent date: ${consentDate}`, { gap: 4 });
+      if (consentDate || planConsent?.consent_date) {
+        writeConsent(
+          `Consent date: ${
+            consentDate ||
+            formatDateDMY(planConsent?.consent_date ?? "")
+          }`,
+          { gap: 4 }
+        );
+      }
+
+      /* Representative consent */
+      writeConsent("Signature for consent when given by representative of the patient", { bold: true, gap: 4 });
+      writeConsent("If the patient is unable to consent complete the following", { gap: 2 });
+      writeConsent(`Patient is a minor, or patient is unable to consent because ${"______________________________________________________"}`, { gap: 4 });
     }
-
-    /* Representative consent */
-    writeConsent("Signature for consent when given by representative of the patient", { bold: true, gap: 4 });
-    writeConsent("If the patient is unable to consent complete the following", { gap: 2 });
-    writeConsent(`Patient is a minor, or patient is unable to consent because ${"______________________________________________________"}`, { gap: 4 });
-
+    }
     } else {
       /* No chemotherapy plan: the visit summary on its own. */
       drawVisitSections(visitPrintSections, true);
@@ -2913,11 +3702,13 @@ const Summary: React.FC<{
     }
 
     if (mode === "print") {
-      // Open the same PDF in a new tab with the print dialog triggered.
+      /* The print tab was opened synchronously by the caller so the async
+         PDF generation cannot be treated as a blocked popup. */
       doc.autoPrint();
       const printUrl = URL.createObjectURL(doc.output("blob"));
-      const printWindow = window.open(printUrl, "_blank");
-      if (!printWindow) {
+      if (printWindow && !printWindow.closed) {
+        printWindow.location.href = printUrl;
+      } else {
         /* Popup blocked - download instead so the printout is not lost. */
         const link = document.createElement("a");
         link.href = printUrl;
@@ -2941,6 +3732,22 @@ const Summary: React.FC<{
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  /* Fire-and-forget wrapper: PDF generation is async now (it may stream an
+     uploaded consent form and rasterize a PDF), so surface failures in the
+     console instead of leaving an unhandled rejection. */
+  const handleDownloadSummary = (mode: "download" | "print" = "download") => {
+    /* Open the print tab synchronously, while still inside the click gesture,
+       so the later async PDF generation cannot be blocked as a popup. */
+    const printWindow = mode === "print" ? window.open("", "_blank") : null;
+    void buildSummaryPdf(mode, printWindow).catch((error) => {
+      if (printWindow && !printWindow.closed) printWindow.close();
+      console.error("Could not generate the summary PDF:", error);
+      window.alert(
+        "The summary PDF could not be generated. Please try again."
+      );
+    });
   };
 
   const [submittingSummary, setSubmittingSummary] = useState(false);
@@ -3273,6 +4080,31 @@ const Summary: React.FC<{
             : "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
         );
         return;
+      }
+
+      /* Treatment cannot start without consent. The backend enforces the
+         same rule on PLANNED -> ACTIVE, so this is the friendly guard. */
+      if (plan.treatment_status === "PLANNED") {
+        const allCaptured = (
+          ["patient", "witness", "doctor"] as ConsentRole[]
+        ).every((role) => Boolean(consentSignatures[role]?.dataUrl));
+
+        if (consentDirtyRef.current) {
+          const saved = await savePlanConsentNow();
+          if (!saved) {
+            setSummarySubmitMessage(
+              "The consent signatures could not be saved. Please retry before starting treatment."
+            );
+            return;
+          }
+        }
+
+        if (!consentIsReady() && !allCaptured) {
+          setSummarySubmitMessage(
+            "A signed consent form or patient, witness and doctor e-signatures are required before treatment can start."
+          );
+          return;
+        }
       }
 
       await API.post("/prescriptions", {
@@ -4058,45 +4890,306 @@ const Summary: React.FC<{
       </div>
 
       {/* ===================================================
-          CONSENT SIGNATURES (shown when a chemo plan exists)
+          CONSENT (owned by the current chemotherapy plan)
       ==================================================== */}
-      {plan && (
+      {plan && !planClosed && (
         <section className="mb-8">
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-xs font-semibold text-slate-900">Consent Signatures</h3>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="text-xs font-semibold text-slate-900">
+              Consent for this chemotherapy plan
+            </h3>
+            <span
+              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                consentIsReady()
+                  ? "bg-green-50 text-green-700"
+                  : "bg-amber-50 text-amber-700"
+              }`}
+            >
+              {consentIsReady() ? "Consent on file" : "Consent required"}
+            </span>
             <span className="text-[10px] text-slate-500">
-              Draw each signature below before printing.
+              Signatures and signed forms stay with this plan on later visits.
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <label className="text-[10px] font-semibold text-slate-700">
+              Patient name
+              <input
+                value={consentSignerFields.patient_name}
+                onChange={(event) =>
+                  updateConsentSignerField("patient_name", event.target.value)
+                }
+                placeholder="Patient name"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-slate-700">
+              Witness name
+              <input
+                value={consentSignerFields.witness_name}
+                onChange={(event) =>
+                  updateConsentSignerField("witness_name", event.target.value)
+                }
+                placeholder="Witness name"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-slate-700">
+              Witness relation
+              <input
+                value={consentSignerFields.witness_relation}
+                onChange={(event) =>
+                  updateConsentSignerField(
+                    "witness_relation",
+                    event.target.value
+                  )
+                }
+                placeholder="Relation to patient"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-slate-700">
+              Doctor name
+              <input
+                value={consentSignerFields.doctor_name}
+                onChange={(event) =>
+                  updateConsentSignerField("doctor_name", event.target.value)
+                }
+                placeholder="Doctor name"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-slate-700">
+              Doctor registration no.
+              <input
+                value={consentSignerFields.doctor_reg_no}
+                onChange={(event) =>
+                  updateConsentSignerField("doctor_reg_no", event.target.value)
+                }
+                placeholder="Registration number"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-slate-700">
+              Consent date
+              <input
+                value={consentDate}
+                onChange={(event) => {
+                  consentDirtyRef.current = true;
+                  setConsentSaveState("idle");
+                  setConsentSaveError("");
+                  setConsentDate(event.target.value);
+                }}
+                placeholder="DD-MM-YYYY"
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-normal text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <SignatureCanvas
               role="patient"
               label="Patient Signature"
               value={consentSignatures.patient}
-              onChange={(sig) =>
-                setConsentSignatures((prev) => ({ ...prev, patient: sig }))
-              }
+              onChange={(sig) => updateConsentSignature("patient", sig)}
             />
             <SignatureCanvas
               role="witness"
               label="Witness Signature"
               value={consentSignatures.witness}
-              onChange={(sig) =>
-                setConsentSignatures((prev) => ({ ...prev, witness: sig }))
-              }
+              onChange={(sig) => updateConsentSignature("witness", sig)}
             />
             <SignatureCanvas
               role="doctor"
               label="Doctor Signature"
               value={consentSignatures.doctor}
-              onChange={(sig) =>
-                setConsentSignatures((prev) => ({ ...prev, doctor: sig }))
-              }
+              onChange={(sig) => updateConsentSignature("doctor", sig)}
             />
           </div>
-          {consentDate && (
-            <p className="mt-3 text-[10px] text-slate-500">
-              Consent date: {consentDate}
+
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px]">
+            <button
+              type="button"
+              onClick={() => {
+                consentDirtyRef.current = true;
+                void savePlanConsentNow();
+              }}
+              disabled={consentSaveState === "saving" || consentFormsLoading}
+              className="rounded-md border border-blue-700 px-3 py-1.5 text-[11px] font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {consentSaveState === "saving" ? "Saving…" : "Save consent"}
+            </button>
+            {consentSaveState === "saving" && (
+              <span className="text-slate-500">Saving to this plan…</span>
+            )}
+            {consentSaveState === "saved" && (
+              <span className="font-medium text-green-700">
+                Saved to this plan
+              </span>
+            )}
+            {consentSaveState === "error" && (
+              <span className="font-medium text-red-600">
+                {consentSaveError}
+              </span>
+            )}
+            <span className="text-slate-400">
+              Signatures save automatically after each capture.
+            </span>
+          </div>
+
+          {/* One or more physically signed consent forms. Any attached form
+              replaces the generated consent pages in the printed PDF. */}
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={consentFileInputRef}
+                type="file"
+                accept={CONSENT_FORM_ACCEPT}
+                multiple
+                className="hidden"
+                onChange={handleConsentFileChange}
+              />
+              <button
+                type="button"
+                onClick={() => consentFileInputRef.current?.click()}
+                disabled={consentUploading || consentFormsLoading}
+                className="rounded-md border border-blue-700 px-3 py-1.5 text-[11px] font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {consentUploading
+                  ? "Uploading…"
+                  : "Upload signed consent form(s)"}
+              </button>
+              <span className="text-[10px] text-slate-500">
+                Select one or more PDF, PNG or JPEG files · up to 10 MB each
+              </span>
+              {consentFormsLoading && (
+                <span className="text-[10px] text-slate-400">
+                  Loading this plan's consent…
+                </span>
+              )}
+            </div>
+
+            {consentForms.length > 0 ? (
+              <ul className="mt-3 space-y-2">
+                {consentForms.map((document) => (
+                  <li
+                    key={document.document_id}
+                    className="rounded-md border border-slate-200 bg-slate-50 p-2 text-[10px]"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-green-50 px-2 py-0.5 font-semibold text-green-700">
+                        {document.chemotherapy_plan_id
+                          ? "Attached to this plan"
+                          : "This plan's visit"}
+                      </span>
+                      <span className="font-medium text-slate-700">
+                        {document.file_name}
+                      </span>
+                      <a
+                        href={consentDocumentViewUrl(document.document_id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-700 hover:underline"
+                      >
+                        View
+                      </a>
+                      {!document.chemotherapy_plan_id && (
+                        <button
+                          type="button"
+                          onClick={() => void attachConsentForm(document)}
+                          disabled={attachingConsentId === document.document_id}
+                          className="font-semibold text-blue-700 hover:underline disabled:opacity-60"
+                        >
+                          {attachingConsentId === document.document_id
+                            ? "Attaching…"
+                            : "Attach to this plan"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void removeConsentForm(document)}
+                        className="text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                      <span className="text-slate-500">
+                        Replaces the generated consent pages when printing.
+                      </span>
+                    </div>
+                    {!isPdfConsentForm(
+                      document.file_name,
+                      document.file_type
+                    ) && (
+                      <img
+                        src={consentDocumentViewUrl(document.document_id)}
+                        alt={`Consent form ${document.file_name}`}
+                        className="mt-2 h-24 w-auto max-w-full rounded border border-slate-200 bg-white object-contain"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-[10px] text-slate-500">
+                No signed consent form attached to this plan. The printout uses
+                the captured signatures above, or blank signature lines when
+                none are captured.
+              </p>
+            )}
+
+            {unassignedConsentForms.length > 0 && (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2">
+                <p className="text-[10px] font-semibold text-amber-800">
+                  Older consent forms not yet attached to a plan
+                </p>
+                <ul className="mt-1 space-y-1 text-[10px]">
+                  {unassignedConsentForms.map((document) => (
+                    <li
+                      key={document.document_id}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <span className="text-slate-700">
+                        {document.file_name}
+                      </span>
+                      <a
+                        href={consentDocumentViewUrl(document.document_id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-700 hover:underline"
+                      >
+                        View
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void attachConsentForm(document)}
+                        disabled={attachingConsentId === document.document_id}
+                        className="font-semibold text-blue-700 hover:underline disabled:opacity-60"
+                      >
+                        {attachingConsentId === document.document_id
+                          ? "Attaching…"
+                          : "Attach to this plan"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {consentUploadError && (
+              <p className="mt-2 text-[10px] font-medium text-red-600">
+                {consentUploadError}
+              </p>
+            )}
+          </div>
+
+          {plan.treatment_status === "PLANNED" && !consentIsReady() && (
+            <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-medium text-amber-800">
+              Treatment cannot be started until a signed consent form is
+              attached to this plan or all three e-signatures are saved.
             </p>
           )}
           <p className="mt-2 text-[10px] text-slate-400">

@@ -70,10 +70,8 @@ const errorMessage = (error: any) =>
 const CONTEXT_TAB_LABEL: Record<StageContext, string> = {
   CLINICAL: "Clinical",
   PATHOLOGICAL: "Pathological",
-  YC: "yc",
   YP: "yp",
-  RECURRENCE: "Recurrence",
-  AUTOPSY: "Autopsy",
+  RECURRENCE: "Recurrence"
 };
 
 const AXIS_LABEL: Record<StageAxis, string> = {

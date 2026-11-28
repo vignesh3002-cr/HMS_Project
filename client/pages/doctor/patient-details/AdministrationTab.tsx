@@ -243,6 +243,150 @@ function ReasonModal({
   );
 }
 
+/* Bulk reason popup for Skip / Cancel all medications in a section.
+   Follows the same portal pattern as ReasonModal. */
+function BulkReasonModal({
+  sectionRole,
+  status,
+  itemCount,
+  saving,
+  onConfirm,
+  onClose,
+}: {
+  sectionRole: string;
+  status: ReasonStatus;
+  itemCount: number;
+  saving: boolean;
+  onConfirm: (reason: string, remarks: string) => void;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [touched, setTouched] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const isSkip = status === "SKIPPED";
+  const missingReason = !reason.trim();
+
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+  }, []);
+
+  const submit = () => {
+    setTouched(true);
+    if (missingReason || saving) return;
+    onConfirm(reason.trim(), remarks.trim());
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+      onMouseDown={e => { if (e.target === e.currentTarget && !saving) onClose(); }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-bulk-reason-title"
+        onKeyDown={e => { if (e.key === "Escape" && !saving) { e.stopPropagation(); onClose(); } }}
+        className="w-full max-w-lg animate-[p360-pop_0.25s_ease-out] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${isSkip ? "bg-slate-100 text-slate-600" : "bg-red-50 text-red-500"}`}>
+              <i className={`fa-solid ${isSkip ? "fa-forward" : "fa-ban"}`} />
+            </div>
+            <div>
+              <h3 id="admin-bulk-reason-title" className="text-[10px] font-bold text-slate-900">
+                {isSkip ? "Skip all medications" : "Cancel all medications"}
+              </h3>
+              <p className="text-[10px] text-slate-500">
+                {isSkip
+                  ? "These medicines will not be given on this treatment day."
+                  : "These medicines will not be given for this treatment day."}{" "}
+                A reason is required.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40"
+            aria-label="Close"
+          >
+            <i className="fa-solid fa-xmark" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <p className="text-[10px] font-semibold text-slate-800">
+              {plural(itemCount, "medicine")} will be marked {isSkip ? "skipped" : "cancelled"}.
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">
+              A single reason and optional remarks will be applied to all affected medicines.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[10px] font-bold text-slate-800">
+              Reason <span className="text-red-500">*</span>
+            </label>
+            <ComboInput
+              value={reason}
+              onChange={setReason}
+              options={SKIP_CANCEL_REASONS}
+              placeholder="Select or type a reason..."
+              hasError={touched && missingReason}
+            />
+            {touched && missingReason && (
+              <p className="mt-1 text-[10px] font-medium text-red-500">
+                Reason is required to {isSkip ? "skip" : "cancel"} these medicines
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[10px] font-bold text-slate-800">
+              Remarks <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              rows={3}
+              maxLength={500}
+              value={remarks}
+              onChange={e => setRemarks(e.target.value)}
+              placeholder="Add clinical notes, e.g. what the patient reported..."
+              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] text-slate-700 outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            <p className="text-right text-[10px] text-slate-400">{remarks.length}/500</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || (touched && missingReason)}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-[10px] font-semibold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${isSkip ? "bg-slate-700 hover:bg-slate-800" : "bg-red-600 hover:bg-red-700"}`}
+          >
+            {saving && <i className="fa-solid fa-spinner fa-spin text-[10px]" />}
+            {isSkip ? "Skip All Medications" : "Cancel All Medications"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 /* Reminder that scrolls left -> right while medicines are still Pending on
    (or after) the treatment date. Pauses on hover; static for reduced motion. */
 function PendingMarquee({ sheet }: { sheet: ChemoAdministrationSheet }) {
@@ -343,6 +487,66 @@ function RowActions({
             </DropdownMenuItem>
           );
         })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* "Select All" dropdown for a medicine type card header. Applies one status
+   to every actionable item of that section role at once. */
+function SectionSelectAll({
+  sectionRole,
+  actionable,
+  lockedReason,
+  saving,
+  onAction,
+}: {
+  sectionRole: string;
+  actionable: boolean;
+  lockedReason: string;
+  saving: boolean;
+  onAction: (sectionRole: string, status: ChemoAdministrationStatus) => void;
+}) {
+  if (!actionable || saving) {
+    return (
+      <button
+        type="button"
+        disabled
+        title={lockedReason}
+        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-[10px] text-slate-400 cursor-not-allowed"
+      >
+        <i className="fa-solid fa-square text-[10px]" />
+        Select All
+      </button>
+    );
+  }
+
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+        >
+          <i className="fa-solid fa-square text-[10px]" />
+          Select All
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wide text-slate-800">
+          Select all to
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {ACTIONS.map(action => (
+          <DropdownMenuItem
+            key={action.status}
+            onSelect={() => onAction(sectionRole, action.status)}
+            className={`flex cursor-pointer items-start gap-2 py-2 text-[10px]`}
+          >
+            <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${STATUS_CONFIG[action.status].dot}`} />
+            <span className="flex-1">{action.label}</span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -546,6 +750,8 @@ export default function AdministrationTab({ patientId, patient, plan, onPlanChan
   const [selectedDay, setSelectedDay] = useState<{ cycle_number: number; cycle_day: number } | null>(null);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [reasonTarget, setReasonTarget] = useState<{ item: ChemoAdministrationItem; status: ReasonStatus } | null>(null);
+  const [bulkReasonTarget, setBulkReasonTarget] = useState<{ sectionRole: string; status: ReasonStatus } | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -678,6 +884,65 @@ export default function AdministrationTab({ patientId, patient, plan, onPlanChan
         title: `${item.drug_name} marked ${status === "SKIPPED" ? "Skipped" : "Cancelled"}`,
         description: `Reason: ${reason}`,
       });
+    }
+  };
+
+  const handleSectionBulkAction = (sectionRole: string, status: ChemoAdministrationStatus) => {
+    if (!actionable) return;
+    if (status === "SKIPPED" || status === "CANCELLED") {
+      setBulkReasonTarget({ sectionRole, status });
+      return;
+    }
+    void applyBulkStatus(sectionRole, status);
+  };
+
+  const confirmBulkReason = async (reason: string, remarks: string) => {
+    if (!bulkReasonTarget) return;
+    const { sectionRole, status } = bulkReasonTarget;
+    await applyBulkStatus(sectionRole, status, reason, remarks);
+    setBulkReasonTarget(null);
+  };
+
+  const applyBulkStatus = async (
+    sectionRole: string,
+    status: ChemoAdministrationStatus,
+    reason?: string,
+    remarks?: string
+  ) => {
+    const sectionItems = allFor(sectionRole);
+    const targets = sectionItems.filter(
+      item =>
+        item.status !== status &&
+        item.status !== "NOT_RECORDED" &&
+        !!item.administration_id &&
+        actionable
+    );
+    if (targets.length === 0) {
+      toast({
+        title: "No medicines to update",
+        description: "All medicines already have this status or cannot be updated.",
+      });
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      await Promise.allSettled(
+        targets.map(item =>
+          chemotherapyApi.updateAdministrationStatus(item.administration_id!, {
+            status,
+            reason: reason ?? null,
+            remarks: remarks ?? null,
+          })
+        )
+      );
+      void loadSheet(selectedDay, true);
+      toast({
+        title: `Updated ${targets.length} medicine(s) to ${status}`,
+        description: reason ? `Reason: ${reason}` : undefined,
+      });
+      onPlanChanged?.();
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -1150,6 +1415,13 @@ export default function AdministrationTab({ patientId, patient, plan, onPlanChan
                             <i className={`fa-solid ${pendingOnly ? "fa-filter-circle-xmark" : "fa-filter"} text-[10px]`} />
                             {pendingOnly ? "Pending only" : "Show All Drugs"}
                           </button>
+                          <SectionSelectAll
+                            sectionRole={section.role}
+                            actionable={actionable}
+                            lockedReason={lockedReason}
+                            saving={bulkSaving}
+                            onAction={handleSectionBulkAction}
+                          />
                           <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
                             <i className="fa-solid fa-magnifying-glass text-[10px] text-slate-400" />
                             <input
@@ -1198,6 +1470,13 @@ export default function AdministrationTab({ patientId, patient, plan, onPlanChan
                         <h3 className="text-[10px] font-bold text-slate-800">{section.title}</h3>
                         <span className="text-[10px] font-medium text-slate-400">({sectionAll.length})</span>
                         <PendingCount items={sectionAll} />
+                        <SectionSelectAll
+                          sectionRole={section.role}
+                          actionable={actionable}
+                          lockedReason={lockedReason}
+                          saving={bulkSaving}
+                          onAction={handleSectionBulkAction}
+                        />
                       </div>
                       <i className={`fa-solid fa-chevron-${open ? "up" : "down"} text-[10px] text-slate-400`} />
                     </button>
@@ -1705,6 +1984,23 @@ export default function AdministrationTab({ patientId, patient, plan, onPlanChan
           saving={!!reasonTarget.item.administration_id && savingIds.has(reasonTarget.item.administration_id)}
           onConfirm={(reason, remarks) => void confirmReason(reason, remarks)}
           onClose={() => setReasonTarget(null)}
+        />
+      )}
+
+      {bulkReasonTarget && (
+        <BulkReasonModal
+          sectionRole={bulkReasonTarget.sectionRole}
+          status={bulkReasonTarget.status}
+          itemCount={allFor(bulkReasonTarget.sectionRole).filter(
+            item =>
+              item.status !== bulkReasonTarget.status &&
+              item.status !== "NOT_RECORDED" &&
+              !!item.administration_id &&
+              actionable
+          ).length}
+          saving={bulkSaving}
+          onConfirm={(reason, remarks) => void confirmBulkReason(reason, remarks)}
+          onClose={() => setBulkReasonTarget(null)}
         />
       )}
 

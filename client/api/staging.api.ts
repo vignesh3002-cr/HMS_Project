@@ -9,12 +9,7 @@ import API from "./axios";
    --------------------------------------------------------------------------- */
 
 export type StageContext =
-  | "CLINICAL"
-  | "PATHOLOGICAL"
-  | "YC"
-  | "YP"
-  | "RECURRENCE"
-  | "AUTOPSY";
+  |"CLINICAL"|"PATHOLOGICAL"|"YP"|"RECURRENCE";
 
 export type StageAxis = "T" | "N" | "M" | "S";
 
@@ -25,37 +20,29 @@ export type DeriveStatus = "MATCHED" | "NO_MATCH" | "AMBIGUOUS" | "INCOMPLETE";
 export const CONTEXT_ORDER: StageContext[] = [
   "CLINICAL",
   "PATHOLOGICAL",
-  "YC",
   "YP",
   "RECURRENCE",
-  "AUTOPSY",
 ];
 
 export const CONTEXT_LABEL: Record<StageContext, string> = {
   CLINICAL: "Clinical",
   PATHOLOGICAL: "Pathological",
-  YC: "Post-neoadjuvant clinical",
   YP: "Post-neoadjuvant pathological",
   RECURRENCE: "Recurrence",
-  AUTOPSY: "Autopsy",
 };
 
 export const CONTEXT_SHORT_LABEL: Record<StageContext, string> = {
   CLINICAL: "Clinical",
   PATHOLOGICAL: "Pathological",
-  YC: "yc",
   YP: "yp",
   RECURRENCE: "Recurrence",
-  AUTOPSY: "Autopsy",
 };
 
 export const CONTEXT_PREFIX: Record<StageContext, string> = {
   CLINICAL: "c",
   PATHOLOGICAL: "p",
-  YC: "yc",
   YP: "yp",
   RECURRENCE: "r",
-  AUTOPSY: "a",
 };
 
 export interface StagingCategory {
