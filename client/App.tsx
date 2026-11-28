@@ -20,6 +20,7 @@ import {
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import DoctorLayout from "@/components/layout/DoctorLayout";
+import { AuthProvider } from "@/context/AuthContext";
 import { PermissionProvider } from "@/context/PermissionContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { NotificationProvider } from "@/context/NotificationContext";
@@ -654,12 +655,13 @@ const App = () => (
       <Sonner />
 
       <BrowserRouter>
-        <ThemeProvider>
-          <PermissionProvider>
-          <NotificationProvider employeeId={getUser()?.employee_id ?? null}>
-          <FollowUpAlertProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <PermissionProvider>
+            <NotificationProvider employeeId={getUser()?.employee_id ?? null}>
+            <FollowUpAlertProvider>
 
-            <RememberMeCheck />
+              <RememberMeCheck />
 
           <Routes>
 
@@ -986,7 +988,8 @@ const App = () => (
           </FollowUpAlertProvider>
         </NotificationProvider>
       </PermissionProvider>
-      </ThemeProvider>
+          </ThemeProvider>
+        </AuthProvider>
 
       </BrowserRouter>
 

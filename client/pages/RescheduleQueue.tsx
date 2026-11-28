@@ -21,6 +21,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import HmsTable, { type HmsColumn } from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import {
@@ -180,6 +181,7 @@ export default function RescheduleQueue() {
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [leaveSearch, setLeaveSearch] = useState("");
 
   const { selectedBranchId, isAllBranches, branches } = useBranchFilter();
 
@@ -488,6 +490,16 @@ export default function RescheduleQueue() {
     [doctors],
   );
 
+  const doctorDepartmentNameById = useCallback(
+    (id?: string | null) => {
+      if (!id) return null;
+      const doc = doctors.find((d) => d.employee_id === id);
+      if (!doc) return null;
+      return doc.department_master?.department_name || doc.department_id || null;
+    },
+    [doctors],
+  );
+
   const branchLabelOf = useCallback(
     (branchId: string) => {
       const b = branches.find((x) => x.branch_id === branchId);
@@ -620,20 +632,105 @@ export default function RescheduleQueue() {
       queueFilterFields
     ) as unknown as RescheduleQueueEntry[];
 
+    // Apply sorting
+    if (sortField && sortDirection) {
+      result = [...result].sort((a, b) => {
+        let av: string | number = "";
+        let bv: string | number = "";
+        switch (sortField) {
+          case "patient":
+            av = patientNameOf(a).toLowerCase();
+            bv = patientNameOf(b).toLowerCase();
+            break;
+          case "appointment":
+            av = (a.old_appointment_date || "") + (a.old_appointment_time || "");
+            bv = (b.old_appointment_date || "") + (b.old_appointment_time || "");
+            break;
+          case "priority":
+            av = a.priority?.toLowerCase() || "";
+            bv = b.priority?.toLowerCase() || "";
+            break;
+          case "transferredBy":
+            av = doctorNameById(a.created_by)?.toLowerCase() || a.created_by?.toLowerCase() || "";
+            bv = doctorNameById(b.created_by)?.toLowerCase() || b.created_by?.toLowerCase() || "";
+            break;
+          case "status":
+            av = (a.status || "").toLowerCase();
+            bv = (b.status || "").toLowerCase();
+            break;
+          default:
+            return 0;
+        }
+        if (av < bv) return sortDirection === "asc" ? -1 : 1;
+        if (av > bv) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
     return result;
-  }, [entries, search, effectiveBranchId, queueAppliedValues, queueFilterFields]);
+  }, [entries, search, effectiveBranchId, queueAppliedValues, queueFilterFields, sortField, sortDirection, doctorNameById]);
 
   const filteredLeaves = useMemo(() => {
     let result = leaveEntries;
     if (effectiveBranchId) {
       result = result.filter((e) => e.branch_id === effectiveBranchId);
     }
-    return filterDataByValues(
+
+    const q = leaveSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter((e) => {
+        const doctor = (doctorNameById(e.employee_id) || e.employee_id).toLowerCase();
+        const lid = e.leave_id.toLowerCase();
+        return doctor.includes(q) || lid.includes(q);
+      });
+    }
+
+    result = filterDataByValues(
       result,
       leaveAppliedValues,
       leaveFilterFields
     ) as unknown as DoctorLeaveRecord[];
-  }, [leaveEntries, effectiveBranchId, leaveAppliedValues, leaveFilterFields]);
+
+    // Apply sorting
+    if (sortField && sortDirection) {
+      result = [...result].sort((a, b) => {
+        let av: string | number = "";
+        let bv: string | number = "";
+        switch (sortField) {
+          case "doctor":
+            av = (doctorNameById(a.employee_id) || a.employee_id).toLowerCase();
+            bv = (doctorNameById(b.employee_id) || b.employee_id).toLowerCase();
+            break;
+          case "period":
+            av = a.leave_start_date || "";
+            bv = b.leave_start_date || "";
+            break;
+          case "type":
+            av = (a.leave_type || "").toLowerCase();
+            bv = (b.leave_type || "").toLowerCase();
+            break;
+          case "approvedRejectedBy": {
+            const actorA = a.status === "APPROVED" ? a.approved_by : a.rejected_by;
+            const actorB = b.status === "APPROVED" ? b.approved_by : b.rejected_by;
+            av = (doctorNameById(actorA) || actorA || "").toLowerCase();
+            bv = (doctorNameById(actorB) || actorB || "").toLowerCase();
+            break;
+          }
+          case "status":
+            av = (a.status || "").toLowerCase();
+            bv = (b.status || "").toLowerCase();
+            break;
+          default:
+            return 0;
+        }
+        if (av < bv) return sortDirection === "asc" ? -1 : 1;
+        if (av > bv) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [leaveEntries, leaveSearch, effectiveBranchId, leaveAppliedValues, leaveFilterFields, sortField, sortDirection, doctorNameById]);
 
   const queuePatientAgeData = useMemo(() => {
     return filtered.map((e) => ({
@@ -1037,14 +1134,23 @@ export default function RescheduleQueue() {
     {
       key: "patient",
       label: "Patient",
-      sortable: false,
+      sortable: true,
       render: (entry) => {
         const crit = getCriticalInfo(entry.patient_id);
         const name = patientNameOf(entry);
+        const assignedDept = entry.assigned_employee_id
+          ? doctorDepartmentNameById(entry.assigned_employee_id)
+          : null;
+        const { bg: avatarBg, text: avatarColor } = getDepartmentColors(assignedDept);
         return (
           <CriticalWrapper className="flex items-center gap-2.5" reasons={crit.reasons}>
             <CriticalCorner reasons={crit.reasons} />
-            <Avatar text={name || entry.patient_id} />
+            <div
+              className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0"
+              style={{ backgroundColor: avatarBg, color: avatarColor }}
+            >
+              {name?.charAt(0).toUpperCase() || entry.patient_id.charAt(0).toUpperCase() || "?"}
+            </div>
             <div className="min-w-0">
               <div className="hms-name-text flex items-center gap-1 truncate">
                 {name}
@@ -1059,7 +1165,7 @@ export default function RescheduleQueue() {
     {
       key: "appointment",
       label: "Appointment",
-      sortable: false,
+      sortable: true,
       render: (entry) => (
         <div>
           <div className="hms-content-text text-[#191C1E]">
@@ -1073,9 +1179,39 @@ export default function RescheduleQueue() {
       ),
     },
     {
+      key: "transferredBy",
+      label: "Transferred by",
+      sortable: true,
+      render: (entry) => {
+        const dept = doctorDepartmentNameById(entry.created_by);
+        const { bg: avatarBg, text: avatarColor } = getDepartmentColors(dept);
+        const initials = doctorNameById(entry.created_by)
+          ?.split(" ")
+          .map((w) => w.charAt(0).toUpperCase())
+          .slice(0, 2)
+          .join("") || entry.created_by?.charAt(0).toUpperCase() || "?";
+        return (
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0"
+              style={{ backgroundColor: avatarBg, color: avatarColor }}
+            >
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <div className="hms-name-text truncate text-[#191C1E]">
+                {doctorNameById(entry.created_by) || entry.created_by}
+              </div>
+              <div className="hms-id-text">{formatDate(entry.created_at)}</div>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
       key: "priority",
       label: "Priority",
-      sortable: false,
+      sortable: true,
       render: (entry) => (
         <StatusBadge tone={PRIORITY_TONE[entry.priority] || "slate"} status={entry.priority} />
       ),
@@ -1099,55 +1235,9 @@ export default function RescheduleQueue() {
     {
       key: "status",
       label: "Status",
-      sortable: false,
+      sortable: true,
       render: (entry) => (
         <StatusBadge tone={QUEUE_TONE[entry.status] || "slate"} status={entry.status} />
-      ),
-    },
-    {
-      key: "actions",
-      label: "Action",
-      sortable: false,
-      headerClassName: "text-right",
-      className: "text-right",
-      render: (entry) => (
-        <div className="flex items-center justify-end gap-1.5">
-          {entry.status === "PENDING" && (
-            <button
-              onClick={() => openAssign(entry)}
-              className="px-2.5 py-1.5 rounded-lg bg-[#004785] text-white text-[11px] font-semibold hover:bg-[#003a6b] transition-colors"
-            >
-              Assign slot
-            </button>
-          )}
-          {entry.status === "ASSIGNED" && (
-            <button
-              onClick={() => {
-                setConfirmReason("");
-                setConfirmTarget(entry);
-              }}
-              className="px-2.5 py-1.5 rounded-lg bg-green-600 text-white text-[11px] font-semibold hover:bg-green-700 transition-colors"
-            >
-              Confirm
-            </button>
-          )}
-          {(entry.status === "PENDING" || entry.status === "ASSIGNED") && (
-            <button
-              onClick={() => {
-                setCancelReason("");
-                setCancelTarget(entry);
-              }}
-              className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          {entry.status === "CONFIRMED" && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Rescheduled
-            </span>
-          )}
-        </div>
       ),
     },
   ];
@@ -1156,12 +1246,24 @@ export default function RescheduleQueue() {
     {
       key: "doctor",
       label: "Doctor",
-      sortable: false,
+      sortable: true,
       render: (leave) => {
         const doctorName = doctorNameById(leave.employee_id);
+        const dept = doctorDepartmentNameById(leave.employee_id);
+        const { bg: avatarBg, text: avatarColor } = getDepartmentColors(dept);
+        const initials = doctorName
+          ?.split(" ")
+          .map((w) => w.charAt(0).toUpperCase())
+          .slice(0, 2)
+          .join("") || leave.employee_id.charAt(0).toUpperCase();
         return (
           <div className="flex items-center gap-2.5">
-            <Avatar text={doctorName || leave.employee_id} />
+            <div
+              className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0"
+              style={{ backgroundColor: avatarBg, color: avatarColor }}
+            >
+              {initials}
+            </div>
             <div className="min-w-0">
               <div className="hms-name-text truncate">{doctorName || leave.employee_id}</div>
               <div className="hms-id-text">{leave.leave_id}</div>
@@ -1173,7 +1275,7 @@ export default function RescheduleQueue() {
     {
       key: "period",
       label: "Leave period",
-      sortable: false,
+      sortable: true,
       render: (leave) => (
         <div>
           <div className="hms-content-text text-[#191C1E]">
@@ -1186,13 +1288,47 @@ export default function RescheduleQueue() {
     {
       key: "type",
       label: "Type",
-      sortable: false,
+      sortable: true,
       render: (leave) => (
         <StatusBadge
           tone={leave.leave_type === "Emergency" ? "red" : "slate"}
           status={leave.leave_type || "Normal"}
         />
       ),
+    },
+    {
+      key: "approvedRejectedBy",
+      label: "Approved/Rejected by",
+      sortable: true,
+      render: (leave) => {
+        const actor = leave.status === "APPROVED" ? leave.approved_by : leave.rejected_by;
+        const actionAt =
+          leave.status === "APPROVED" ? leave.approved_at : leave.rejected_at;
+        if (!actor) return <span className="text-[#9CA3AF]">—</span>;
+        const dept = doctorDepartmentNameById(actor);
+        const { bg: avatarBg, text: avatarColor } = getDepartmentColors(dept);
+        const initials = doctorNameById(actor)
+          ?.split(" ")
+          .map((w) => w.charAt(0).toUpperCase())
+          .slice(0, 2)
+          .join("") || actor.charAt(0).toUpperCase();
+        return (
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0"
+              style={{ backgroundColor: avatarBg, color: avatarColor }}
+            >
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <div className="hms-name-text truncate text-[#191C1E]">
+                {doctorNameById(actor) || actor}
+              </div>
+              <div className="hms-id-text">{formatDate(actionAt)}</div>
+            </div>
+          </div>
+        );
+      },
     },
     {
       key: "reason",
@@ -1208,50 +1344,9 @@ export default function RescheduleQueue() {
     {
       key: "status",
       label: "Status",
-      sortable: false,
+      sortable: true,
       render: (leave) => (
         <StatusBadge tone={LEAVE_STATUS_TONE[leave.status] || "slate"} status={leave.status} />
-      ),
-    },
-    {
-      key: "actions",
-      label: "Action",
-      sortable: false,
-      headerClassName: "text-right",
-      className: "text-right",
-      render: (leave) => (
-        <div className="flex items-center justify-end gap-1.5">
-          {leave.status === "PENDING" && (
-            <>
-              <button
-                onClick={() => openApproveLeave(leave)}
-                className="px-2.5 py-1.5 rounded-lg bg-green-600 text-white text-[11px] font-semibold hover:bg-green-700 transition-colors"
-              >
-                Approve
-              </button>
-              <button
-                onClick={() => {
-                  setDeclineTarget(leave);
-                  setDeclineRemarks("");
-                  setDeclineDialogOpen(true);
-                }}
-                className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50 transition-colors"
-              >
-                Decline
-              </button>
-            </>
-          )}
-          {leave.status === "APPROVED" && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Approved
-            </span>
-          )}
-          {leave.status === "REJECTED" && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600">
-              Declined
-            </span>
-          )}
-        </div>
       ),
     },
   ];
@@ -1319,11 +1414,6 @@ export default function RescheduleQueue() {
                 Leave Requests
               </button>
             </div>
-            <RefreshButton
-              onClick={viewMode === "transfer" ? fetchQueue : fetchLeaves}
-              isLoading={viewMode === "transfer" ? queueLoading : leaveLoading}
-              className="!h-[36px] rounded-lg"
-            />
           </div>
         </div>
 
@@ -1349,6 +1439,21 @@ export default function RescheduleQueue() {
             <div className="flex items-center gap-2 ml-auto flex-wrap">
               {viewMode === "transfer" ? (
                 <>
+                  {/* Search — current expand-on-focus pattern */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search this page…"
+                      value={search}
+                      onChange={(e) => {
+                        setSearch(e.target.value);
+                        setPage(1);
+                      }}
+                      className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+                    />
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                  </div>
+                  {/* Filter */}
                   <ToolbarFilter
                     title="Filter Queue"
                     fields={queueFilterFields}
@@ -1366,35 +1471,54 @@ export default function RescheduleQueue() {
                     open={isQueueFilterOpen}
                     onOpenChange={setIsQueueFilterOpen}
                   />
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6B7280]" />
-                    <input
-                      type="text"
-                      className="pl-8 pr-3 h-[32px] w-[190px] bg-[#F2F4F6] text-xs text-[#191C1E] placeholder:text-[#6B7280] outline-none rounded-md focus:ring-2 focus:ring-[#00488D]/30"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search this page…"
-                    />
-                  </div>
+                  {/* Refresh — rightmost */}
+                  <RefreshButton
+                    onClick={fetchQueue}
+                    isLoading={queueLoading}
+                    className="!h-[32px] px-2.5 text-xs rounded-lg"
+                  />
                 </>
               ) : (
-                <ToolbarFilter
-                  title="Filter Leaves"
-                  fields={leaveFilterFields}
-                  values={leaveFilterValues}
-                  appliedValues={leaveAppliedValues}
-                  onChange={handleLeaveFilterChange}
-                  onApply={() => {
-                    handleLeaveApply();
-                    setLeavePage(1);
-                  }}
-                  onClear={() => {
-                    handleLeaveClear();
-                    setLeavePage(1);
-                  }}
-                  open={isLeaveFilterOpen}
-                  onOpenChange={setIsLeaveFilterOpen}
-                />
+                <>
+                  {/* Search — current expand-on-focus pattern */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search this page…"
+                      value={leaveSearch}
+                      onChange={(e) => {
+                        setLeaveSearch(e.target.value);
+                        setLeavePage(1);
+                      }}
+                      className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+                    />
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                  </div>
+                  {/* Filter */}
+                  <ToolbarFilter
+                    title="Filter Leaves"
+                    fields={leaveFilterFields}
+                    values={leaveFilterValues}
+                    appliedValues={leaveAppliedValues}
+                    onChange={handleLeaveFilterChange}
+                    onApply={() => {
+                      handleLeaveApply();
+                      setLeavePage(1);
+                    }}
+                    onClear={() => {
+                      handleLeaveClear();
+                      setLeavePage(1);
+                    }}
+                    open={isLeaveFilterOpen}
+                    onOpenChange={setIsLeaveFilterOpen}
+                  />
+                  {/* Refresh — rightmost */}
+                  <RefreshButton
+                    onClick={fetchLeaves}
+                    isLoading={leaveLoading}
+                    className="!h-[32px] px-2.5 text-xs rounded-lg"
+                  />
+                </>
               )}
             </div>
           </div>
@@ -1447,7 +1571,14 @@ export default function RescheduleQueue() {
               data={filteredLeaves}
               sortField={sortField}
               sortDirection={sortDirection}
-              onSort={() => {}}
+              onSort={(field) => {
+                if (sortField === field) {
+                  setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+                } else {
+                  setSortField(field);
+                  setSortDirection("asc");
+                }
+              }}
               currentPage={leavePage}
               totalPages={leaveTotalPages}
               totalRecords={leaveTotal}

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import CalendarPicker from "@/components/hms/Calender";
 import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -422,7 +423,7 @@ export default function Staff() {
         description: `${restoreTarget.first_name} ${restoreTarget.last_name} has been reactivated.`,
       });
       setRestoreTarget(null);
-      fetchStaff();
+      staffQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to restore employee",
@@ -447,7 +448,7 @@ export default function Staff() {
         description: `${deleteTarget.first_name} ${deleteTarget.last_name} has been deactivated.`,
       });
       setDeleteTarget(null);
-      fetchStaff();
+      staffQuery.refetch();
     } catch (err: any) {
       toast({
         title: "Failed to deactivate employee",
@@ -494,55 +495,41 @@ export default function Staff() {
   const isAdminTab = activeTabName === "Admin";
   const isSupportingTab = activeTabName === "Support staff";
 
-  const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
-  const [isStaffLoading, setIsStaffLoading] = useState(true);
   const [showDeactivated, setShowDeactivated] = useState(false);
 
-  const fetchStaff = useCallback(async () => {
-    setIsStaffLoading(true);
-    console.log("[Staff Page] Fetching all employees from employeeApi...");
-    try {
+  const staffQuery = useQuery<EmployeeRecord[]>({
+    queryKey: ["staff", isAllBranches ? undefined : selectedBranchId, showDeactivated],
+    queryFn: async () => {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
         includeDeleted: showDeactivated,
       });
-      console.log("[Staff Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
       const me = getUser();
       const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
         String(me?.role_type ?? "").toUpperCase()
       );
-      const staff = allEmployees.filter(
+      return allEmployees.filter(
         (e) =>
           e.user_table?.role_type !== "DOCTOR" &&
           !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
           (showDeactivated ? !!e.deleted_at : !e.deleted_at)
       );
-      setRealStaff(staff);
-      if (staff.length === 0) {
-        toast({
-          title: "No staff records found",
-          description: "The employees API returned no staff records.",
-        });
-      }
-    } catch (err: any) {
-      console.error("[Staff Page] Error:", err);
-      console.error("[Staff Page] Error response:", err.response?.data);
-      console.error("[Staff Page] Error status:", err.response?.status);
-      toast({
-        title: "Failed to load staff",
-        description: err.response?.data?.message || "Couldn't reach the employees API.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsStaffLoading(false);
-    }
-  }, [toast, selectedBranchId, isAllBranches, showDeactivated]);
+    },
+  });
+
+  const realStaff = staffQuery.data ?? null;
+  const isStaffLoading = staffQuery.isLoading;
 
   useEffect(() => {
-    fetchStaff();
-  }, [fetchStaff]);
+    if (staffQuery.isSuccess && staffQuery.data?.length === 0) {
+      toast({
+        title: "No staff records found",
+        description: "The employees API returned no staff records.",
+      });
+    }
+  }, [staffQuery.isSuccess, staffQuery.data, toast]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -881,7 +868,7 @@ export default function Staff() {
                   onOpenChange={setIsFilterOpen}
                 />
 
-                <RefreshButton onClick={fetchStaff} isLoading={isStaffLoading} />
+                <RefreshButton onClick={() => staffQuery.refetch()} isLoading={isStaffLoading} />
               </div>
             </div>
 

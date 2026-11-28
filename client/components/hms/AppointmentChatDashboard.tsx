@@ -24,7 +24,7 @@ interface AppointmentItem {
     status?: string;
     appointment_date?: string;
     appointment_time?: string;
-    token_number?: number;
+    token_number?: string | number;
     patient_id?: string;
     patient_name?: string | null;
     doctor_name?: string | null;
@@ -233,7 +233,7 @@ export function AppointmentChatDashboard({ action }: AppointmentChatDashboardPro
                 const timeA = a.appointment_time || "";
                 const timeB = b.appointment_time || "";
                 if (timeA && timeB) return timeA.localeCompare(timeB);
-                return (a.token_number || 0) - (b.token_number || 0);
+                return String(a.token_number || "").localeCompare(String(b.token_number || ""), undefined, { numeric: true });
             });
         }
 

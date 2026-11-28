@@ -6,7 +6,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { formatInBranchTimezone, getTodayInActiveTimezone, isTodayInActiveTimezone, isYesterdayInActiveTimezone, isTomorrowInActiveTimezone } from "@/utils/timezone";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   List,
   LayoutGrid,
@@ -395,6 +395,7 @@ export default function PatientsManagement() {
   const {
     data: realPatients = null,
     isLoading: isPatientsLoading,
+    isFetching: isFetchingPatients,
     refetch: fetchPatients,
   } = useQuery<PatientRecord[]>({
     queryKey: ["patients", isAllBranches ? "all" : selectedBranchId],
@@ -436,7 +437,7 @@ export default function PatientsManagement() {
   const { getCriticalInfo } = useCriticalPatients(patientAgeData);
 
   // Assigned Doctor (list view) — derived from appointment history, cached with React Query
-  const { data: assignedDoctors = {}, refetch: fetchAssignedDoctors } = useQuery<Record<string, AssignedDoctor>>({
+  const { data: assignedDoctors = {}, isFetching: isFetchingAssignedDoctors, refetch: fetchAssignedDoctors } = useQuery<Record<string, AssignedDoctor>>({
     queryKey: ["patients-assigned-doctors", isAllBranches ? "all" : selectedBranchId],
     queryFn: async () => {
       try {
@@ -475,10 +476,6 @@ export default function PatientsManagement() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-
-  // Date selection
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // Grid-only: infinite scroll
   const [infiniteScroll, setInfiniteScroll] = useState(false);
@@ -780,51 +777,6 @@ export default function PatientsManagement() {
                   </button>
                 </div>
 
-                {/* Date nav */}
-                <div className="flex items-center">
-                  <button
-                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
-                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                  >
-                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
-                      <path d="M5 1L1 5L5 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                    <PopoverTrigger asChild>
-                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isTodayInActiveTimezone(selectedDate)
-                          ? "Today"
-                          : isYesterdayInActiveTimezone(selectedDate)
-                            ? "Yesterday"
-                            : isTomorrowInActiveTimezone(selectedDate)
-                              ? "Tomorrow"
-                              : formatInBranchTimezone(selectedDate, "dd/MM/yyyy")}
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
-                      <CalendarPicker
-                        selected={selectedDate}
-                        hideThemePicker
-                        onSelect={(date) => {
-                          if (date instanceof Date) {
-                            setSelectedDate(date);
-                            setIsCalendarOpen(false);
-                          }
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <button
-                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
-                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                  >
-                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
-                      <path d="M1 1L5 5L1 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                </div>
-
                 {/* Filters */}
                 <ToolbarFilter
                   title="Filters"
@@ -842,7 +794,7 @@ export default function PatientsManagement() {
                     fetchPatients();
                     fetchAssignedDoctors();
                   }}
-                  isLoading={isPatientsLoading}
+                  isLoading={isPatientsLoading || isFetchingPatients || isFetchingAssignedDoctors}
                 />
               </div>
             </div>

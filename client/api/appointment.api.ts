@@ -184,6 +184,7 @@ export interface GetAppointmentsParams {
   sortOrder?: "asc" | "desc";
   page?: number;
   limit?: number;
+  viewMode?: string;
 }
 
 export const appointmentApi = {

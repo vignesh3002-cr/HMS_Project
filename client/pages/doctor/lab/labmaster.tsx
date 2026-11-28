@@ -36,7 +36,6 @@ import {
   getContainerBadgeClass,
   SubTestDefinition,
 } from "./packageDecomposition";
-import * as XLSX from "xlsx";
 
 // ============================================================================
 // DATA TYPES
@@ -1029,7 +1028,7 @@ export default function LabMaster() {
     }
   };
 
-  // Export Catalog as Excel (.xlsx) Form
+  // Export the catalog as Excel-compatible CSV files without an external dependency.
   const handleExportCatalog = () => {
     try {
       // 1. Detailed Master Parameters Sheet
@@ -1117,42 +1116,38 @@ export default function LabMaster() {
         "Description": t.description || "",
       }));
 
-      // Create Workbook
-      const wb = XLSX.utils.book_new();
-
-      const wsParameters = XLSX.utils.json_to_sheet(parameterRows);
-      const wsSummary = XLSX.utils.json_to_sheet(testSummaryRows);
-
-      // Auto-fit column widths
-      const applyColWidths = (ws: any, rows: any[]) => {
-        if (!rows || rows.length === 0) return;
-        const keys = Object.keys(rows[0]);
-        ws["!cols"] = keys.map((key) => {
-          let maxLen = key.length;
-          rows.forEach((r) => {
-            const val = r[key];
-            if (val != null) {
-              const strLen = String(val).length;
-              if (strLen > maxLen) maxLen = strLen;
-            }
-          });
-          return { wch: Math.min(Math.max(maxLen + 3, 12), 40) };
-        });
+      const toCsv = (rows: Record<string, unknown>[]) => {
+        const headers = Object.keys(rows[0] || {});
+        const escapeCsvValue = (value: unknown) => {
+          const text = value == null ? "" : String(value);
+          return `"${text.replace(/"/g, '""')}"`;
+        };
+        return [headers, ...rows.map((row) => headers.map((header) => row[header]))]
+          .map((row) => row.map(escapeCsvValue).join(","))
+          .join("\r\n");
       };
 
-      applyColWidths(wsParameters, parameterRows);
-      applyColWidths(wsSummary, testSummaryRows);
+      const downloadCsv = (filename: string, rows: Record<string, unknown>[]) => {
+        const blob = new Blob([`\uFEFF${toCsv(rows)}`], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      };
 
-      XLSX.utils.book_append_sheet(wb, wsParameters, "Diagnostic Parameters");
-      XLSX.utils.book_append_sheet(wb, wsSummary, "Test Summary");
-
-      // Write and download native .xlsx file
-      const filename = `Lab_Master_Catalog_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, filename);
+      const date = new Date().toISOString().slice(0, 10);
+      const parameterFilename = `Lab_Master_Parameters_${date}.csv`;
+      const summaryFilename = `Lab_Master_Summary_${date}.csv`;
+      downloadCsv(parameterFilename, parameterRows);
+      downloadCsv(summaryFilename, testSummaryRows);
 
       toast({
-        title: "Excel Catalog Exported",
-        description: `Exported ${tests.length} tests and all parameters as ${filename}.`,
+        title: "Catalog Exported",
+        description: `Exported ${tests.length} tests to ${parameterFilename} and ${summaryFilename}.`,
       });
     } catch (error) {
       console.error("Failed to export Excel file:", error);
@@ -1189,10 +1184,10 @@ export default function LabMaster() {
               type="button"
               onClick={handleExportCatalog}
               className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-emerald-700 bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/50 rounded-lg transition cursor-pointer inline-flex items-center gap-1.5"
-              title="Export Diagnostic Catalog as Excel (.xlsx)"
+              title="Export Diagnostic Catalog as CSV"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Export Excel</span>
+              <span>Export CSV</span>
             </button>
             <button
               type="button"
